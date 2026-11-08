@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
+import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
 
 type RecordItem = {
   id: string;
@@ -232,6 +233,18 @@ function dataUrlBlob(dataUrl: string) {
   }
 
   return new Blob([bytes], { type: mime });
+}
+
+async function compactPhoto(dataUrl: string): Promise<string> {
+  const image = new Image();
+  image.src = dataUrl;
+  await image.decode();
+  const scale = Math.min(1, 2000 / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.82);
 }
 
 function recordPhoto(record: RecordItem) {
@@ -701,7 +714,9 @@ function safeFileName(s: string) {
 }
 
 export default function App() {
-  const [records, setRecords] = useState<RecordItem[]>(() => removeDuplicateRecords(readRecords()));
+  const [records, setRecords] = useState<RecordItem[]>([]);
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
+  const [recordPage, setRecordPage] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
@@ -737,6 +752,27 @@ export default function App() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const cropStart = useRef<{ x: number; y: number } | null>(null);
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    let mounted = true;
+    loadInventory<RecordItem>()
+      .then(saved => {
+        if (mounted) {
+          setRecords(removeDuplicateRecords(saved === undefined ? readRecords() : saved));
+          setInventoryLoaded(true);
+        }
+      })
+      .catch(error => {
+        console.error('Unable to open device storage', error);
+        if (mounted) {
+          setRecords(removeDuplicateRecords(readRecords()));
+          setInventoryLoaded(true);
+          setStorageWarning('Large batch storage is unavailable in this browser. Export your records before closing this page.');
+        }
+      });
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
@@ -757,15 +793,26 @@ export default function App() {
   }
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORE, JSON.stringify(records));
-      localStorage.setItem(PEOPLE_STORE, JSON.stringify(personGroups));
-      setStorageWarning('');
-    } catch (error) {
-      console.error('Unable to save records locally', error);
-      setStorageWarning('Some records could not be saved on this device. Export your records before refreshing; browser storage may be full or unavailable.');
-    }
-  }, [records, personGroups]);
+    try { localStorage.setItem(PEOPLE_STORE, JSON.stringify(personGroups)); }
+    catch (error) { console.error('Unable to save people locally', error); }
+  }, [personGroups]);
+
+  useEffect(() => {
+    if (!inventoryLoaded) return;
+    const timer = window.setTimeout(() => {
+      saveChain.current = saveChain.current.catch(() => {}).then(async () => {
+        try {
+          await saveInventory(records);
+          localStorage.removeItem(STORE);
+          setStorageWarning('');
+        } catch (error) {
+          console.error('Unable to save records locally', error);
+          setStorageWarning('Some records could not be saved on this device. Export your records before refreshing.');
+        }
+      });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [records, inventoryLoaded]);
 
   useEffect(() => {
     if (!toast) return;
@@ -797,6 +844,11 @@ export default function App() {
       .includes(query.toLowerCase()) &&
     (personFilter === 'All' || r.personId === personFilter)
   );
+  const pageSize = 40;
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
+  const currentPage = Math.min(recordPage, pageCount);
+  const pageRows = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setRecordPage(1); }, [filter, query, personFilter]);
   const selectedRows = records.filter(r => selectedIds.includes(r.id));
   const reviewRecords = reviewIds.map(id => records.find(record => record.id === id)).filter((record): record is RecordItem => !!record);
   const reviewIndex = selected ? reviewRecords.findIndex(record => record.id === selected.id) : -1;
@@ -871,7 +923,7 @@ export default function App() {
   }
 
   async function scan() {
-    if (!files.length || busy) return;
+    if (!files.length || busy || !inventoryLoaded) return;
 
     setBusy(true);
 
@@ -880,7 +932,11 @@ export default function App() {
     try {
       worker = await createWorker('eng');
 
-      const newRows: RecordItem[] = [];
+      let newRows: RecordItem[] = [];
+      let addedCount = 0;
+      let needsReviewCount = 0;
+      const knownImeis = new Set(records.map(record => record.imei).filter(Boolean));
+      let nextNumber = records.reduce((max, record) => Math.max(max, record.number), 2) + 1;
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -961,18 +1017,16 @@ export default function App() {
           return x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height;
         }).map(line => line.text).join('\n') : raw;
         const model = identifyModel(regionText, file.name, mostlyWhite);
-        const duplicate = !!imei && (
-          records.some(r => r.imei === imei) ||
-          newRows.some(r => r.imei === imei)
-        );
+        const duplicate = !!imei && knownImeis.has(imei);
 
         if (duplicate && /^\d{15}$/.test(imei)) continue;
+        if (/^\d{15}$/.test(imei)) knownImeis.add(imei);
 
         newRows.push({
           id: crypto.randomUUID(),
           pictureId: `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
           sourcePictureId: pictureId,
-          number: Math.max(2, ...records.map(r => r.number)) + newRows.length + 1,
+          number: nextNumber++,
           personId: activePersonId,
           name: file.name,
           dataUrl,
@@ -988,20 +1042,35 @@ export default function App() {
           raw: cropRaw
         });
         }
+        const sourceRows = newRows.filter(row => row.sourcePictureId === pictureId);
+        if (sourceRows.length) {
+          const storedPhoto = await compactPhoto(dataUrl);
+          for (const record of sourceRows) record.dataUrl = storedPhoto;
+          await saveOriginalSource(pictureId, file);
+        }
+        if ((i + 1) % 20 === 0) {
+          const completed = newRows;
+          newRows = [];
+          addedCount += completed.length;
+          needsReviewCount += completed.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
+          setRecords(old => [...old, ...completed]);
+        }
+        if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
       }
 
       await worker.terminate();
       worker = null;
 
-      setRecords(old => [...old, ...newRows]);
+      addedCount += newRows.length;
+      needsReviewCount += newRows.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
+      if (newRows.length) setRecords(old => [...old, ...newRows]);
       setFiles([]);
 
-      const reviewTotal = newRows.filter(r => r.status !== 'Valid' || r.cropNeedsReview).length;
-      const reviewMessage = reviewTotal
-        ? ` ${reviewTotal} need review; open a record to see the OCR text.`
+      const reviewMessage = needsReviewCount
+        ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`Finished scanning ${newRows.length} record(s). Duplicate IMEIs are skipped.${reviewMessage}`);
+      setToast(`Finished scanning ${addedCount} record(s). Duplicate IMEIs are skipped.${reviewMessage}`);
     } catch (e) {
       console.error(e);
       setToast(
@@ -1530,7 +1599,7 @@ export default function App() {
 
             <button
               className="primary scan-button"
-              disabled={!files.length || busy}
+              disabled={!files.length || busy || !inventoryLoaded}
               onClick={scan}
             >
               {busy ? (
@@ -1806,7 +1875,7 @@ export default function App() {
                 </thead>
 
                 <tbody>
-                  {visible.map(r => (
+                  {pageRows.map(r => (
                     <tr key={r.id}>
                       <td data-label="Select">
                         <input
@@ -1818,7 +1887,7 @@ export default function App() {
                         />
                       </td>
                       <td data-label="Record">#{r.number}</td>
-                      <td data-label="Picture ID">{r.pictureId}{r.sourcePictureId && records.filter(item => item.sourcePictureId === r.sourcePictureId).length > 1 ? ' · Same source photo' : ''}{r.cropNeedsReview ? ' · Crop needs review' : ''}</td>
+                      <td data-label="Picture ID">{r.pictureId}{r.sourcePictureId && records.some(item => item.id !== r.id && item.sourcePictureId === r.sourcePictureId) ? ' · Same source photo' : ''}{r.cropNeedsReview ? ' · Crop needs review' : ''}</td>
                       <td data-label="Photo">
                         <button
                           className="photo-cell"
@@ -1942,6 +2011,13 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+          )}
+          {visible.length > pageSize && (
+            <nav className="record-pages" aria-label="Scanned records pages">
+              <button className="subtle-btn" disabled={currentPage === 1} onClick={() => setRecordPage(currentPage - 1)}>Previous</button>
+              <span>Page {currentPage} of {pageCount} · {visible.length} records</span>
+              <button className="subtle-btn" disabled={currentPage === pageCount} onClick={() => setRecordPage(currentPage + 1)}>Next</button>
+            </nav>
           )}
         </section>
 
