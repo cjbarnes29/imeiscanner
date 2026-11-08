@@ -8,6 +8,9 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.net.Uri;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.util.HashSet;
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 import androidx.work.ForegroundInfo;
@@ -24,6 +27,19 @@ public final class ScanWorker extends Worker {
 
     public ScanWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
+    }
+
+    private String photoFingerprint(Uri uri) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = getApplicationContext().getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IllegalStateException("Cannot open photo");
+            byte[] buffer = new byte[8192];
+            int length;
+            while ((length = input.read(buffer)) != -1) digest.update(buffer, 0, length);
+        }
+        StringBuilder value = new StringBuilder();
+        for (byte part : digest.digest()) value.append(String.format("%02x", part & 0xff));
+        return value.toString();
     }
 
     private ForegroundInfo foreground(int completed, int total) {
@@ -51,6 +67,12 @@ public final class ScanWorker extends Worker {
         if (queue == null || queue.length() == 0) return Result.success();
         int completed = job.optInt("completed", 0);
         int failed = job.optInt("failed", 0);
+        HashSet<String> seenPhotos = new HashSet<>();
+        for (int index = 0; index < completed; index++) {
+            JSONObject previous = queue.optJSONObject(index);
+            if (previous != null) try { seenPhotos.add(photoFingerprint(Uri.parse(previous.getString("uri")))); }
+            catch (Exception ignored) { /* A previous photo may no longer be accessible. */ }
+        }
         try {
             setForegroundAsync(foreground(completed, queue.length())).get();
             ScanStore.update(context, completed, failed, new JSONArray());
@@ -61,8 +83,10 @@ public final class ScanWorker extends Worker {
                     JSONObject photo = queue.optJSONObject(index);
                     JSONArray additions = new JSONArray();
                     try {
-                        additions = ImageScanner.scan(context, Uri.parse(photo.getString("uri")),
-                            photo.optString("name", "Phone photo.jpg"), job.optString("personId", "person-1"), recognizer);
+                        Uri uri = Uri.parse(photo.getString("uri"));
+                        if (seenPhotos.add(photoFingerprint(uri)))
+                            additions = ImageScanner.scan(context, uri,
+                                photo.optString("name", "Phone photo.jpg"), job.optString("personId", "person-1"), recognizer);
                     } catch (Exception error) { failed++; }
                     if (isStopped() || "stopped".equals(ScanStore.read(context).optString("status"))) return Result.success();
                     ScanStore.update(context, index + 1, failed, additions);

@@ -14,6 +14,7 @@ type RecordItem = {
   id: string;
   pictureId: string;
   sourcePictureId?: string;
+  uploadBatchId?: string;
   number: number;
   personId: string;
   name: string;
@@ -82,13 +83,42 @@ async function copyText(value: string) {
 }
 
 function markDuplicateRecords(rows: RecordItem[]) {
+  const latest = rows.reduce<RecordItem | undefined>((current, row) =>
+    row.uploadBatchId && (!current || row.createdAt > current.createdAt) ? row : current, undefined);
+  const batchId = latest?.uploadBatchId;
   const counts = new Map<string, number>();
-  for (const row of rows) if (/^\d{15}$/.test(row.imei)) counts.set(row.imei, (counts.get(row.imei) || 0) + 1);
-  return rows.map(row => ({ ...row, duplicate: /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1 }));
+  for (const row of rows) if (batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei)) counts.set(row.imei, (counts.get(row.imei) || 0) + 1);
+  return rows.map(row => ({ ...row, duplicate: !!batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1 }));
+}
+
+async function photoFingerprint(file: Blob) {
+  const bytes = await file.arrayBuffer();
+  if (crypto.subtle?.digest) {
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+  // SubtleCrypto is unavailable on an HTTP phone-to-laptop connection.
+  let first = 2166136261, second = 2246822519;
+  for (const byte of new Uint8Array(bytes)) {
+    first = Math.imul(first ^ byte, 16777619);
+    second = Math.imul(second ^ byte, 3266489917);
+  }
+  return `${file.size}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
+}
+
+async function uniqueUploadPhotos(files: File[]) {
+  const seen = new Set<string>();
+  const unique: File[] = [];
+  for (const file of files) {
+    const hash = await photoFingerprint(file);
+    if (!seen.has(hash)) { seen.add(hash); unique.push(file); }
+  }
+  return unique;
 }
 
 function reviewStatus(row: RecordItem) {
-  return row.duplicate ? 'Duplicate IMEI' : row.cropNeedsReview || row.status !== 'Valid' ? 'Needs review' : 'Valid';
+  const needsReview = row.cropNeedsReview || row.status !== 'Valid';
+  return row.duplicate ? needsReview ? 'Duplicate IMEI · Needs review' : 'Duplicate IMEI' : needsReview ? 'Needs review' : 'Valid';
 }
 
 function luhnValid(value: string) {
@@ -317,6 +347,46 @@ async function compactPhoto(dataUrl: string): Promise<string> {
 
 function recordPhoto(record: RecordItem) {
   return record.cropDataUrl || record.dataUrl;
+}
+
+function createPhotoGalleryHtml(rows: RecordItem[], people: PersonGroup[]) {
+  const photoItems = rows.map(record => {
+    const name = photoFilename(record).replace(/^#/, 'photo-');
+    return `<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, people))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`;
+  });
+  const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IMEI Lens — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> IMEI LENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
+  return makeStableGalleryHtml(galleryHtml);
+}
+
+function makeStableGalleryHtml(html: string) {
+  const css = `
+dialog#viewer{width:min(900px,calc(100vw - 20px));height:min(680px,calc(100dvh - 20px));max-width:none;max-height:none;overflow:hidden;padding:50px 16px 16px}
+dialog#viewer[open]{display:flex;flex-direction:column}
+dialog#viewer .viewer-stage{flex:1;min-height:0;width:100%;display:grid;place-items:center;background:#091321;border-radius:9px;overflow:hidden}
+dialog#viewer .viewer-stage img{width:100%;height:100%;max-width:none;max-height:none;object-fit:contain}
+dialog#viewer>button:not(.dialog-close){display:none}
+dialog#viewer .viewer-toolbar{flex:none;min-height:54px;display:grid;grid-template-columns:70px 1fr 70px repeat(3,110px);align-items:center;gap:6px}
+dialog#viewer .viewer-toolbar button{margin:0;min-width:0;height:44px;padding:6px;border:1px solid #3b5067;border-radius:8px;background:#1a2a3e;color:#e7eef7;font-weight:700}
+dialog#viewer .viewer-toolbar button:disabled{opacity:.4;cursor:not-allowed}
+dialog#viewer .viewer-counter{text-align:center;color:#b8cadd;font-size:12px}
+@media(max-width:700px){dialog#viewer{padding:50px 10px 10px}dialog#viewer .viewer-toolbar{min-height:100px;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:44px 44px}dialog#viewer .viewer-counter{grid-column:2;grid-row:1}dialog#viewer .viewer-toolbar button{font-size:11px}dialog#viewer .viewer-prev{grid-column:1;grid-row:1}dialog#viewer .viewer-next{grid-column:3;grid-row:1}}
+`;
+  const script = `<script>(function(){
+var dialog=document.getElementById('viewer'),image=dialog.querySelector('img'),cards=Array.from(document.querySelectorAll('article.card'));
+var stage=document.createElement('div');stage.className='viewer-stage';image.before(stage);stage.appendChild(image);
+var toolbar=document.createElement('div');toolbar.className='viewer-toolbar';
+toolbar.innerHTML='<button class="viewer-prev" type="button">Previous</button><span class="viewer-counter"></span><button class="viewer-next" type="button">Next</button><button class="viewer-copy" type="button">Copy IMEI</button><button class="viewer-download" type="button">Download</button><button class="viewer-close" type="button">Close</button>';
+dialog.appendChild(toolbar);
+var previous=toolbar.querySelector('.viewer-prev'),next=toolbar.querySelector('.viewer-next'),counter=toolbar.querySelector('.viewer-counter'),copy=toolbar.querySelector('.viewer-copy'),download=toolbar.querySelector('.viewer-download');var current=-1;
+function show(index){current=index;var card=cards[index];image.src=card.querySelector('img').src;image.alt='Photo '+(index+1);counter.textContent=(index+1)+' of '+cards.length;previous.disabled=index===0;next.disabled=index===cards.length-1;copy.disabled=!card.querySelector('[data-imei]').dataset.imei;copy.textContent='Copy IMEI';}
+window.viewPhoto=function(button){show(cards.indexOf(button.closest('article')));dialog.showModal()};
+window.savePhoto=function(button){try{var source=button.closest('article').querySelector('img').src;var parts=source.split(',');var mime=(parts[0].match(/data:([^;]+)/)||[])[1]||'image/jpeg';var binary=atob(parts[1]);var bytes=new Uint8Array(binary.length);for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);var url=URL.createObjectURL(new Blob([bytes],{type:mime}));var link=document.createElement('a');link.href=url;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove();setTimeout(function(){URL.revokeObjectURL(url)},60000)}catch(error){alert('Could not download this photo: '+(error&&error.message||error))}};
+previous.onclick=function(){if(current>0)show(current-1)};next.onclick=function(){if(current<cards.length-1)show(current+1)};
+copy.onclick=async function(){var source=cards[current].querySelector('[data-imei]');await copyImei(source);copy.textContent=source.textContent};
+download.onclick=function(){savePhoto(cards[current].querySelector('[data-filename]'))};toolbar.querySelector('.viewer-close').onclick=function(){dialog.close()};
+document.addEventListener('keydown',function(event){if(!dialog.open)return;if(event.key==='ArrowLeft'&&current>0)show(current-1);if(event.key==='ArrowRight'&&current<cards.length-1)show(current+1)});
+})();</script>`;
+  return html.replace('</style>', css + '</style>').replace('</body>', script + '</body>');
 }
 
 function ocrLines(page: Awaited<ReturnType<Awaited<ReturnType<typeof createWorker>>['recognize']>>['data']): OcrLine[] {
@@ -879,7 +949,6 @@ export default function App() {
   const [googleProgress, setGoogleProgress] = useState('');
   const [downloadStatus, setDownloadStatus] = useState('');
   const [photoDownloads, setPhotoDownloads] = useState<RecordItem[]>([]);
-  const [photoGallery, setPhotoGallery] = useState('');
   const [saveToFolder, setSaveToFolder] = useState(false);
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [imeiFilter, setImeiFilter] = useState<'all' | 'with' | 'without'>('all');
@@ -894,6 +963,7 @@ export default function App() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const cropStart = useRef<{ x: number; y: number; edge?: string; initial?: typeof manualCrop } | null>(null);
+  const reviewModalRef = useRef<HTMLDivElement | null>(null);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
@@ -951,7 +1021,7 @@ export default function App() {
       if (!androidBridge || importingAndroid.current || cancelled) return;
       importingAndroid.current = true;
       try {
-        const job = JSON.parse(androidBridge.status()) as { status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[] };
+        const job = JSON.parse(androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[] };
         if (cancelled) return;
         setAndroidJob({ status: job.status, count: job.count, completed: job.completed, failed: job.failed, error: job.error });
         const scanned = job.records || [];
@@ -963,7 +1033,7 @@ export default function App() {
           const dataUrl = androidBridge.image(item.id);
           if (!dataUrl) continue;
           const { imageName, ...row } = item;
-          added.push({ ...row, dataUrl, cropDataUrl: (counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
+          added.push({ ...row, uploadBatchId: row.uploadBatchId || job.id, dataUrl, cropDataUrl: (counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
           importedAndroidIds.current.add(item.id);
         }
         if (added.length) {
@@ -992,6 +1062,7 @@ export default function App() {
 
   useEffect(() => {
     setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
+    if (reviewModalRef.current) reviewModalRef.current.scrollTop = 0;
     setCropZoom(1);
     setReviewSplit(null);
     setManualImei(selected?.imei || '');
@@ -1221,22 +1292,24 @@ export default function App() {
     setLaptopUploading(true);
     setLaptopMessage('Connecting to the laptop scanner…');
     try {
+      const uploadFiles = await uniqueUploadPhotos(files);
+      const skipped = files.length - uploadFiles.length;
       const created = await laptopRequest('/api/jobs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: files.length, mode: scanMode, personId: activePersonId })
+        body: JSON.stringify({ count: uploadFiles.length, mode: scanMode, personId: activePersonId })
       });
       const { job } = await created.json();
-      for (let index = 0; index < files.length; index++) {
-        setLaptopMessage(`Uploading ${index + 1} of ${files.length}: ${files[index].name}. Keep this page open until upload finishes.`);
+      for (let index = 0; index < uploadFiles.length; index++) {
+        setLaptopMessage(`Uploading ${index + 1} of ${uploadFiles.length}: ${uploadFiles[index].name}. Keep this page open until upload finishes.`);
         await laptopRequest(`/api/jobs/${job.id}/photos/${index}`, {
-          method: 'PUT', headers: { 'Content-Type': files[index].type, 'X-File-Name': encodeURIComponent(files[index].name) },
-          body: files[index]
+          method: 'PUT', headers: { 'Content-Type': uploadFiles[index].type, 'X-File-Name': encodeURIComponent(uploadFiles[index].name) },
+          body: uploadFiles[index]
         });
       }
       await laptopRequest(`/api/jobs/${job.id}/start`, { method: 'POST' });
       setLaptopJobId(job.id);
-      setLaptopJob({ status: 'queued', count: files.length, completed: 0, resultCount: 0, failed: 0 });
-      setLaptopMessage(`Upload finished. You can close the app now; the ${scannerLocation} will keep scanning.`);
+      setLaptopJob({ status: 'queued', count: uploadFiles.length, completed: 0, resultCount: 0, failed: 0 });
+      setLaptopMessage(`Upload finished.${skipped ? ` Skipped ${skipped} repeated photo(s).` : ''} You can close the app now; the ${scannerLocation} will keep scanning.`);
       setFiles([]);
     } catch (error) {
       console.error('Laptop scan upload failed', error);
@@ -1280,7 +1353,7 @@ export default function App() {
           const photoResponse = await laptopRequest(`/api/jobs/${laptopJobId}/images/${item.imageName}`);
           const photo = await blobDataUrl(await photoResponse.blob());
           const { imageName, photoIndex, ...record } = item;
-          imported.push({ ...record, dataUrl: photo, cropDataUrl: (sourceCounts.get(item.sourcePictureId || '') || 0) > 1 ? photo : undefined });
+          imported.push({ ...record, uploadBatchId: job.id, dataUrl: photo, cropDataUrl: (sourceCounts.get(item.sourcePictureId || '') || 0) > 1 ? photo : undefined });
           if (imported.length % 20 === 0) setLaptopMessage(`Importing ${imported.length} of ${scanned.length} completed records…`);
         }
         if (cancelled) return;
@@ -1316,21 +1389,23 @@ export default function App() {
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
 
     try {
+      const scanFiles = await uniqueUploadPhotos(files);
+      const skippedPhotos = files.length - scanFiles.length;
+      const uploadBatchId = newId();
       worker = await createWorker('eng');
 
       let newRows: RecordItem[] = [];
       let addedCount = 0;
       let needsReviewCount = 0;
       let failedFiles = 0;
-      const knownImeis = new Set(records.map(record => record.imei).filter(Boolean));
       let nextNumber = records.reduce((max, record) => Math.max(max, record.number), 2) + 1;
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+      for (let i = 0; i < scanFiles.length; i++) {
+        const file = scanFiles[i];
         const beforeCount = newRows.length;
 
         setProgress(
-          `Scanning ${i + 1} of ${files.length}: ${file.name}`
+          `Scanning ${i + 1} of ${scanFiles.length}: ${file.name}`
         );
         try {
 
@@ -1388,14 +1463,11 @@ export default function App() {
           return x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height;
         }).map(line => line.text).join('\n') : raw;
         const model = identifyModel(regionText, file.name, mostlyWhite);
-        const duplicate = !!imei && knownImeis.has(imei);
-
-        if (/^\d{15}$/.test(imei)) knownImeis.add(imei);
-
         newRows.push({
           id: newId(),
           pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
           sourcePictureId: pictureId,
+          uploadBatchId,
           number: nextNumber++,
           personId: activePersonId,
           name: file.name,
@@ -1407,7 +1479,7 @@ export default function App() {
           status: imei
             ? (luhnValid(imei) ? 'Valid' : 'Invalid')
             : 'Review',
-          duplicate,
+          duplicate: false,
           createdAt: new Date().toISOString(),
           raw: cropRaw
         });
@@ -1447,7 +1519,7 @@ export default function App() {
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`Finished scanning ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds. Duplicate IMEIs are flagged.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`Finished scanning ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Skipped ${skippedPhotos} repeated photo(s).` : ''} Matching IMEIs in this upload are flagged.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       setToast(
@@ -1475,7 +1547,8 @@ export default function App() {
     if (!selected || adjustingCrop || rotatingPhoto || reviewSplit) return;
     if (manualImei && !/^\d{15}$/.test(manualImei)) { setToast('Enter all 15 IMEI digits or leave it empty.'); return; }
     const imeiChanged = manualImei !== selected.imei;
-    const duplicate = !!manualImei && records.some(r => r.id !== selected.id && r.imei === manualImei);
+    const latestBatch = records.filter(r => r.uploadBatchId).reduce<RecordItem | undefined>((current, row) => !current || row.createdAt > current.createdAt ? row : current, undefined)?.uploadBatchId;
+    const duplicate = !!manualImei && !!latestBatch && selected.uploadBatchId === latestBatch && records.some(r => r.id !== selected.id && r.uploadBatchId === latestBatch && r.imei === manualImei);
     const patch: Partial<RecordItem> = { model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
     updateRow(selected.id, patch);
     if (advance && reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1) {
@@ -1737,22 +1810,18 @@ export default function App() {
       const folder = parent ? await parent.getDirectoryHandle(`IMEI-Lens-${Date.now()}`, { create: true }) : null;
       const photosFolder = folder ? await folder.getDirectoryHandle('photos', { create: true }) : null;
       const links = new Map<string, string>();
-      const photoItems: string[] = [];
       for (const record of rows) {
         const name = photoFilename(record).replace(/^#/, 'photo-');
-        const photo = dataUrlBlob(recordPhoto(record));
         const path = `photos/${name}`;
         if (photosFolder) {
           const photoFile = await photosFolder.getFileHandle(name, { create: true });
           const writer = await photoFile.createWritable();
-          await writer.write(photo);
+          await writer.write(dataUrlBlob(recordPhoto(record)));
           await writer.close();
           links.set(record.id, path);
         }
-        photoItems.push(`<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, personGroups))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`);
       }
 
-      const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IMEI Lens — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> IMEI LENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
 
       let reportName: string;
       let report: Blob;
@@ -1768,19 +1837,17 @@ export default function App() {
       }
 
       if (folder) {
-        for (const [name, content] of [[reportName, report], ['open-photos.html', new Blob([galleryHtml], { type: 'text/html;charset=utf-8' })]] as [string, Blob][]) {
+        for (const [name, content] of [[reportName, report], ['open-photos.html', new Blob([createPhotoGalleryHtml(rows, personGroups)], { type: 'text/html;charset=utf-8' })]] as [string, Blob][]) {
           const file = await folder.getFileHandle(name, { create: true });
           const writer = await file.createWritable();
           await writer.write(content);
           await writer.close();
         }
         setPhotoDownloads([]);
-        setPhotoGallery('');
         setDownloadStatus('Saved the report and photos in a new folder. Open open-photos.html to view the pictures. Excel links depend on your spreadsheet app.');
       } else {
         await downloadBlob(report, reportName);
         setPhotoDownloads(rows);
-        setPhotoGallery(galleryHtml);
         setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the report. Photo buttons appear below.' : folderFailed
           ? 'The browser could not use that folder. The report was downloaded; use the buttons below for each photo.'
           : 'Report downloaded. Use the photo buttons below to download each picture.');
@@ -1817,7 +1884,6 @@ export default function App() {
       try { folderChoice = picker ? picker.call(window, { mode: 'readwrite' }) : undefined; }
       catch { folderChoice = undefined; }
       setPhotoDownloads([]);
-      setPhotoGallery('');
       void exportPhotoPackage(rows, folderChoice);
       return;
     }
@@ -2207,7 +2273,10 @@ export default function App() {
             {photoDownloads.length > 0 && (
               <div className="photo-download-list">
                 <strong>Download photos individually</strong>
-                <button className="subtle-btn" onClick={() => saveDirectFile(new Blob([photoGallery], { type: 'text/html;charset=utf-8' }), 'open-photos.html')}>
+                <button className="subtle-btn" onClick={() => {
+                  try { saveDirectFile(new Blob([createPhotoGalleryHtml(photoDownloads, personGroups)], { type: 'text/html;charset=utf-8' }), 'open-photos.html'); }
+                  catch (error) { setDownloadStatus(`Could not create the photo gallery: ${error instanceof Error ? error.message : 'Unknown error'}`); }
+                }}>
                   <Download size={15} /> Download photo gallery HTML
                 </button>
                 {photoDownloads.slice(0, photoDisplayCount).map(record => (
@@ -2431,7 +2500,7 @@ export default function App() {
                           onChange={e => {
                             const imei = digits(e.target.value).slice(0, 15);
 
-                            if (imei.length === 15 && records.some(other => other.id !== r.id && other.imei === imei)) setToast('Duplicate IMEI flagged. Both pictures are kept.');
+                            if (imei.length === 15 && r.uploadBatchId && records.some(other => other.id !== r.id && other.uploadBatchId === r.uploadBatchId && other.imei === imei)) setToast('Matching IMEI in this upload flagged. Both pictures are kept.');
 
                             updateRow(r.id, {
                               imei,
@@ -2528,6 +2597,7 @@ export default function App() {
           onClick={closePhotoReview}
         >
           <div
+            ref={reviewModalRef}
             className={`modal ${cropEditorOpen ? 'crop-mode' : ''}`}
             onClick={e => e.stopPropagation()}
           >
@@ -2546,13 +2616,18 @@ export default function App() {
               </button>
             </div>
 
-            {!cropEditorOpen && <><img className="preview" src={recordPhoto(selected)} alt="Selected record photo" />
-            <button className="subtle-btn fix-crop-button" onClick={() => setCropEditorOpen(true)}>Edit or split photo</button></>}
+            {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={recordPhoto(selected)} alt="Selected record photo" /></div>}
 
             {!cropEditorOpen && reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
               <button className="subtle-btn" disabled={reviewIndex === 0 || adjustingCrop || rotatingPhoto || !!reviewSplit || manualModel !== exportModel(selected.model) || manualImei !== selected.imei} onClick={() => setSelected(reviewRecords[reviewIndex - 1])}>← Previous</button>
               <span>{reviewIndex + 1} of {reviewRecords.length}</span>
               <button className="subtle-btn" disabled={reviewIndex === reviewRecords.length - 1 || adjustingCrop || rotatingPhoto || !!reviewSplit || manualModel !== exportModel(selected.model) || manualImei !== selected.imei} onClick={() => setSelected(reviewRecords[reviewIndex + 1])}>Next →</button>
+            </div>}
+
+            {!cropEditorOpen && <div className="review-fixed-actions">
+              <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
+              <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), photoFilename(selected))}><Download size={16} /> Download photo</button>
+              <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
             </div>}
 
             {!cropEditorOpen && <div className="crop-actions" aria-label="Rotate photo">
@@ -2580,12 +2655,6 @@ export default function App() {
               <span>Duplicate: {selected.duplicate ? 'Yes' : 'No'}</span>
               {selected.cropNeedsReview && <span>Automatic cropping needs review; adjust the crop if needed.</span>}
             </div>
-
-            <button className="primary" onClick={() => {
-              saveDirectFile(dataUrlBlob(recordPhoto(selected)), photoFilename(selected));
-            }}>
-              <Download size={16} /> Download {selected.cropDataUrl ? 'separated' : 'original'} photo
-            </button>
 
             {selected.cropDataUrl && (
               <details>

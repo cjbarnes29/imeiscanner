@@ -15,7 +15,7 @@ Android may pause and retry queued work when it restricts background activity, a
 - The Android scanner frames each separated box using a visible seam between labels and keeps the full width or height of that box face. If it cannot find a reliable seam, it keeps the full photo as one review record for manual splitting instead of saving a cut-off label. The review editor loads the original photo and saves manually selected crops even when automatic text reading fails.
 - Review a photo to rotate it, draw crops by touch or mouse, and enter an unreadable IMEI manually. Guided cropping can replace one review record with several separate records.
 - Luhn checksum validation.
-- Duplicate 15-digit IMEIs are flagged on both records. Each physical picture remains available for review and export.
+- Each new upload skips exact copies of a photo within that upload. Different pictures with the same 15-digit IMEI remain separate records and are flagged as duplicates within the latest upload only; older saved records remain available without cross-batch duplicate flags.
 - Manual exports only; scanning does not start downloads automatically.
 - Numbered photos, selected-only downloads, and image names matched to the `#3`-starting record numbers.
 - Excel and Word exports with optional embedded photos, plus CSV and Google Sheets exports.
@@ -23,6 +23,7 @@ Android may pause and retry queued work when it restricts background activity, a
 - Photo exports can save the report, photo gallery HTML, and record photos to a folder when the browser supports folder selection. Other browsers provide separate downloads for the report, the self-contained HTML gallery, and each photo. Split records use the cropped picture.
 - Best-effort device model classification from OCR text and filenames; unknown models can be edited.
 - Original photo retained with each record; click the thumbnail to inspect the image and raw OCR text.
+- The in-app photo viewer and self-contained offline HTML gallery keep their controls in place when moving between differently sized pictures. The HTML gallery can view, download, and copy the IMEI for each cropped picture.
 - Editable model and IMEI values; records recalculate validation and duplicate state.
 - Excel and Google Sheets workbooks include an all-records tab, model tabs, and person tabs.
 - Android exports transfer files to the system save picker in small pieces, then report whether the file was saved, cancelled, or failed. Sheets-compatible exports download as Excel files to import into Google Sheets.

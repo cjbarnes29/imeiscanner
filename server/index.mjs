@@ -2,7 +2,7 @@ import http from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve, sep } from 'node:path';
-import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
+import { timingSafeEqual, randomBytes, randomUUID, createHash } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { createScanner } from './scan.mjs';
 
@@ -20,6 +20,12 @@ const jobPath = id => join(jobsRoot, id);
 const manifestPath = id => join(jobPath(id), 'manifest.json');
 const recordsPath = id => join(jobPath(id), 'records.json');
 const safeId = value => /^[a-f0-9-]{36}$/.test(value || '');
+
+async function photoFingerprint(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
 
 async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
@@ -82,33 +88,41 @@ async function processQueue() {
         await atomicJson(manifestPath(id), job);
         let rows = await readJson(recordsPath(id), []);
         job.nextNumber = Math.max(2, ...rows.map(row => row.number || 2)) + 1;
-        const seen = new Set(rows.map(row => row.imei).filter(Boolean));
+        const seenPhotos = new Set(job.seenPhotoHashes || []);
         for (let index = job.completed; index < job.count; index++) {
           if (stoppedJobs.has(id) || (await loadJob(id))?.status === 'stopped') {
             job.status = 'stopped';
             break;
           }
           if (rows.some(row => row.photoIndex === index)) {
+            seenPhotos.add(await photoFingerprint(join(jobPath(id), 'input', `${index}.bin`)));
             job.completed = index + 1;
+            job.seenPhotoHashes = [...seenPhotos];
             await atomicJson(manifestPath(id), job);
             continue;
           }
           try {
             const source = join(jobPath(id), 'input', `${index}.bin`);
+            const hash = await photoFingerprint(source);
+            if (seenPhotos.has(hash)) {
+              job.completed = index + 1;
+              await atomicJson(manifestPath(id), job);
+              continue;
+            }
+            seenPhotos.add(hash);
             const results = await scanner.scan(source, job.files[index].name, job.mode);
             if (stoppedJobs.has(id) || (await loadJob(id))?.status === 'stopped') {
               job.status = 'stopped';
               break;
             }
             for (const result of results) {
-              if (result.imei && seen.has(result.imei)) continue;
-              if (result.imei) seen.add(result.imei);
               const imageName = `${result.id}.jpg`;
               await writeFile(join(jobPath(id), 'output', imageName), result.photo);
               delete result.photo;
               rows.push({ ...result, imageName, photoIndex: index, number: job.nextNumber++, personId: job.personId, duplicate: false });
             }
             await atomicJson(recordsPath(id), rows);
+            job.seenPhotoHashes = [...seenPhotos];
           } catch (error) {
             console.error(`Photo ${index + 1} in job ${id} failed:`, error);
             job.failed++;

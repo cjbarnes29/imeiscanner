@@ -37,3 +37,14 @@ body{min-width:0}
 .crop-mode .crop-back{order:1}.crop-mode .crop-workspace>p{order:2}.crop-mode .crop-zoom-controls{order:3}.crop-mode .crop-viewport{order:4}.crop-mode .crop-draft-preview{order:5}.crop-mode .crop-workspace>button:not(.crop-back){order:6}.crop-mode .crop-workspace>details{order:7}.crop-mode .review-crop-list{order:8}.crop-mode .crop-sticky-actions{order:9}
 @media(max-width:700px){.crop-mode .review-crop-list{grid-template-columns:1fr}.crop-mode .saved-crop-card img{height:110px}}
 .photo-edit-cell{display:flex;align-items:center;gap:8px;min-width:0}.photo-edit-cell .photo-cell{min-width:0;flex:1}.photo-edit-cell .edit-photo-action{flex:none;min-height:40px}@media(max-width:700px){.photo-edit-cell{width:100%;flex-wrap:wrap}.photo-edit-cell .photo-cell{flex:1 1 160px}.photo-edit-cell .edit-photo-action{min-height:44px}}
+.modal:not(.crop-mode){height:min(760px,calc(100dvh - 24px));max-height:calc(100dvh - 24px)}
+.modal:not(.crop-mode) .modal-head{height:52px;min-height:52px;gap:12px;margin-bottom:8px}
+.modal:not(.crop-mode) .modal-head>div{min-width:0;flex:1}
+.modal:not(.crop-mode) .modal-head h2{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.review-photo-stage{height:clamp(190px,39dvh,330px);width:100%;display:grid;place-items:center;overflow:hidden;background:#09111d;border-radius:9px}
+.review-photo-stage .preview{width:100%;height:100%;max-height:none;object-fit:contain}
+.modal:not(.crop-mode) .review-navigation{height:48px;margin:10px 0 8px}
+.review-fixed-actions{height:48px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-bottom:10px}
+.review-fixed-actions button{min-width:0;height:48px;justify-content:center;text-align:center;font-size:11px;padding:6px}
+.review-fixed-actions button:disabled{opacity:.45}
+@media(max-width:700px){.modal:not(.crop-mode){height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}.review-photo-stage{height:clamp(180px,36dvh,300px)}.review-fixed-actions{gap:5px}.review-fixed-actions button{font-size:10px;gap:3px}}

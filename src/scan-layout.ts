@@ -74,11 +74,52 @@ export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, 
   const first = ordered[0], last = ordered[ordered.length - 1];
   const start = findEdge(Math.max(0, startOf(first) - extent * 0.4), startOf(first) - extent * 0.025, 'start');
   const end = findEdge(endOf(last) + extent * 0.025, Math.min(extent, endOf(last) + extent * 0.4), 'end');
-  const bounds = [start < 0 ? Math.max(0, Math.floor(startOf(first) - extent * 0.2)) : Math.max(0, start - Math.ceil(majorScale * 2)), ...seams, end < 0 ? Math.min(extent, Math.ceil(endOf(last) + extent * 0.2)) : Math.min(extent, end + Math.ceil(majorScale * 2))];
+  const bounds = [start < 0 ? Math.max(0, Math.floor(startOf(first) - extent * 0.3)) : Math.max(0, start - Math.ceil(majorScale * 2)), ...seams, end < 0 ? Math.min(extent, Math.ceil(endOf(last) + extent * 0.3)) : Math.min(extent, end + Math.ceil(majorScale * 2))];
+  // Find the two side edges of each box face across the whole region. Barcode
+  // strokes are short; a box edge continues through much of the crop height.
+  const sideSteps = Math.min(300, minorExtent);
+  const sideScale = minorExtent / sideSteps;
+  const sideContrast = (minor: number, from: number, to: number) => {
+    let strong = 0, total = 0, sum = 0;
+    const inset = Math.max(2, Math.round(sideScale * 3));
+    for (let major = from + (to - from) * 0.1; major < to - (to - from) * 0.1; major += Math.max(3, (to - from) / 35)) {
+      const sampleColor = (side: number) => {
+        const x = Math.max(0, Math.min(width - 1, Math.round(vertical ? side : major)));
+        const y = Math.max(0, Math.min(height - 1, Math.round(vertical ? major : side)));
+        const index = (y * width + x) * 4;
+        return [frame.data[index], frame.data[index + 1], frame.data[index + 2]];
+      };
+      const before = sampleColor(minor - inset), after = sampleColor(minor + inset);
+      const delta = (Math.abs(before[0] - after[0]) + Math.abs(before[1] - after[1]) + Math.abs(before[2] - after[2])) / 3;
+      if (delta > 30) strong++;
+      sum += delta; total++;
+    }
+    return total ? { coverage: strong / total, strength: sum / total } : { coverage: 0, strength: 0 };
+  };
+  const sideEdge = (from: number, to: number, majorFrom: number, majorTo: number) => {
+    let best = -1, bestScore = 0;
+    for (let step = Math.max(2, Math.ceil(from / sideScale)); step <= Math.min(sideSteps - 2, Math.floor(to / sideScale)); step++) {
+      const position = step * sideScale;
+      const contrast = sideContrast(position, majorFrom, majorTo);
+      const score = contrast.coverage * contrast.strength;
+      if (contrast.coverage >= 0.55 && contrast.strength >= 28 && score > bestScore) {
+        best = position; bestScore = score;
+      }
+    }
+    return best;
+  };
   const regions = ordered.map((item, i) => {
     const from = bounds[i], to = bounds[i + 1];
-    const needsReview = (i === 0 && start < 0) || (i === ordered.length - 1 && end < 0);
-    return vertical ? { imei: item.imei, x: 0, y: from, width, height: to - from, needsReview } : { imei: item.imei, x: from, y: 0, width: to - from, height, needsReview };
+    const labelStart = vertical ? item.box.x0 : item.box.y0;
+    const labelEnd = vertical ? item.box.x1 : item.box.y1;
+    const sidePadding = minorExtent * 0.06;
+    const left = sideEdge(Math.max(0, labelStart - minorExtent * 0.42), Math.max(0, labelStart - sidePadding), from, to);
+    const right = sideEdge(Math.min(minorExtent, labelEnd + sidePadding), Math.min(minorExtent, labelEnd + minorExtent * 0.42), from, to);
+    const sideFrom = left < 0 ? 0 : Math.max(0, Math.floor(left - minorExtent * 0.025));
+    const sideTo = right < 0 ? minorExtent : Math.min(minorExtent, Math.ceil(right + minorExtent * 0.025));
+    const needsReview = (i === 0 && start < 0) || (i === ordered.length - 1 && end < 0) || left < 0 || right < 0;
+    return vertical ? { imei: item.imei, x: sideFrom, y: from, width: sideTo - sideFrom, height: to - from, needsReview } : { imei: item.imei, x: from, y: sideFrom, width: to - from, height: sideTo - sideFrom, needsReview };
   });
-  return regions.every(region => region.width > 0 && region.height > 0) ? regions : [];
+  return regions.every((region, i) => region.width > 0 && region.height > 0 &&
+    (vertical ? region.x <= ordered[i].box.x0 && region.x + region.width >= ordered[i].box.x1 : region.y <= ordered[i].box.y0 && region.y + region.height >= ordered[i].box.y1)) ? regions : [];
 }
