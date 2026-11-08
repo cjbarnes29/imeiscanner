@@ -31,6 +31,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.UUID;
 
 public final class MainActivity extends Activity {
     private static final String WORK_NAME = "imei-lens-background-scan";
@@ -38,6 +39,9 @@ public final class MainActivity extends Activity {
     private String selectedPerson = "person-1";
     private ValueCallback<Uri[]> webFileCallback;
     private File pendingExport;
+    private String pendingExportName;
+    private File stagingExport;
+    private String stagingToken;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -77,15 +81,22 @@ public final class MainActivity extends Activity {
             return;
         }
         if (requestCode == 1003) {
+            boolean saved = false;
             if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingExport != null) {
                 try (InputStream input = new FileInputStream(pendingExport);
                      OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+                    if (output == null) throw new IllegalStateException("Cannot open destination");
                     byte[] chunk = new byte[8192]; int count;
                     while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
-                } catch (Exception ignored) { }
+                    output.flush();
+                    saved = true;
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Export failed", error); }
             }
+            String name = pendingExportName;
             if (pendingExport != null) pendingExport.delete();
             pendingExport = null;
+            pendingExportName = null;
+            reportExport(saved ? "saved" : resultCode == RESULT_CANCELED ? "cancelled" : "failed", name);
             return;
         }
         if (requestCode != 1001 || resultCode != RESULT_OK || data == null) return;
@@ -124,6 +135,15 @@ public final class MainActivity extends Activity {
 
     private void notifyWeb() {
         runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new Event('android-scan-updated'))", null));
+    }
+
+    private void reportExport(String status, String filename) {
+        runOnUiThread(() -> {
+            JSONObject detail = new JSONObject();
+            try { detail.put("status", status); detail.put("filename", filename == null ? "file" : filename); }
+            catch (Exception ignored) { }
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-export-result',{detail:" + detail + "}))", null);
+        });
     }
 
     @Override public void onBackPressed() {
@@ -199,22 +219,62 @@ public final class MainActivity extends Activity {
             notifyWeb();
         }
 
-        @JavascriptInterface public void saveFile(String filename, String mimeType, String base64) {
-            try {
-                File temp = File.createTempFile("imei-export-", ".bin", getCacheDir());
-                try (FileOutputStream output = new FileOutputStream(temp)) {
+        @JavascriptInterface public String beginFile(String filename) {
+            synchronized (MainActivity.this) {
+                if (stagingExport != null || pendingExport != null) return "";
+                try {
+                    stagingExport = File.createTempFile("imei-export-", ".bin", getCacheDir());
+                    stagingToken = UUID.randomUUID().toString();
+                    return stagingToken;
+                } catch (Exception error) { return ""; }
+            }
+        }
+
+        @JavascriptInterface public boolean appendFile(String token, String base64) {
+            synchronized (MainActivity.this) {
+                if (stagingExport == null || !token.equals(stagingToken)) return false;
+                try (FileOutputStream output = new FileOutputStream(stagingExport, true)) {
                     output.write(Base64.decode(base64, Base64.DEFAULT));
-                }
-                runOnUiThread(() -> {
-                    if (pendingExport != null) pendingExport.delete();
-                    pendingExport = temp;
+                    return true;
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Export chunk failed", error); return false; }
+            }
+        }
+
+        @JavascriptInterface public boolean finishFile(String token, String filename, String mimeType) {
+            synchronized (MainActivity.this) {
+                if (stagingExport == null || !token.equals(stagingToken) || pendingExport != null) return false;
+                pendingExport = stagingExport;
+                pendingExportName = filename;
+                stagingExport = null;
+                stagingToken = null;
+            }
+            runOnUiThread(() -> {
+                try {
                     Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.setType(mimeType.isEmpty() ? "application/octet-stream" : mimeType);
                     intent.putExtra(Intent.EXTRA_TITLE, filename.replaceAll("[/\\\\]", "_"));
+                    intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
                     startActivityForResult(intent, 1003);
-                });
-            } catch (Exception ignored) { }
+                } catch (Exception error) {
+                    android.util.Log.e("IMEI-Lens", "Save picker failed", error);
+                    if (pendingExport != null) pendingExport.delete();
+                    pendingExport = null;
+                    pendingExportName = null;
+                    reportExport("failed", filename);
+                }
+            });
+            return true;
+        }
+
+        @JavascriptInterface public void abortFile(String token) {
+            synchronized (MainActivity.this) {
+                if (stagingExport != null && token.equals(stagingToken)) {
+                    stagingExport.delete();
+                    stagingExport = null;
+                    stagingToken = null;
+                }
+            }
         }
     }
 }

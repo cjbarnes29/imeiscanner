@@ -38,7 +38,10 @@ type AndroidBridge = {
   image(id: string): string;
   sourceImage(id: string): string;
   stop(): void;
-  saveFile(filename: string, mimeType: string, base64: string): void;
+  beginFile(filename: string): string;
+  appendFile(token: string, base64: string): boolean;
+  finishFile(token: string, filename: string, mimeType: string): boolean;
+  abortFile(token: string): void;
 };
 const androidBridge = (window as Window & { AndroidScanner?: AndroidBridge }).AndroidScanner;
 const NATIVE_IMPORTED_STORE = 'imei-lens-native-imported-v1';
@@ -78,14 +81,14 @@ async function copyText(value: string) {
   return copied;
 }
 
-function removeDuplicateRecords(rows: RecordItem[]) {
-  const seen = new Set<string>();
-  return rows.filter(row => {
-    if (!/^\d{15}$/.test(row.imei)) return true;
-    if (seen.has(row.imei)) return false;
-    seen.add(row.imei);
-    return true;
-  }).map(row => ({ ...row, duplicate: false }));
+function markDuplicateRecords(rows: RecordItem[]) {
+  const counts = new Map<string, number>();
+  for (const row of rows) if (/^\d{15}$/.test(row.imei)) counts.set(row.imei, (counts.get(row.imei) || 0) + 1);
+  return rows.map(row => ({ ...row, duplicate: /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1 }));
+}
+
+function reviewStatus(row: RecordItem) {
+  return row.duplicate ? 'Duplicate IMEI' : row.cropNeedsReview || row.status !== 'Valid' ? 'Needs review' : 'Valid';
 }
 
 function luhnValid(value: string) {
@@ -143,16 +146,16 @@ function extractImei1(text: string) {
 }
 
 function extractImei1s(text: string) {
-  const labelled = [...text.matchAll(/\bIMEI\s*(?:1|01)\s*[:#-]?\s*((?:\d[ -]*){15})(?![ -]*\d)/gi)]
+  const labelled = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:1|01)\s*[:#-]?\s*((?:\d[ -]*){15})(?![ -]*\d)/gi)]
     .map(match => digits(match[1]));
   return [...new Set(labelled)];
 }
 
 function extractPreferredImei(text: string) {
-  const first = extractImei1s(text);
+  const first = extractImei1s(text).filter(luhnValid);
   if (first.length === 1) return first[0];
   if (first.length > 1) return '';
-  const second = [...text.matchAll(/\bIMEI\s*(?:2|02)\s*[:#-]?\s*((?:\d[ -]*){15})(?![ -]*\d)/gi)].map(match => digits(match[1]));
+  const second = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[ -]*){15})(?![ -]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid);
   const unique = [...new Set(second)];
   return unique.length === 1 ? unique[0] : '';
 }
@@ -250,11 +253,20 @@ function personTitle(record: RecordItem, people: PersonGroup[]) {
   return person ? `${person.label}${person.name ? ` — ${person.name}` : ''}` : 'Person 1';
 }
 
-function downloadBlob(blob: Blob, filename: string) {
+async function downloadBlob(blob: Blob, filename: string): Promise<void> {
   if (androidBridge) {
-    const reader = new FileReader();
-    reader.onload = () => androidBridge.saveFile(filename, blob.type || 'application/octet-stream', String(reader.result).split(',')[1] || '');
-    reader.readAsDataURL(blob);
+    const token = androidBridge.beginFile(filename);
+    if (!token) throw new Error('Finish or cancel the current save before starting another.');
+    try {
+      for (let offset = 0; offset < blob.size; offset += 64 * 1024) {
+        const chunk = await blobDataUrl(blob.slice(offset, offset + 64 * 1024));
+        if (!androidBridge.appendFile(token, chunk.split(',')[1] || '')) throw new Error('Could not transfer the file to Android.');
+      }
+      if (!androidBridge.finishFile(token, filename, blob.type || 'application/octet-stream')) throw new Error('Could not open the Android save screen.');
+    } catch (error) {
+      androidBridge.abortFile(token);
+      throw error;
+    }
     return;
   }
   const url = URL.createObjectURL(blob);
@@ -460,21 +472,21 @@ function recordsCsv(
   if (layout) {
     const rich = layout === 'person_photo';
     const values = [
-      ['IMEI', 'Model', ...(rich ? ['Assigned person', 'Download photo'] : [])],
-      ...rows.map(r => [r.imei, exportModel(r.model), ...(rich ? [personTitle(r, people), photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download photo")` : ''] : [])])
+      ['IMEI', 'Model', 'Review status', ...(rich ? ['Assigned person', 'Download photo'] : [])],
+      ...rows.map(r => [r.imei, exportModel(r.model), reviewStatus(r), ...(rich ? [personTitle(r, people), photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download photo")` : ''] : [])])
     ];
     return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
   }
   if (compact) {
     const values = [
-      ['Model', 'IMEI', 'Duplicate', 'Download photo'],
-      ...rows.map(r => [exportModel(r.model), r.imei, r.duplicate ? 'Yes' : 'No',
+      ['Model', 'IMEI', 'Review status', 'Duplicate', 'Download photo'],
+      ...rows.map(r => [exportModel(r.model), r.imei, reviewStatus(r), r.duplicate ? 'Yes' : 'No',
         photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download image")` : ''])
     ];
     return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
   }
   const values = [
-    ['No.', 'Picture ID', 'Person', 'Person name', 'Image filename', 'Model', 'IMEI', 'Validation', 'Duplicate', 'Scanned at', 'Download photo'],
+    ['No.', 'Picture ID', 'Person', 'Person name', 'Image filename', 'Model', 'IMEI', 'Review status', 'Validation', 'Duplicate', 'Scanned at', 'Download photo'],
     ...rows.map(r => {
       const person = people.find(item => item.id === r.personId);
       return [
@@ -485,6 +497,7 @@ function recordsCsv(
         r.name,
         exportModel(r.model),
         r.imei,
+        reviewStatus(r),
         r.status,
         r.duplicate ? 'Yes' : 'No',
         r.createdAt,
@@ -512,7 +525,7 @@ async function workbookImage(r: RecordItem) {
   image.src = recordPhoto(r);
   await image.decode();
 
-  const maxSize = 480;
+  const maxSize = 320;
   const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -522,7 +535,7 @@ async function workbookImage(r: RecordItem) {
   if (!context) throw new Error('Could not prepare a photo for the workbook.');
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-  return canvas.toDataURL('image/jpeg', 0.82);
+  return canvas.toDataURL('image/jpeg', 0.72);
 }
 
 async function createInventoryWorkbook(
@@ -558,11 +571,15 @@ async function createInventoryWorkbook(
   const imageIds = new Map<string, number>();
   if (includePhotos) {
     for (const row of rows) {
-      const imageData = await workbookImage(row);
-      imageIds.set(row.id, workbook.addImage({
-        base64: imageData,
-        extension: 'jpeg'
-      }));
+      try {
+        const imageData = await workbookImage(row);
+        imageIds.set(row.id, workbook.addImage({
+          base64: imageData,
+          extension: 'jpeg'
+        }));
+      } catch (error) {
+        console.warn(`Photo ${row.pictureId} could not be embedded; exporting its IMEI row`, error);
+      }
     }
   }
 
@@ -577,6 +594,7 @@ async function createInventoryWorkbook(
       { header: 'Image filename', key: 'filename', width: 36 },
       { header: 'Model', key: 'model', width: 28 },
       { header: 'IMEI', key: 'imei', width: 20 },
+      { header: 'Review status', key: 'reviewStatus', width: 18 },
       { header: 'Validation', key: 'validation', width: 14 },
       { header: 'Duplicate', key: 'duplicate', width: 12 },
       { header: 'Scanned at', key: 'scannedAt', width: 24 },
@@ -585,10 +603,10 @@ async function createInventoryWorkbook(
     ];
     const columns = layout
       ? (layout === 'simple'
-        ? [allColumns.find(column => column.key === 'imei')!, allColumns.find(column => column.key === 'model')!]
-        : ['imei', 'model', 'person', 'photo', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
+        ? ['imei', 'model', 'reviewStatus'].map(key => allColumns.find(column => column.key === key)!)
+        : ['imei', 'model', 'reviewStatus', 'person', 'photo', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
       : compact
-      ? allColumns.filter(column => ['model', 'imei', 'duplicate', 'download', 'folder'].includes(column.key))
+      ? allColumns.filter(column => ['model', 'imei', 'reviewStatus', 'duplicate', 'download', 'folder'].includes(column.key))
       : allColumns;
     sheet.columns = columns;
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -610,6 +628,7 @@ async function createInventoryWorkbook(
         filename: record.name,
         model: exportModel(record.model),
         imei: record.imei,
+        reviewStatus: reviewStatus(record),
         validation: record.status,
         duplicate: record.duplicate ? 'Yes' : 'No',
         scannedAt: record.createdAt,
@@ -733,7 +752,7 @@ async function createWordReport(
 
   for (const [group, modelRecords] of groups) {
     children.push(new Paragraph({ text: group, heading: HeadingLevel.HEADING_1 }));
-    const headerLabels = layout === 'simple' ? ['IMEI', 'Model'] : layout === 'person_photo' ? ['IMEI', 'Model', 'Assigned person', 'Photo'] : includePhotos
+    const headerLabels = layout === 'simple' ? ['IMEI', 'Model', 'Review status'] : layout === 'person_photo' ? ['IMEI', 'Model', 'Review status', 'Assigned person', 'Photo'] : includePhotos
       ? ['No.', 'Person', 'Name', 'Photo', 'Image filename', 'IMEI', 'Validation']
       : ['No.', 'Person', 'Name', 'Image filename', 'IMEI', 'Validation'];
     const tableRows = [
@@ -749,7 +768,8 @@ async function createWordReport(
       if (layout) {
         const cells = [
           new TableCell({ children: [new Paragraph({ text: record.imei || 'Not detected' })] }),
-          new TableCell({ children: [new Paragraph({ text: record.model })] })
+          new TableCell({ children: [new Paragraph({ text: record.model })] }),
+          new TableCell({ children: [new Paragraph({ text: reviewStatus(record) })] })
         ];
         if (layout === 'person_photo') {
           cells.push(new TableCell({ children: [new Paragraph({ text: personTitle(record, people) })] }));
@@ -872,6 +892,20 @@ export default function App() {
   const cropStart = useRef<{ x: number; y: number } | null>(null);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
 
+  useEffect(() => {
+    if (!androidBridge) return;
+    const report = (event: Event) => {
+      const { status, filename } = (event as CustomEvent<{ status: string; filename: string }>).detail;
+      const message = status === 'saved' ? `${filename} saved to your phone.`
+        : status === 'cancelled' ? 'Save cancelled. No file was downloaded.'
+        : `Could not save ${filename}. Choose a different folder and try again.`;
+      setDownloadStatus(message);
+      setToast(message);
+    };
+    window.addEventListener('android-export-result', report);
+    return () => window.removeEventListener('android-export-result', report);
+  }, []);
+
   useEffect(() => { localStorage.setItem('imei-lens-laptop-url', laptopUrl); }, [laptopUrl]);
   useEffect(() => {
     if (!['127.0.0.1', 'localhost'].includes(window.location.hostname)) return;
@@ -890,14 +924,14 @@ export default function App() {
     loadInventory<RecordItem>()
       .then(saved => {
         if (mounted) {
-          setRecords(removeDuplicateRecords(saved === undefined ? readRecords() : saved));
+          setRecords(markDuplicateRecords(saved === undefined ? readRecords() : saved));
           setInventoryLoaded(true);
         }
       })
       .catch(error => {
         console.error('Unable to open device storage', error);
         if (mounted) {
-          setRecords(removeDuplicateRecords(readRecords()));
+          setRecords(markDuplicateRecords(readRecords()));
           setInventoryLoaded(true);
           setStorageWarning('Large batch storage is unavailable in this browser. Export your records before closing this page.');
         }
@@ -934,15 +968,14 @@ export default function App() {
         }
         if (added.length && !cancelled) setRecords(old => {
           const ids = new Set(old.map(row => row.id));
-          const imeis = new Set(old.map(row => row.imei).filter(Boolean));
           let number = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
           const unique = added.filter(row => {
-            if (ids.has(row.id) || (row.imei && imeis.has(row.imei))) return false;
-            ids.add(row.id); if (row.imei) imeis.add(row.imei);
+            if (ids.has(row.id)) return false;
+            ids.add(row.id);
             row.number = number++;
             return true;
           });
-          return unique.length ? [...old, ...unique] : old;
+          return unique.length ? markDuplicateRecords([...old, ...unique]) : old;
         });
       } catch (error) { console.error('Unable to read Android scan', error); }
       finally { importingAndroid.current = false; }
@@ -1201,16 +1234,14 @@ export default function App() {
         if (cancelled) return;
         setRecords(old => {
           const seenIds = new Set(old.map(row => row.id));
-          const seenImeis = new Set(old.map(row => row.imei).filter(Boolean));
           let nextNumber = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
           const added = imported.filter(row => {
-            if (seenIds.has(row.id) || (row.imei && seenImeis.has(row.imei))) return false;
+            if (seenIds.has(row.id)) return false;
             seenIds.add(row.id);
-            if (row.imei) seenImeis.add(row.imei);
             row.number = nextNumber++;
             return true;
           });
-          return added.length ? [...old, ...added] : old;
+          return added.length ? markDuplicateRecords([...old, ...added]) : old;
         });
         setLaptopMessage(`${job.status === 'stopped' ? 'Scan stopped.' : 'Scan finished.'} Imported ${imported.length} record(s). ${job.failed ? `${job.failed} photo(s) could not be read.` : ''}`);
         setLaptopJobId('');
@@ -1307,7 +1338,6 @@ export default function App() {
         const model = identifyModel(regionText, file.name, mostlyWhite);
         const duplicate = !!imei && knownImeis.has(imei);
 
-        if (duplicate && /^\d{15}$/.test(imei)) continue;
         if (/^\d{15}$/.test(imei)) knownImeis.add(imei);
 
         newRows.push({
@@ -1341,7 +1371,7 @@ export default function App() {
           newRows = [];
           addedCount += completed.length;
           needsReviewCount += completed.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
-          setRecords(old => [...old, ...completed]);
+          setRecords(old => markDuplicateRecords([...old, ...completed]));
         }
         } catch (error) {
           if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'UnknownError')) throw error;
@@ -1358,14 +1388,14 @@ export default function App() {
 
       addedCount += newRows.length;
       needsReviewCount += newRows.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
-      if (newRows.length) setRecords(old => [...old, ...newRows]);
+      if (newRows.length) setRecords(old => markDuplicateRecords([...old, ...newRows]));
       setFiles([]);
 
       const reviewMessage = needsReviewCount
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`Finished scanning ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds. Duplicate IMEIs are skipped.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`Finished scanning ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds. Duplicate IMEIs are flagged.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       setToast(
@@ -1381,23 +1411,20 @@ export default function App() {
 
   function updateRow(id: string, patch: Partial<RecordItem>) {
     setRecords(old => {
-      if (patch.imei && /^\d{15}$/.test(patch.imei) && old.some(r => r.id !== id && r.imei === patch.imei)) {
-        return old.filter(r => r.id !== id);
-      }
       const changed = old.map(r =>
         r.id === id ? { ...r, ...patch } : r
       );
 
-      return removeDuplicateRecords(changed);
+      return markDuplicateRecords(changed);
     });
   }
 
   function saveReviewFields(advance = false) {
     if (!selected || adjustingCrop || rotatingPhoto || reviewSplit) return;
     if (manualImei && !/^\d{15}$/.test(manualImei)) { setToast('Enter all 15 IMEI digits or leave it empty.'); return; }
-    if (manualImei && records.some(r => r.id !== selected.id && r.imei === manualImei)) { setToast('This IMEI already has a record.'); return; }
     const imeiChanged = manualImei !== selected.imei;
-    const patch: Partial<RecordItem> = { model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
+    const duplicate = !!manualImei && records.some(r => r.id !== selected.id && r.imei === manualImei);
+    const patch: Partial<RecordItem> = { model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
     updateRow(selected.id, patch);
     if (advance && reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1) {
       setSelected(reviewRecords[reviewIndex + 1]);
@@ -1406,7 +1433,7 @@ export default function App() {
       setSelected({ ...selected, ...patch });
       setManualModel(exportModel(patch.model || ''));
     }
-    setToast(patch.status === 'Invalid' ? 'Saved. The IMEI checksum needs review.' : 'Saved.');
+    setToast(duplicate ? 'Saved. Duplicate IMEI flagged; both pictures are kept.' : patch.status === 'Invalid' ? 'Saved. The IMEI checksum needs review.' : 'Saved.');
   }
 
   async function applyManualCrop(addAnother = false) {
@@ -1427,15 +1454,11 @@ export default function App() {
         worker = await createWorker('eng');
         ({ raw, imei } = await readCropImei(worker, cropDataUrl));
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
-      if (imei && records.some(r => (addAnother || r.id !== selected.id) && r.imei === imei)) {
-        setToast('This IMEI already has a record. Draw a crop around a different label.');
-        return;
-      }
       const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, cropNeedsReview: !imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
         const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
         const added: RecordItem = { ...selected, ...patch, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: Math.max(2, ...records.map(r => r.number)) + 1, duplicate: false, createdAt: new Date().toISOString() };
-        setRecords(old => [...old.map(r => r.id === selected.id ? { ...r, sourcePictureId } : r), added]);
+        setRecords(old => markDuplicateRecords([...old.map(r => r.id === selected.id ? { ...r, sourcePictureId } : r), added]));
         setReviewIds(old => { const index = old.indexOf(selected.id); return index < 0 ? [...old, added.id] : [...old.slice(0, index + 1), added.id, ...old.slice(index + 1)]; });
         setSelected(added);
         setToast(imei ? 'Another crop added as a new record.' : 'Another crop added. Its IMEI needs review.');
@@ -1497,10 +1520,6 @@ export default function App() {
         worker = await createWorker('eng');
         ({ raw, imei } = await readCropImei(worker, cropDataUrl));
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
-      if (imei && (records.some(r => r.id !== selected.id && r.imei === imei) || reviewSplit.crops.some(crop => crop.imei === imei))) {
-        setToast('This IMEI already has a record. Select a different label.');
-        return;
-      }
       const crops = [...reviewSplit.crops, { cropDataUrl, imei, raw }];
       if (crops.length < reviewSplit.target) {
         setReviewSplit({ ...reviewSplit, crops });
@@ -1510,7 +1529,7 @@ export default function App() {
         const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
         const nextNumber = Math.max(2, ...records.map(r => r.number)) + 1;
         const replacements: RecordItem[] = crops.map((crop, index) => ({ ...selected, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1, dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl, imei: crop.imei, raw: crop.raw, cropNeedsReview: !crop.imei, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review', duplicate: false, createdAt: new Date().toISOString() }));
-        setRecords(old => old.flatMap(r => r.id === selected.id ? replacements : [r]));
+        setRecords(old => markDuplicateRecords(old.flatMap(r => r.id === selected.id ? replacements : [r])));
         setSelectedIds(old => old.filter(id => id !== selected.id));
         setReviewSplit(null);
         setSelected(null);
@@ -1577,23 +1596,23 @@ export default function App() {
       if (exportFormat === 'excel') {
         setGoogleProgress('Building the Excel workbook…');
         const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
-        downloadBlob(file, selectedOnly ? 'imei-scanner-selected.xlsx' : 'imei-scanner-export.xlsx');
-        setDownloadStatus(`Excel download started for ${rows.length} record(s). Check your Downloads folder.`);
-        setToast(`Excel downloaded with ${rows.length} record(s).`);
+        await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.xlsx' : 'imei-scanner-export.xlsx');
+        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Excel export.' : `Excel downloaded with ${rows.length} record(s).`);
+        setToast(androidBridge ? 'Choose where to save the Excel file.' : `Excel downloaded with ${rows.length} record(s).`);
       } else if (exportFormat === 'word') {
         setGoogleProgress('Building the Word document…');
         const file = await createWordReport(rows, includePhotos, photoLinks, personGroups, reportLayout);
-        downloadBlob(file, selectedOnly ? 'imei-scanner-selected.docx' : 'imei-scanner-export.docx');
-        setDownloadStatus(`Word download started for ${rows.length} record(s). Check your Downloads folder.`);
-        setToast(`Word document downloaded with ${rows.length} record(s).`);
+        await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.docx' : 'imei-scanner-export.docx');
+        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Word export.' : `Word document downloaded with ${rows.length} record(s).`);
+        setToast(androidBridge ? 'Choose where to save the Word file.' : `Word document downloaded with ${rows.length} record(s).`);
       } else if (exportFormat === 'csv') {
         const file = new Blob(
           [recordsCsv(rows, photoLinks, personGroups, compactExport, reportLayout)],
           { type: 'text/csv;charset=utf-8' }
         );
-        downloadBlob(file, selectedOnly ? 'imei-scanner-selected.csv' : 'imei-scanner-export.csv');
-        setDownloadStatus(`CSV download started for ${rows.length} record(s). Check your Downloads folder.`);
-        setToast(`CSV downloaded with ${rows.length} record(s).`);
+        await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.csv' : 'imei-scanner-export.csv');
+        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the CSV export.' : `CSV downloaded with ${rows.length} record(s).`);
+        setToast(androidBridge ? 'Choose where to save the CSV file.' : `CSV downloaded with ${rows.length} record(s).`);
       } else {
         if (!token) throw new Error('Google authorization is required for Sheets export.');
         setGoogleProgress('Building the model and person tabs…');
@@ -1633,9 +1652,8 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      const message = exportFormat === 'sheets'
-        ? 'Google Sheets export failed. Try the Excel download instead.'
-        : `Could not create the ${exportFormat.toUpperCase()} file. Try fewer records or another format.`;
+      const reason = e instanceof Error ? e.message : 'Unknown error';
+      const message = `Could not export ${exportFormat.toUpperCase()}: ${reason}`;
       setDownloadStatus(message);
       setToast(message);
     } finally {
@@ -1664,7 +1682,7 @@ export default function App() {
           await writer.close();
           links.set(record.id, path);
         }
-        photoItems.push(`<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, personGroups))}</strong><span>STATUS</span><strong>${record.cropNeedsReview || record.status !== 'Valid' ? 'Needs review' : 'Valid'}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`);
+        photoItems.push(`<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, personGroups))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`);
       }
 
       const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IMEI Lens — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> IMEI LENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
@@ -1693,10 +1711,10 @@ export default function App() {
         setPhotoGallery('');
         setDownloadStatus('Saved the report and photos in a new folder. Open open-photos.html to view the pictures. Excel links depend on your spreadsheet app.');
       } else {
-        downloadBlob(report, reportName);
+        await downloadBlob(report, reportName);
         setPhotoDownloads(rows);
         setPhotoGallery(galleryHtml);
-        setDownloadStatus(folderFailed
+        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the report. Photo buttons appear below.' : folderFailed
           ? 'The browser could not use that folder. The report was downloaded; use the buttons below for each photo.'
           : 'Report downloaded. Use the photo buttons below to download each picture.');
       }
@@ -1710,8 +1728,9 @@ export default function App() {
         await exportPhotoPackage(rows, undefined, true);
         return;
       }
-      setDownloadStatus('Could not prepare the spreadsheet and photos. Please try again.');
-      setToast('Could not prepare the spreadsheet and photos. Try fewer records.');
+      const message = `Could not prepare the report: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      setDownloadStatus(message);
+      setToast(message);
     } finally {
       setSyncing(false);
       setGoogleProgress('');
@@ -1738,15 +1757,24 @@ export default function App() {
     if (exportFormat === 'sheets') {
       setSyncing(true);
       void createInventoryWorkbook(rows, new Map(), includePhotos, personGroups, '', compactExport, reportLayout)
-        .then(file => {
-          downloadBlob(file, 'imei-records-for-google-sheets.xlsx');
-          setDownloadStatus('Excel file downloaded. In Google Sheets, choose File → Import → Upload.');
+        .then(async file => {
+          await downloadBlob(file, 'imei-records-for-google-sheets.xlsx');
+          setDownloadStatus(androidBridge ? 'Choose a folder and tap Save. Then import the Excel file into Google Sheets.' : 'Excel file downloaded. In Google Sheets, choose File → Import → Upload.');
         })
-        .catch(error => { console.error(error); setDownloadStatus('Could not create the file. Please try again.'); })
+        .catch(error => { console.error(error); setDownloadStatus(`Could not create the Google Sheets file: ${error instanceof Error ? error.message : 'Unknown error'}`); })
         .finally(() => setSyncing(false));
       return;
     }
     void performExport(rows);
+  }
+
+  function saveDirectFile(blob: Blob, filename: string) {
+    void downloadBlob(blob, filename).catch(error => {
+      console.error(error);
+      const message = error instanceof Error ? error.message : 'Could not save this file.';
+      setDownloadStatus(message);
+      setToast(message);
+    });
   }
 
   function deleteSelected() {
@@ -1754,7 +1782,7 @@ export default function App() {
     const ids = new Set(selectedRows.map(record => record.id));
     setRecords(old => {
       const remaining = old.filter(record => !ids.has(record.id));
-      return remaining.map(record => ({ ...record, duplicate: !!record.imei && remaining.some(other => other.id !== record.id && other.imei === record.imei) }));
+      return markDuplicateRecords(remaining);
     });
     setSelectedIds([]);
     setSelectedOnly(false);
@@ -2112,11 +2140,11 @@ export default function App() {
             {photoDownloads.length > 0 && (
               <div className="photo-download-list">
                 <strong>Download photos individually</strong>
-                <button className="subtle-btn" onClick={() => downloadBlob(new Blob([photoGallery], { type: 'text/html;charset=utf-8' }), 'open-photos.html')}>
+                <button className="subtle-btn" onClick={() => saveDirectFile(new Blob([photoGallery], { type: 'text/html;charset=utf-8' }), 'open-photos.html')}>
                   <Download size={15} /> Download photo gallery HTML
                 </button>
                 {photoDownloads.slice(0, photoDisplayCount).map(record => (
-                  <button key={record.id} className="subtle-btn" onClick={() => downloadBlob(dataUrlBlob(recordPhoto(record)), photoFilename(record).replace(/^#/, 'photo-'))}>
+                  <button key={record.id} className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), photoFilename(record).replace(/^#/, 'photo-'))}>
                     <Download size={15} /> Photo #{record.number} · {record.imei || 'No IMEI'}
                   </button>
                 ))}
@@ -2333,9 +2361,7 @@ export default function App() {
                           onChange={e => {
                             const imei = digits(e.target.value).slice(0, 15);
 
-                            if (imei.length === 15 && records.some(other => other.id !== r.id && other.imei === imei)) {
-                              setToast('Duplicate IMEI removed; the existing record was kept.');
-                            }
+                            if (imei.length === 15 && records.some(other => other.id !== r.id && other.imei === imei)) setToast('Duplicate IMEI flagged. Both pictures are kept.');
 
                             updateRow(r.id, {
                               imei,
@@ -2376,8 +2402,7 @@ export default function App() {
                           className="row-action"
                           title="Download original photo"
                           onClick={() => {
-                            downloadBlob(dataUrlBlob(recordPhoto(r)), photoFilename(r));
-                            setToast('Photo download started.');
+                            saveDirectFile(dataUrlBlob(recordPhoto(r)), photoFilename(r));
                           }}
                         >
                           <Download size={16} /> Photo
@@ -2490,7 +2515,7 @@ export default function App() {
             </div>
 
             <button className="primary" onClick={() => {
-              downloadBlob(dataUrlBlob(recordPhoto(selected)), photoFilename(selected));
+              saveDirectFile(dataUrlBlob(recordPhoto(selected)), photoFilename(selected));
             }}>
               <Download size={16} /> Download {selected.cropDataUrl ? 'separated' : 'original'} photo
             </button>

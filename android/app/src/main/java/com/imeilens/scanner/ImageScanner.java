@@ -25,10 +25,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class ImageScanner {
-    private static final Pattern LABEL_ONE = Pattern.compile("(?i)\\bI\\s*M\\s*E\\s*I\\s*[:#-]?\\s*[1I]\\b");
+    private static final Pattern LABEL_ONE = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*[1I]\\b");
     private static final Pattern NUMBER = Pattern.compile("(?<!\\d)(?:\\d[\\s-]*){15}(?!\\d)");
-    private static final Pattern FIRST = Pattern.compile("(?i)\\bI\\s*M\\s*E\\s*I\\s*[:#-]?\\s*[1I]\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
-    private static final Pattern SECOND = Pattern.compile("(?i)\\bI\\s*M\\s*E\\s*I\\s*[:#-]?\\s*2\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
+    private static final Pattern FIRST = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*[1I]\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
+    private static final Pattern SECOND = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
 
     private ImageScanner() {}
 
@@ -36,7 +36,7 @@ final class ImageScanner {
         Bitmap bitmap = decode(context, uri);
         try {
             Text full = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)));
-            List<Rect> labels = labels(full);
+            List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
@@ -113,19 +113,48 @@ final class ImageScanner {
         return rotated;
     }
 
-    private static List<Rect> labels(Text text) {
-        List<Rect> found = new ArrayList<>();
+    private static List<Rect> labels(Text text, int width, int height) {
+        List<Rect> hits = new ArrayList<>();
+        List<String> numbers = new ArrayList<>();
         for (Text.TextBlock block : text.getTextBlocks()) for (Text.Line line : block.getLines()) {
             if (!LABEL_ONE.matcher(line.getText()).find() || line.getBoundingBox() == null) continue;
             Rect box = line.getBoundingBox();
+            Matcher number = NUMBER.matcher(line.getText());
+            String imei = number.find() ? number.group().replaceAll("\\D", "") : "";
             boolean duplicate = false;
-            for (Rect previous : found) {
+            for (Rect previous : hits) {
                 if (Math.abs(previous.centerX() - box.centerX()) < Math.max(24, box.width() / 3)
                     && Math.abs(previous.centerY() - box.centerY()) < Math.max(24, box.height() * 2)) duplicate = true;
             }
-            if (!duplicate) found.add(new Rect(box));
+            if (!duplicate) { hits.add(new Rect(box)); numbers.add(imei); }
         }
-        return found;
+        if (hits.size() < 2) return hits;
+        int xSpread = hits.stream().mapToInt(Rect::centerX).max().orElse(0) - hits.stream().mapToInt(Rect::centerX).min().orElse(0);
+        int ySpread = hits.stream().mapToInt(Rect::centerY).max().orElse(0) - hits.stream().mapToInt(Rect::centerY).min().orElse(0);
+        boolean vertical = (double) ySpread / height >= (double) xSpread / width;
+        int major = vertical ? height : width, minor = vertical ? width : height;
+        List<Integer> order = new ArrayList<>();
+        for (int index = 0; index < hits.size(); index++) order.add(index);
+        order.sort(Comparator.comparingInt(index -> vertical ? hits.get(index).centerY() : hits.get(index).centerX()));
+        List<Rect> groups = new ArrayList<>();
+        List<String> groupNumbers = new ArrayList<>();
+        for (int index : order) {
+            Rect hit = hits.get(index);
+            String imei = numbers.get(index);
+            int match = -1;
+            for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
+                Rect group = groups.get(groupIndex);
+                if (imei.isEmpty() || !imei.equals(groupNumbers.get(groupIndex))) continue;
+                int gap = vertical ? hit.centerY() - group.bottom : hit.centerX() - group.right;
+                int cross = vertical ? Math.abs(hit.centerX() - group.centerX()) : Math.abs(hit.centerY() - group.centerY());
+                int span = vertical ? Math.max(hit.bottom, group.bottom) - Math.min(hit.top, group.top)
+                    : Math.max(hit.right, group.right) - Math.min(hit.left, group.left);
+                if (gap < major * 0.18 && cross < minor * 0.65 && span < major * 0.27) { match = groupIndex; break; }
+            }
+            if (match >= 0) groups.get(match).union(hit);
+            else { groups.add(new Rect(hit)); groupNumbers.add(imei); }
+        }
+        return groups;
     }
 
     private static List<Rect> boxRegions(Bitmap image, List<Rect> labels) {
