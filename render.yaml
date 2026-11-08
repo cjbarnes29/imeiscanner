@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: imei-lens-scanner
+    runtime: node
+    plan: 1c-2g
+    region: frankfurt
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.mjs
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    disk:
+      name: imei-lens-photos
+      mountPath: /opt/render/project/src/server-data
+      sizeGB: 20
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: IMEI_HOST
+        value: 0.0.0.0
+      - key: IMEI_DATA_DIR
+        value: /opt/render/project/src/server-data
+      - key: VITE_HOSTED_SCANNER
+        value: "true"
+      - key: IMEI_ACCESS_KEY
+        sync: false

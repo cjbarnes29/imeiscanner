@@ -786,6 +786,7 @@ function safeFileName(s: string) {
 }
 
 export default function App() {
+  const hostedScanner = import.meta.env.VITE_HOSTED_SCANNER === 'true' || window.location.hostname.endsWith('.onrender.com');
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [recordPage, setRecordPage] = useState(1);
@@ -796,7 +797,7 @@ export default function App() {
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
   const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
-  const [laptopUrl, setLaptopUrl] = useState(() => localStorage.getItem('imei-lens-laptop-url') || (window.location.hostname === 'cjbarnes29.github.io' ? 'http://127.0.0.1:8787' : window.location.origin));
+  const [laptopUrl, setLaptopUrl] = useState(() => hostedScanner ? window.location.origin : localStorage.getItem('imei-lens-laptop-url') || (window.location.hostname === 'cjbarnes29.github.io' ? 'http://127.0.0.1:8787' : window.location.origin));
   const [laptopKey, setLaptopKey] = useState(() => localStorage.getItem('imei-lens-laptop-key') || '');
   const [laptopJobId, setLaptopJobId] = useState(() => localStorage.getItem('imei-lens-laptop-job') || '');
   const [laptopUploading, setLaptopUploading] = useState(false);
@@ -804,6 +805,8 @@ export default function App() {
   const [laptopJob, setLaptopJob] = useState<{ status: string; count: number; completed: number; resultCount: number; failed: number } | null>(null);
   const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
   const phoneOnLaptopNetwork = window.matchMedia('(pointer: coarse)').matches && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(window.location.hostname);
+  const useBackgroundByDefault = hostedScanner || phoneOnLaptopNetwork;
+  const scannerLocation = hostedScanner ? 'online server' : 'laptop';
   const importingLaptop = useRef(false);
   const [filter, setFilter] = useState('All');
   const [query, setQuery] = useState('');
@@ -1048,7 +1051,7 @@ export default function App() {
 
   async function startLaptopScan() {
     if (!files.length || busy || laptopUploading || laptopJobId) return;
-    if (!laptopKey.trim()) { setLaptopMessage('Enter the access code from server-data/access-code.txt on your laptop.'); return; }
+    if (!laptopKey.trim()) { setLaptopMessage(hostedScanner ? 'Enter the scanner access code you set in your hosting account.' : 'Enter the access code from server-data/access-code.txt on your laptop.'); return; }
     if (files.length > 500) { setLaptopMessage('Choose up to 500 photos per background scan.'); return; }
     setLaptopUploading(true);
     setLaptopMessage('Connecting to the laptop scanner…');
@@ -1068,7 +1071,7 @@ export default function App() {
       await laptopRequest(`/api/jobs/${job.id}/start`, { method: 'POST' });
       setLaptopJobId(job.id);
       setLaptopJob({ status: 'queued', count: files.length, completed: 0, resultCount: 0, failed: 0 });
-      setLaptopMessage('Upload finished. You can close the browser now; the laptop will keep scanning.');
+      setLaptopMessage(`Upload finished. You can close the app now; the ${scannerLocation} will keep scanning.`);
       setFiles([]);
     } catch (error) {
       console.error('Laptop scan upload failed', error);
@@ -1829,18 +1832,18 @@ export default function App() {
 
             <button
               className="primary scan-button"
-              disabled={!files.length || busy || laptopUploading || (phoneOnLaptopNetwork && !!laptopJobId) || !inventoryLoaded}
-              onClick={() => phoneOnLaptopNetwork ? void startLaptopScan() : void scan()}
+              disabled={!files.length || busy || laptopUploading || (useBackgroundByDefault && !!laptopJobId) || !inventoryLoaded}
+              onClick={() => useBackgroundByDefault ? void startLaptopScan() : void scan()}
             >
               {busy || laptopUploading ? (
                 <>
                   <LoaderCircle className="spin" size={17} />
-                  {laptopUploading ? 'Uploading photos to laptop…' : 'Scanning photos…'}
+                  {laptopUploading ? `Uploading photos to ${scannerLocation}…` : 'Scanning photos…'}
                 </>
               ) : (
                 <>
                   <ScanLine size={17} />
-                  {phoneOnLaptopNetwork ? `Scan ${files.length || 0} photo(s) on laptop` : `Extract IMEI from ${files.length || 0} photo(s)`}
+                  {useBackgroundByDefault ? `Scan ${files.length || 0} photo(s) in background` : `Extract IMEI from ${files.length || 0} photo(s)`}
                 </>
               )}
             </button>
@@ -1854,19 +1857,19 @@ export default function App() {
               </div>
             )}
 
-            <details className="laptop-scan" open={phoneOnLaptopNetwork}>
+            <details className="laptop-scan" open={useBackgroundByDefault}>
               <summary>Keep scanning after closing the browser</summary>
-              <p>On a phone, use the laptop address below while both devices are on the same private Wi-Fi. Wait for <strong>Upload finished</strong>; then you may minimize or close the phone app. Your laptop keeps scanning until completion or you press Stop. Reopen this same address on the phone to see the results.</p>
+              <p>{hostedScanner ? 'Wait for Upload finished; then you may minimize or close the phone app. The online scanner continues until completion or you press Stop. Reopen this address to see the results.' : 'On a phone, use the laptop address below while both devices are on the same private Wi-Fi. Wait for Upload finished; then you may minimize or close the phone app. Your laptop keeps scanning until completion or you press Stop. Reopen this same address on the phone to see the results.'}</p>
               {phoneAddresses.length > 0 && <div className="phone-addresses">Phone address on this Wi-Fi: {phoneAddresses.map(address => <span key={address}><a href={address}>{address}</a><button type="button" className="subtle-btn" onClick={() => void copyText(address).then(copied => setLaptopMessage(copied ? 'Phone address copied. Open it on your phone using the same Wi-Fi.' : 'Could not copy the phone address.'))}>Copy</button></span>)}</div>}
-              <label>Laptop scanner address
+              {!hostedScanner && <label>Laptop scanner address
                 <input type="url" value={laptopUrl} onChange={event => setLaptopUrl(event.target.value)} placeholder="http://127.0.0.1:8787" />
-              </label>
-              <label>Access code from server-data/access-code.txt
+              </label>}
+              <label>{hostedScanner ? 'Scanner access code' : 'Access code from server-data/access-code.txt'}
                 <input type="password" value={laptopKey} onChange={event => setLaptopKey(event.target.value)} autoComplete="off" />
               </label>
               <button type="button" className="subtle-btn laptop-start" disabled={!files.length || busy || laptopUploading || !!laptopJobId || !inventoryLoaded} onClick={startLaptopScan}>
                 {laptopUploading ? <LoaderCircle className="spin" size={16} /> : <CloudUpload size={16} />}
-                {laptopUploading ? 'Uploading to laptop…' : `Scan ${files.length} photo${files.length === 1 ? '' : 's'} on laptop`}
+                {laptopUploading ? `Uploading to ${scannerLocation}…` : `Scan ${files.length} photo${files.length === 1 ? '' : 's'} on ${scannerLocation}`}
               </button>
               {laptopJobId && laptopJob && !['completed', 'stopped'].includes(laptopJob.status) && <button type="button" className="subtle-btn laptop-stop" onClick={() => void stopLaptopScan()}>Stop background scan</button>}
               {laptopJob && <div className="laptop-progress">Background scan: {laptopJob.completed} of {laptopJob.count} photos · {laptopJob.resultCount} record(s) · {laptopJob.status}</div>}
@@ -1875,7 +1878,7 @@ export default function App() {
 
             <div className="privacy-note">
               <CheckCircle2 size={15} />
-              Browser scans stay in this browser. Background scans are saved on your laptop.
+              {hostedScanner ? 'Background scans and photos are saved on your online scanner.' : 'Browser scans stay in this browser. Background scans are saved on your laptop.'}
             </div>
           </div>
 

@@ -175,7 +175,7 @@ async function handle(request, response) {
       .flatMap(([, items]) => items || [])
       .filter(item => item.family === 'IPv4' && !item.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address))
       .map(item => `http://${item.address}:${port}/`);
-    return json(response, 200, { running: true, background: true, phoneAddresses: host === '0.0.0.0' ? addresses : [] });
+    return json(response, 200, { running: true, background: true, phoneAddresses: host === '0.0.0.0' && !process.env.RENDER ? addresses : [] });
   }
   if (!authorized(request)) return json(response, 401, { error: 'Enter the laptop scanner access code.' });
 
@@ -245,11 +245,17 @@ async function handle(request, response) {
 
 await mkdir(jobsRoot, { recursive: true });
 const keyPath = join(dataRoot, 'access-code.txt');
-try { accessKey = (await readFile(keyPath, 'utf8')).trim(); }
-catch (error) {
-  if (error.code !== 'ENOENT') throw error;
-  accessKey = randomBytes(24).toString('hex');
-  await writeFile(keyPath, accessKey, { mode: 0o600 });
+if (process.env.IMEI_ACCESS_KEY) {
+  accessKey = process.env.IMEI_ACCESS_KEY.trim();
+  if (accessKey.length < 24) throw new Error('IMEI_ACCESS_KEY must be at least 24 characters.');
+} else {
+  if (process.env.RENDER) throw new Error('Set IMEI_ACCESS_KEY in the Render service environment before starting.');
+  try { accessKey = (await readFile(keyPath, 'utf8')).trim(); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    accessKey = randomBytes(24).toString('hex');
+    await writeFile(keyPath, accessKey, { mode: 0o600 });
+  }
 }
 const server = http.createServer((request, response) => {
   void handle(request, response).catch(error => {
