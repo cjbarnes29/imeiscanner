@@ -720,6 +720,7 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
+  const [completedFiles, setCompletedFiles] = useState(0);
   const [filter, setFilter] = useState('All');
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -849,8 +850,10 @@ export default function App() {
   const currentPage = Math.min(recordPage, pageCount);
   const pageRows = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   useEffect(() => { setRecordPage(1); }, [filter, query, personFilter]);
-  const selectedRows = records.filter(r => selectedIds.includes(r.id));
-  const reviewRecords = reviewIds.map(id => records.find(record => record.id === id)).filter((record): record is RecordItem => !!record);
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedRows = records.filter(r => selectedIdSet.has(r.id));
+  const recordById = useMemo(() => new Map(records.map(record => [record.id, record])), [records]);
+  const reviewRecords = reviewIds.map(id => recordById.get(id)).filter((record): record is RecordItem => !!record);
   const reviewIndex = selected ? reviewRecords.findIndex(record => record.id === selected.id) : -1;
   useEffect(() => {
     if (!selected) return;
@@ -872,7 +875,7 @@ export default function App() {
     setSelected(record);
   }
   const allVisibleSelected = visible.length > 0 &&
-    visible.every(r => selectedIds.includes(r.id));
+    visible.every(r => selectedIdSet.has(r.id));
   function addPersonGroup() {
     const next = personGroups.length + 1;
     const person = {
@@ -926,6 +929,7 @@ export default function App() {
     if (!files.length || busy || !inventoryLoaded) return;
 
     setBusy(true);
+    setCompletedFiles(0);
 
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
 
@@ -1055,6 +1059,7 @@ export default function App() {
           needsReviewCount += completed.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
           setRecords(old => [...old, ...completed]);
         }
+        setCompletedFiles(i + 1);
         if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
       }
 
@@ -1618,7 +1623,7 @@ export default function App() {
             {busy && (
               <div className="progress">
                 <div className="progressbar">
-                  <i style={{ width: '30%' }} />
+                  <i style={{ width: `${files.length ? completedFiles / files.length * 100 : 0}%` }} />
                 </div>
                 <span>{progress}</span>
               </div>
@@ -1882,7 +1887,7 @@ export default function App() {
                           className="selection-check"
                           type="checkbox"
                           aria-label={`Select photo #${r.number}`}
-                          checked={selectedIds.includes(r.id)}
+                          checked={selectedIdSet.has(r.id)}
                           onChange={() => toggleSelected(r.id)}
                         />
                       </td>
