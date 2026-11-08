@@ -243,6 +243,20 @@ final class ImageScanner {
     }
 
     private static String model(String text) {
+        java.util.regex.Matcher labelled = java.util.regex.Pattern.compile("\\bmodel\\s*[:：-]?\\s*S\\s*M\\s*[-–—]?\\s*([A-Z0-9]{5})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+        java.util.regex.Matcher visible = java.util.regex.Pattern.compile("\\bS\\s*M\\s*[-–—]\\s*([A-Z0-9]{5})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+        String labelledCode = labelled.find() ? labelled.group(1).toUpperCase(java.util.Locale.US) : "";
+        java.util.HashSet<String> exactCodes = new java.util.HashSet<>();
+        String firstCode = "";
+        while (visible.find()) {
+            String code = visible.group(1).toUpperCase(java.util.Locale.US);
+            if (firstCode.isEmpty()) firstCode = code;
+            if (code.matches("[A-Z][0-9]{3}[A-Z0-9]")) exactCodes.add(code);
+        }
+        if (!labelledCode.isEmpty() && exactCodes.contains(labelledCode)) return "SM-" + labelledCode;
+        if (exactCodes.size() == 1) return "SM-" + exactCodes.iterator().next();
+        if (!labelledCode.isEmpty()) return "SM-" + labelledCode;
+        if (!firstCode.isEmpty()) return "SM-" + firstCode;
         String value = text.toLowerCase();
         if (value.matches("(?s).*samsung.*s26.*|.*sm[- ]?s94.*")) return "Samsung Galaxy S26 series";
         if (value.matches("(?s).*samsung.*s25.*|.*sm[- ]?s93.*")) return "Samsung Galaxy S25 series";

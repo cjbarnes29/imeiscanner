@@ -3,7 +3,7 @@ import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
 
 const digits = value => value.replace(/\D/g, '');
-const labelledNumbers = (text, type) => [...new Set([...text.matchAll(new RegExp(`\\bIMEI\\s*(?:${type}|0${type})\\s*[:#-]?\\s*((?:\\d[ -]*){15})(?![ -]*\\d)`, 'gi'))]
+const labelledNumbers = (text, type) => [...new Set([...text.matchAll(new RegExp(`\\bIMEI\\s*(?:${type}|0${type})\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?![\\s-]*\\d)`, 'gi'))]
   .map(match => digits(match[1])).filter(value => value.length === 15))];
 
 function luhnValid(value) {
@@ -26,6 +26,12 @@ function preferredImei(text) {
 }
 
 function modelFrom(text, filename) {
+  const labelledCode = text.match(/\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?\s*([A-Z0-9]{5})/i);
+  const codes = [...new Set([...text.matchAll(/\bS\s*M\s*[-–—]\s*([A-Z0-9]{5})/gi)].map(match => match[1].toUpperCase()))];
+  const labelled = labelledCode?.[1].toUpperCase();
+  const exact = codes.filter(code => /^[A-Z][0-9]{3}[A-Z0-9]$/.test(code));
+  const code = labelled && exact.includes(labelled) ? labelled : exact.length === 1 ? exact[0] : labelled || codes[0];
+  if (code) return `SM-${code}`;
   const value = `${text} ${filename}`.toLowerCase().replace(/[_-]/g, ' ');
   const patterns = [
     [/galaxy\s*s26|sm\s*s94|sm\s*s93/, 'Samsung Galaxy S26 series'],

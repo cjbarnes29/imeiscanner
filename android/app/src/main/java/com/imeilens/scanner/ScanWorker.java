@@ -68,6 +68,12 @@ public final class ScanWorker extends Worker {
         int completed = job.optInt("completed", 0);
         int failed = job.optInt("failed", 0);
         HashSet<String> seenPhotos = new HashSet<>();
+        HashSet<String> seenImeis = new HashSet<>();
+        JSONArray existingRecords = job.optJSONArray("records");
+        if (existingRecords != null) for (int index = 0; index < existingRecords.length(); index++) {
+            JSONObject row = existingRecords.optJSONObject(index);
+            if (row != null && row.optString("imei").matches("[0-9]{15}")) seenImeis.add(row.optString("imei"));
+        }
         for (int index = 0; index < completed; index++) {
             JSONObject previous = queue.optJSONObject(index);
             if (previous != null) try { seenPhotos.add(photoFingerprint(Uri.parse(previous.getString("uri")))); }
@@ -87,6 +93,18 @@ public final class ScanWorker extends Worker {
                         if (seenPhotos.add(photoFingerprint(uri)))
                             additions = ImageScanner.scan(context, uri,
                                 photo.optString("name", "Phone photo.jpg"), job.optString("personId", "person-1"), recognizer);
+                        JSONArray unique = new JSONArray();
+                        for (int rowIndex = 0; rowIndex < additions.length(); rowIndex++) {
+                            JSONObject row = additions.optJSONObject(rowIndex);
+                            if (row == null) continue;
+                            String imei = row.optString("imei");
+                            if (imei.matches("[0-9]{15}") && !seenImeis.add(imei)) {
+                                ScanStore.image(context, row.optString("id")).delete();
+                                continue;
+                            }
+                            unique.put(row);
+                        }
+                        additions = unique;
                     } catch (Exception error) { failed++; }
                     if (isStopped() || "stopped".equals(ScanStore.read(context).optString("status"))) return Result.success();
                     ScanStore.update(context, index + 1, failed, additions);

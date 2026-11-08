@@ -176,7 +176,7 @@ function extractImei1(text: string) {
 }
 
 function extractImei1s(text: string) {
-  const labelled = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:1|01)\s*[:#-]?\s*((?:\d[ -]*){15})(?![ -]*\d)/gi)]
+  const labelled = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:1|01)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)]
     .map(match => digits(match[1]));
   return [...new Set(labelled)];
 }
@@ -185,12 +185,18 @@ function extractPreferredImei(text: string) {
   const first = extractImei1s(text).filter(luhnValid);
   if (first.length === 1) return first[0];
   if (first.length > 1) return '';
-  const second = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[ -]*){15})(?![ -]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid);
+  const second = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid);
   const unique = [...new Set(second)];
   return unique.length === 1 ? unique[0] : '';
 }
 
 function identifyModel(text: string, filename: string, mostlyWhite = false) {
+  const labelledCode = text.match(/\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?\s*([A-Z0-9]{5})/i);
+  const codes = [...new Set([...text.matchAll(/\bS\s*M\s*[-–—]\s*([A-Z0-9]{5})/gi)].map(match => match[1].toUpperCase()))];
+  const labelled = labelledCode?.[1].toUpperCase();
+  const exact = codes.filter(code => /^[A-Z][0-9]{3}[A-Z0-9]$/.test(code));
+  const code = labelled && exact.includes(labelled) ? labelled : exact.length === 1 ? exact[0] : labelled || codes[0];
+  if (code) return `SM-${code}`;
   const s = (text + ' ' + filename)
     .toLowerCase()
     .replace(/[_-]/g, ' ');
@@ -905,6 +911,7 @@ export default function App() {
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
   const [busy, setBusy] = useState(false);
+  const [stoppingScan, setStoppingScan] = useState(false);
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
   const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
@@ -922,13 +929,18 @@ export default function App() {
   const useBackgroundByDefault = hostedScanner || phoneOnLaptopNetwork;
   const scannerLocation = hostedScanner ? 'online server' : 'laptop';
   const importingLaptop = useRef(false);
+  const laptopUploadController = useRef<AbortController | null>(null);
+  const laptopUploadJobId = useRef('');
+  const stopScanRequested = useRef(false);
   const [filter, setFilter] = useState('All');
+  const [simpleView, setSimpleView] = useState(() => localStorage.getItem('imei-lens-simple-view') === 'true');
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [personGroups, setPersonGroups] = useState<PersonGroup[]>(readPeople);
   const [activePersonId, setActivePersonId] = useState('person-1');
   const [personFilter, setPersonFilter] = useState('All');
   const [selected, setSelected] = useState<RecordItem | null>(null);
+  const [deleteReviewConfirm, setDeleteReviewConfirm] = useState(false);
   const [reviewIds, setReviewIds] = useState<string[]>([]);
   const [manualImei, setManualImei] = useState('');
   const [manualModel, setManualModel] = useState('');
@@ -1042,10 +1054,15 @@ export default function App() {
         }
         if (added.length && !cancelled) setRecords(old => {
           const ids = new Set(old.map(row => row.id));
+          const seenImeis = new Set(old.filter(row => row.uploadBatchId === job.id).map(row => row.imei).filter(imei => /^\d{15}$/.test(imei)));
           let number = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
           const unique = added.filter(row => {
             if (ids.has(row.id)) return false;
             ids.add(row.id);
+            if (/^\d{15}$/.test(row.imei)) {
+              if (seenImeis.has(row.imei)) return false;
+              seenImeis.add(row.imei);
+            }
             row.number = number++;
             return true;
           });
@@ -1061,6 +1078,7 @@ export default function App() {
   }, [inventoryLoaded]);
 
   useEffect(() => {
+    setDeleteReviewConfirm(false);
     setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
     if (reviewModalRef.current) reviewModalRef.current.scrollTop = 0;
     setCropZoom(1);
@@ -1137,6 +1155,7 @@ export default function App() {
     try { localStorage.setItem(PEOPLE_STORE, JSON.stringify(personGroups)); }
     catch (error) { console.error('Unable to save people locally', error); }
   }, [personGroups]);
+  useEffect(() => { localStorage.setItem('imei-lens-simple-view', String(simpleView)); }, [simpleView]);
 
   useEffect(() => {
     if (!inventoryLoaded) return;
@@ -1223,6 +1242,15 @@ export default function App() {
     setReviewIds(visible.map(item => item.id));
     setSelected(record);
   }
+  function deleteRecord(record: RecordItem, fromReview = false, confirmed = false) {
+    if (!confirmed && !window.confirm(`Delete record #${record.number} and its saved picture?`)) return;
+    const next = fromReview ? reviewRecords[reviewIndex + 1] || reviewRecords[reviewIndex - 1] : null;
+    setRecords(old => markDuplicateRecords(old.filter(item => item.id !== record.id)));
+    setSelectedIds(old => old.filter(id => id !== record.id));
+    setReviewIds(old => old.filter(id => id !== record.id));
+    if (fromReview) { closeCropEditor(); setSelected(next || null); }
+    setToast(`Record #${record.number} deleted.`);
+  }
   const allVisibleSelected = visible.length > 0 &&
     visible.every(r => selectedIdSet.has(r.id));
   function addPersonGroup() {
@@ -1291,30 +1319,50 @@ export default function App() {
     if (files.length > 500) { setLaptopMessage('Choose up to 500 photos per background scan.'); return; }
     setLaptopUploading(true);
     setLaptopMessage('Connecting to the laptop scanner…');
+    const controller = new AbortController();
+    laptopUploadController.current = controller;
+    laptopUploadJobId.current = '';
     try {
       const uploadFiles = await uniqueUploadPhotos(files);
+      if (controller.signal.aborted) throw new DOMException('Upload stopped', 'AbortError');
       const skipped = files.length - uploadFiles.length;
       const created = await laptopRequest('/api/jobs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: uploadFiles.length, mode: scanMode, personId: activePersonId })
+        body: JSON.stringify({ count: uploadFiles.length, mode: scanMode, personId: activePersonId }), signal: controller.signal
       });
       const { job } = await created.json();
+      laptopUploadJobId.current = job.id;
       for (let index = 0; index < uploadFiles.length; index++) {
+        if (controller.signal.aborted) throw new DOMException('Upload stopped', 'AbortError');
         setLaptopMessage(`Uploading ${index + 1} of ${uploadFiles.length}: ${uploadFiles[index].name}. Keep this page open until upload finishes.`);
         await laptopRequest(`/api/jobs/${job.id}/photos/${index}`, {
           method: 'PUT', headers: { 'Content-Type': uploadFiles[index].type, 'X-File-Name': encodeURIComponent(uploadFiles[index].name) },
-          body: uploadFiles[index]
+          body: uploadFiles[index], signal: controller.signal
         });
       }
-      await laptopRequest(`/api/jobs/${job.id}/start`, { method: 'POST' });
+      if (controller.signal.aborted) throw new DOMException('Upload stopped', 'AbortError');
+      await laptopRequest(`/api/jobs/${job.id}/start`, { method: 'POST', signal: controller.signal });
       setLaptopJobId(job.id);
       setLaptopJob({ status: 'queued', count: uploadFiles.length, completed: 0, resultCount: 0, failed: 0 });
       setLaptopMessage(`Upload finished.${skipped ? ` Skipped ${skipped} repeated photo(s).` : ''} You can close the app now; the ${scannerLocation} will keep scanning.`);
       setFiles([]);
     } catch (error) {
-      console.error('Laptop scan upload failed', error);
-      setLaptopMessage(error instanceof Error ? `Laptop scan could not start: ${error.message}` : 'Laptop scan could not start.');
-    } finally { setLaptopUploading(false); }
+      if (controller.signal.aborted) {
+        if (laptopUploadJobId.current) {
+          try { await laptopRequest(`/api/jobs/${laptopUploadJobId.current}/stop`, { method: 'POST' }); }
+          catch (stopError) { console.error('Could not stop incomplete upload', stopError); }
+        }
+        setLaptopMessage('Upload stopped. Photos remain in the queue.');
+      } else {
+        console.error('Laptop scan upload failed', error);
+        setLaptopMessage(error instanceof Error ? `Laptop scan could not start: ${error.message}` : 'Laptop scan could not start.');
+      }
+    } finally { laptopUploadController.current = null; laptopUploadJobId.current = ''; setLaptopUploading(false); }
+  }
+
+  function stopCurrentUpload() {
+    if (laptopUploading) { laptopUploadController.current?.abort(); setLaptopMessage('Stopping upload…'); }
+    if (busy) { stopScanRequested.current = true; setStoppingScan(true); setProgress('Stopping after the current photo…'); }
   }
 
   async function stopLaptopScan() {
@@ -1359,10 +1407,15 @@ export default function App() {
         if (cancelled) return;
         setRecords(old => {
           const seenIds = new Set(old.map(row => row.id));
+          const seenImeis = new Set(old.filter(row => row.uploadBatchId === job.id).map(row => row.imei).filter(imei => /^\d{15}$/.test(imei)));
           let nextNumber = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
           const added = imported.filter(row => {
             if (seenIds.has(row.id)) return false;
             seenIds.add(row.id);
+            if (/^\d{15}$/.test(row.imei)) {
+              if (seenImeis.has(row.imei)) return false;
+              seenImeis.add(row.imei);
+            }
             row.number = nextNumber++;
             return true;
           });
@@ -1383,6 +1436,8 @@ export default function App() {
     if (!files.length || busy || !inventoryLoaded) return;
 
     setBusy(true);
+    stopScanRequested.current = false;
+    setStoppingScan(false);
     setCompletedFiles(0);
     const startedAt = performance.now();
 
@@ -1390,6 +1445,7 @@ export default function App() {
 
     try {
       const scanFiles = await uniqueUploadPhotos(files);
+      if (stopScanRequested.current) { setToast('Scan stopped. Photos remain in the queue.'); return; }
       const skippedPhotos = files.length - scanFiles.length;
       const uploadBatchId = newId();
       worker = await createWorker('eng');
@@ -1398,11 +1454,16 @@ export default function App() {
       let addedCount = 0;
       let needsReviewCount = 0;
       let failedFiles = 0;
+      let skippedImeis = 0;
+      const seenImeis = new Set<string>();
+      let processedFiles = 0;
       let nextNumber = records.reduce((max, record) => Math.max(max, record.number), 2) + 1;
 
       for (let i = 0; i < scanFiles.length; i++) {
+        if (stopScanRequested.current) break;
         const file = scanFiles[i];
         const beforeCount = newRows.length;
+        const fileImeis = new Set<string>();
 
         setProgress(
           `Scanning ${i + 1} of ${scanFiles.length}: ${file.name}`
@@ -1457,6 +1518,11 @@ export default function App() {
         const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw) };
         const cropRaw = cropResult.raw;
         const imei = cropNeedsReview ? '' : cropResult.imei;
+        if (/^\d{15}$/.test(imei)) {
+          if (seenImeis.has(imei)) { skippedImeis++; continue; }
+          seenImeis.add(imei);
+          fileImeis.add(imei);
+        }
         const regionText = region && cropDataUrl ? lines.filter(line => {
           const x = (line.bbox.x0 + line.bbox.x1) / 2;
           const y = (line.bbox.y0 + line.bbox.y1) / 2;
@@ -1501,9 +1567,11 @@ export default function App() {
           if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'UnknownError')) throw error;
           console.error(`Could not scan ${file.name}`, error);
           newRows = newRows.slice(0, beforeCount);
+          for (const imei of fileImeis) seenImeis.delete(imei);
           failedFiles++;
         }
         setCompletedFiles(i + 1);
+        processedFiles = i + 1;
         if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
       }
 
@@ -1513,13 +1581,13 @@ export default function App() {
       addedCount += newRows.length;
       needsReviewCount += newRows.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
       if (newRows.length) setRecords(old => markDuplicateRecords([...old, ...newRows]));
-      setFiles([]);
+      setFiles(stopScanRequested.current ? scanFiles.slice(processedFiles) : []);
 
       const reviewMessage = needsReviewCount
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`Finished scanning ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Skipped ${skippedPhotos} repeated photo(s).` : ''} Matching IMEIs in this upload are flagged.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       setToast(
@@ -1529,6 +1597,7 @@ export default function App() {
       if (worker) await worker.terminate();
 
       setBusy(false);
+      setStoppingScan(false);
       setProgress('');
     }
   }
@@ -2113,6 +2182,10 @@ export default function App() {
               )}
             </button>
 
+            {(busy || laptopUploading) && <button type="button" className="subtle-btn stop-upload-button" disabled={stoppingScan} onClick={stopCurrentUpload}>
+              <X size={16} /> {laptopUploading ? 'Stop uploading' : stoppingScan ? 'Stopping after this photo…' : 'Stop scanning'}
+            </button>}
+
             {busy && (
               <div className="progress">
                 <div className="progressbar">
@@ -2308,6 +2381,11 @@ export default function App() {
             </div>
 
             <div className="result-actions">
+              <select className="model-filter" aria-label="Filter scanned records by model" value={filter} onChange={event => setFilter(event.target.value)}>
+                <option value="All">All models</option>
+                {models.map(([model]) => <option key={model} value={model}>{model}</option>)}
+                <option value="Review">Needs review</option>
+              </select>
               <label className="search">
                 <Search size={15} />
                 <input
@@ -2327,10 +2405,13 @@ export default function App() {
               >
                 <RefreshCw size={15} /> Add more
               </button>
+              <button className="subtle-btn view-toggle" aria-pressed={simpleView} onClick={() => setSimpleView(old => !old)}>
+                {simpleView ? 'Detailed view' : 'Simple view'}
+              </button>
             </div>
           </div>
 
-          <div className="filters">
+          {!simpleView && <div className="filters">
             <button
               className={filter === 'All' ? 'active' : ''}
               onClick={() => setFilter('All')}
@@ -2355,7 +2436,7 @@ export default function App() {
               Needs review
             </button>
 
-          </div>
+          </div>}
 
           <div className="people-controls">
             <div className="people-setup">
@@ -2412,6 +2493,23 @@ export default function App() {
                   ? 'Try a different search or filter.'
                   : 'Upload phone label photos to begin extracting IMEI.'}
               </span>
+            </div>
+          ) : simpleView ? (
+            <div className="simple-record-list">
+              {pageRows.map(record => <article className="simple-record" key={record.id}>
+                <input className="selection-check" type="checkbox" aria-label={`Select photo #${record.number}`} checked={selectedIdSet.has(record.id)} onChange={() => toggleSelected(record.id)} />
+                <button className="simple-record-photo" onClick={() => openReview(record)} aria-label={`View photo #${record.number}`}><img src={recordPhoto(record)} alt="" /></button>
+                <div className="simple-record-info">
+                  <strong>#{record.number} · {record.imei || 'IMEI needs review'}</strong>
+                  <span>{exportModel(record.model) || 'Unknown model'} · {personTitle(record, personGroups)}</span>
+                  <small>{record.pictureId}{reviewStatus(record) !== 'Valid' ? ` · ${reviewStatus(record)}` : ''}</small>
+                </div>
+                <div className="simple-record-actions">
+                  <button className="subtle-btn" onClick={() => openReview(record)}>View</button>
+                  <button className="subtle-btn" onClick={() => openCropReview(record)}>Edit</button>
+                  <button className="subtle-btn danger" onClick={() => deleteRecord(record)}>Delete</button>
+                </div>
+              </article>)}
             </div>
           ) : (
             <div className="table-wrap">
@@ -2558,12 +2656,7 @@ export default function App() {
                         <button
                           className="row-action danger"
                           title="Delete record"
-                          onClick={() =>
-                            {
-                              setSelectedIds(old => old.filter(id => id !== r.id));
-                              setRecords(old => old.filter(x => x.id !== r.id));
-                            }
-                          }
+                          onClick={() => deleteRecord(r)}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -2607,14 +2700,16 @@ export default function App() {
                 <h2>{selected.name}</h2>
               </div>
 
-              <button
-                className="iconbtn"
-                aria-label="Close photo review"
-                onClick={closePhotoReview}
-              >
-                <X />
-              </button>
+              <div className="review-header-actions">
+                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
+                <button className="iconbtn" aria-label="Close photo review" onClick={closePhotoReview}><X /></button>
+              </div>
             </div>
+
+            {deleteReviewConfirm && <div className="review-delete-confirm" role="alertdialog" aria-label="Confirm record deletion">
+              <strong>Delete record #{selected.number} and its picture?</strong>
+              <div><button className="subtle-btn" onClick={() => setDeleteReviewConfirm(false)}>Cancel</button><button className="subtle-btn danger" onClick={() => deleteRecord(selected, true, true)}>Delete record</button></div>
+            </div>}
 
             {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={recordPhoto(selected)} alt="Selected record photo" /></div>}
 

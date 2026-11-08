@@ -89,6 +89,7 @@ async function processQueue() {
         let rows = await readJson(recordsPath(id), []);
         job.nextNumber = Math.max(2, ...rows.map(row => row.number || 2)) + 1;
         const seenPhotos = new Set(job.seenPhotoHashes || []);
+        const seenImeis = new Set(rows.map(row => row.imei).filter(imei => /^\d{15}$/.test(imei || '')));
         for (let index = job.completed; index < job.count; index++) {
           if (stoppedJobs.has(id) || (await loadJob(id))?.status === 'stopped') {
             job.status = 'stopped';
@@ -116,6 +117,10 @@ async function processQueue() {
               break;
             }
             for (const result of results) {
+              if (/^\d{15}$/.test(result.imei || '')) {
+                if (seenImeis.has(result.imei)) continue;
+                seenImeis.add(result.imei);
+              }
               const imageName = `${result.id}.jpg`;
               await writeFile(join(jobPath(id), 'output', imageName), result.photo);
               delete result.photo;
