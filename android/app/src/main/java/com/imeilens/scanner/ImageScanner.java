@@ -49,9 +49,12 @@ final class ImageScanner {
                 output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer));
                 return output;
             }
+            boolean perspectiveReview = false;
+            for (int index = 1; index < regions.size(); index++)
+                if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
             for (Rect region : regions) {
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, false, recognizer)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer)); }
                 finally { crop.recycle(); }
             }
             return output;
@@ -165,52 +168,66 @@ final class ImageScanner {
         List<Rect> ordered = new ArrayList<>(labels);
         ordered.sort(vertical ? Comparator.comparingInt(Rect::centerY) : Comparator.comparingInt(Rect::centerX));
         int extent = vertical ? height : width;
-        List<Integer> seams = new ArrayList<>();
+        List<int[]> seams = new ArrayList<>();
         for (int index = 1; index < ordered.size(); index++) {
             Rect before = ordered.get(index - 1), after = ordered.get(index);
             int from = vertical ? before.bottom : before.right;
             int to = vertical ? after.top : after.left;
             if (to - from < Math.max(18, extent / 70)) return new ArrayList<>();
-            int seam = visibleSeam(image, vertical, from, to);
-            if (seam < 0) return new ArrayList<>();
+            int[] seam = visibleSeam(image, vertical, from, to);
+            if (seam == null) return new ArrayList<>();
             seams.add(seam);
         }
         List<Rect> regions = new ArrayList<>();
-        int start = 0;
         for (int index = 0; index < ordered.size(); index++) {
-            int end = index < seams.size() ? seams.get(index) : extent;
+            int start = index == 0 ? 0 : seams.get(index - 1)[0];
+            int end = index < seams.size() ? seams.get(index)[1] : extent;
             Rect region = vertical ? new Rect(0, start, width, end) : new Rect(start, 0, end, height);
             if (!region.contains(ordered.get(index).centerX(), ordered.get(index).centerY())
                 || region.width() < width / 8 || region.height() < height / 8) return new ArrayList<>();
+            for (int other = 0; other < ordered.size(); other++)
+                if (other != index && Rect.intersects(region, ordered.get(other))) return new ArrayList<>();
             regions.add(region);
-            start = end;
         }
         return regions;
     }
 
-    private static int visibleSeam(Bitmap image, boolean vertical, int from, int to) {
+    private static int[] visibleSeam(Bitmap image, boolean vertical, int from, int to) {
         int extent = vertical ? image.getHeight() : image.getWidth();
         int minor = vertical ? image.getWidth() : image.getHeight();
         int stride = Math.max(2, extent / 900);
         int probe = Math.max(3, extent / 240);
         double bestScore = 0;
-        int best = -1;
-        for (int position = from + probe; position < to - probe; position += stride) {
-            double strength = 0;
-            int strong = 0, samples = 0;
-            for (int offset = minor / 12; offset < minor * 11 / 12; offset += Math.max(3, minor / 65)) {
-                int left = luminance(image, vertical, position - probe, offset);
-                int right = luminance(image, vertical, position + probe, offset);
-                int delta = Math.abs(left - right);
-                strength += delta;
-                if (delta > 24) strong++;
-                samples++;
+        int[] best = null;
+        for (int pass = 0; pass < 2; pass++) {
+            double[] slopes = pass == 0 ? new double[]{0} : new double[]{-0.12, -0.08, -0.04, 0.04, 0.08, 0.12};
+            for (int position = from + probe; position < to - probe; position += stride) {
+                for (double slopeFraction : slopes) {
+                    double slope = slopeFraction * extent / minor;
+                    double strength = 0;
+                    int strong = 0, samples = 0;
+                    for (int offset = minor / 12; offset < minor * 11 / 12; offset += Math.max(3, minor / 65)) {
+                        int tilted = position + (int) Math.round(slope * (offset - minor / 2.0));
+                        if (tilted - probe < 0 || tilted + probe >= extent) continue;
+                        int left = luminance(image, vertical, tilted - probe, offset);
+                        int right = luminance(image, vertical, tilted + probe, offset);
+                        int delta = Math.abs(left - right);
+                        strength += delta;
+                        if (delta > 24) strong++;
+                        samples++;
+                    }
+                    double coverage = samples == 0 ? 0 : (double) strong / samples;
+                    double score = samples == 0 ? 0 : strength / samples * coverage;
+                    if (coverage >= 0.28 && score > bestScore) {
+                        int halfTilt = (int) Math.ceil(Math.abs(slope) * minor * 5 / 12);
+                        bestScore = score;
+                        best = new int[]{Math.max(0, position - halfTilt), Math.min(extent, position + halfTilt)};
+                    }
+                }
             }
-            double coverage = samples == 0 ? 0 : (double) strong / samples;
-            double score = samples == 0 ? 0 : strength / samples * coverage;
-            if (coverage >= 0.28 && score > bestScore) { bestScore = score; best = position; }
+            if (bestScore >= 10) break;
         }
-        return bestScore >= 10 ? best : -1;
+        return bestScore >= 10 ? best : null;
     }
 
     private static int luminance(Bitmap image, boolean vertical, int major, int minor) {

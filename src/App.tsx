@@ -596,12 +596,13 @@ function photoFilename(r: RecordItem) {
   return `#${r.number}_${safeFileName(r.imei || 'IMEI_NOT_FOUND')}_${original}.${ext}`;
 }
 
-async function workbookImage(r: RecordItem) {
+async function workbookImage(r: RecordItem, maxSize = 1200) {
   const image = new Image();
   image.src = recordPhoto(r);
   await image.decode();
 
-  const maxSize = 320;
+  // Keep the sticker text readable when the picture is enlarged in Excel.
+  // The visible worksheet thumbnail is smaller; this is its stored resolution.
   const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -611,7 +612,7 @@ async function workbookImage(r: RecordItem) {
   if (!context) throw new Error('Could not prepare a photo for the workbook.');
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-  return canvas.toDataURL('image/jpeg', 0.72);
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.86), width: canvas.width, height: canvas.height };
 }
 
 async function createInventoryWorkbook(
@@ -644,17 +645,17 @@ async function createInventoryWorkbook(
     return name;
   };
 
-  const imageIds = new Map<string, number>();
+  const imageIds = new Map<string, { id: number; width: number; height: number }>();
   if (includePhotos) {
     for (const row of rows) {
       try {
         const imageData = await workbookImage(row);
-        imageIds.set(row.id, workbook.addImage({
-          base64: imageData,
+        imageIds.set(row.id, { id: workbook.addImage({
+          base64: imageData.dataUrl,
           extension: 'jpeg'
-        }));
+        }), width: imageData.width, height: imageData.height });
       } catch (error) {
-        console.warn(`Photo ${row.pictureId} could not be embedded; exporting its IMEI row`, error);
+        throw new Error(`Photo ${row.pictureId} could not be embedded in Excel. ${error instanceof Error ? error.message : ''}`.trim());
       }
     }
   }
@@ -666,7 +667,7 @@ async function createInventoryWorkbook(
       { header: 'Picture ID', key: 'pictureId', width: 18 },
       { header: 'Person', key: 'person', width: 16 },
       { header: 'Person name', key: 'personName', width: 22 },
-      ...(includePhotos ? [{ header: 'Photo', key: 'photo', width: 20 }] : []),
+      ...(includePhotos ? [{ header: 'Photo', key: 'photo', width: 38 }] : []),
       { header: 'Image filename', key: 'filename', width: 36 },
       { header: 'Model', key: 'model', width: 28 },
       { header: 'IMEI', key: 'imei', width: 20 },
@@ -680,7 +681,7 @@ async function createInventoryWorkbook(
     const columns = layout
       ? (layout === 'simple'
         ? ['imei', 'model', 'reviewStatus'].map(key => allColumns.find(column => column.key === key)!)
-        : ['imei', 'model', 'reviewStatus', 'person', 'photo', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
+        : ['imei', 'photo', 'model', 'person', 'reviewStatus', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
       : compact
       ? allColumns.filter(column => ['model', 'imei', 'reviewStatus', 'duplicate', 'download', 'folder'].includes(column.key))
       : allColumns;
@@ -711,9 +712,9 @@ async function createInventoryWorkbook(
         ...(photoLinks.size ? { download: '' } : {}),
         ...(folderLink ? { folder: '' } : {})
       });
-      row.height = includePhotos ? 72 : 24;
+      row.height = includePhotos ? 150 : 24;
       row.alignment = { vertical: 'middle', wrapText: true };
-      const imageId = imageIds.get(record.id);
+      const image = imageIds.get(record.id);
       const photoLink = photoLinks.get(record.id);
 
       if (photoLink) {
@@ -724,10 +725,18 @@ async function createInventoryWorkbook(
         row.getCell(folderColumn + 1).value = { text: 'Choose photos / download all', hyperlink: folderLink };
       }
 
-      if (includePhotos && imageId !== undefined) {
-        sheet.addImage(imageId, {
-          tl: { col: columns.findIndex(column => column.key === 'photo') + 0.12, row: row.number - 0.92 },
-          ext: { width: 112, height: 82 },
+      if (includePhotos && image) {
+        const photoColumn = columns.findIndex(column => column.key === 'photo');
+        const cellWidth = 270, cellHeight = 200;
+        const scale = Math.min((cellWidth - 16) / image.width, (cellHeight - 16) / image.height);
+        const displayWidth = Math.max(1, Math.round(image.width * scale));
+        const displayHeight = Math.max(1, Math.round(image.height * scale));
+        sheet.addImage(image.id, {
+          tl: {
+            col: photoColumn + (cellWidth - displayWidth) / (2 * cellWidth),
+            row: row.number - 1 + (cellHeight - displayHeight) / (2 * cellHeight)
+          },
+          ext: { width: displayWidth, height: displayHeight },
           editAs: 'oneCell',
           ...(photoLink ? {
             hyperlinks: {
@@ -849,7 +858,7 @@ async function createWordReport(
         ];
         if (layout === 'person_photo') {
           cells.push(new TableCell({ children: [new Paragraph({ text: personTitle(record, people) })] }));
-          const photo = new Uint8Array(await dataUrlBlob(await workbookImage(record)).arrayBuffer());
+          const photo = new Uint8Array(await dataUrlBlob((await workbookImage(record, 320)).dataUrl).arrayBuffer());
           const link = photoLinks.get(record.id);
           cells.push(new TableCell({ children: [new Paragraph({ children: [new ImageRun({ data: photo, type: 'jpg', transformation: { width: 90, height: 64 }, ...(link ? { link } : {}) })] })] }));
         }
@@ -863,7 +872,7 @@ async function createWordReport(
       ];
 
       if (includePhotos) {
-        const photo = new Uint8Array(await dataUrlBlob(await workbookImage(record)).arrayBuffer());
+        const photo = new Uint8Array(await dataUrlBlob((await workbookImage(record, 320)).dataUrl).arrayBuffer());
         const link = photoLinks.get(record.id);
         cells.push(new TableCell({
           children: [new Paragraph({
@@ -1806,8 +1815,8 @@ export default function App() {
         setGoogleProgress('Building the Excel workbook…');
         const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.xlsx' : 'imei-scanner-export.xlsx');
-        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Excel export.' : `Excel downloaded with ${rows.length} record(s).`);
-        setToast(androidBridge ? 'Choose where to save the Excel file.' : `Excel downloaded with ${rows.length} record(s).`);
+        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Excel export.' : `Excel downloaded with ${rows.length} record(s)${includePhotos ? ' and embedded photos' : ''}.`);
+        setToast(androidBridge ? 'Choose where to save the Excel file.' : `Excel downloaded with ${rows.length} record(s)${includePhotos ? ' and embedded photos' : ''}.`);
       } else if (exportFormat === 'word') {
         setGoogleProgress('Building the Word document…');
         const file = await createWordReport(rows, includePhotos, photoLinks, personGroups, reportLayout);
@@ -1946,8 +1955,9 @@ export default function App() {
       setDownloadStatus('No records are included. Change the filter or check records in the preview.');
       return;
     }
+    setPhotoDownloads([]);
 
-    if (reportLayout === 'person_photo') {
+    if (reportLayout === 'person_photo' && exportFormat !== 'excel') {
       const picker = saveToFolder ? (window as any).showDirectoryPicker : undefined;
       let folderChoice: Promise<any> | undefined;
       try { folderChoice = picker ? picker.call(window, { mode: 'readwrite' }) : undefined; }
@@ -2250,13 +2260,15 @@ export default function App() {
               <span>Information to include</span>
               <select value={reportLayout} onChange={e => { setReportLayout(e.target.value as typeof reportLayout); setDownloadStatus(''); }}>
                 <option value="simple">IMEI and model only</option>
-                <option value="person_photo">IMEI, model, person and photo download</option>
+                <option value="person_photo">IMEI, model, person and photos</option>
               </select>
             </label>
             {reportLayout === 'person_photo' && (
               <>
-                <div className="download-status">Download the report and then use the photo buttons below to save each image. Google Sheets cannot open links to local photos.</div>
-                {typeof (window as any).showDirectoryPicker === 'function' && (
+                <div className="download-status">{exportFormat === 'excel'
+                  ? 'The Excel file includes each matching photo beside its IMEI. On desktop Excel, right-click a picture and choose Save as Picture. Excel on phones may not offer that action; for an individual file, open the record in Scanned records and tap Download photo.'
+                  : 'Download the report and then use the photo buttons below to save each image. Google Sheets cannot open links to local photos.'}</div>
+                {exportFormat !== 'excel' && typeof (window as any).showDirectoryPicker === 'function' && (
                   <label className="auto-download-toggle">
                     <input type="checkbox" checked={saveToFolder} onChange={e => setSaveToFolder(e.target.checked)} />
                     <span><b>Save report and photos to a folder</b><small>Choose an ordinary folder, such as one you created inside Documents.</small></span>

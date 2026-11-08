@@ -1,19 +1,6 @@
 name: Android APK
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'android-v*'
-    paths:
-      - 'android/**'
-      - 'src/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:

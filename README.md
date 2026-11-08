@@ -18,7 +18,7 @@ Android may pause and retry queued work when it restricts background activity, a
 - Each new upload skips exact copies of a photo and removes later rows with the same readable 15-digit IMEI within that upload. Rows without a readable IMEI remain for review. Older saved uploads are not compared or deleted.
 - Manual exports only; scanning does not start downloads automatically.
 - Numbered photos, selected-only downloads, and image names matched to the `#3`-starting record numbers.
-- Excel and Word exports with optional embedded photos, plus CSV and Google Sheets exports.
+- Excel with pictures downloads one `.xlsx` file with each record's photo (or matching crop) beside its IMEI. Photos keep their proportions and remain embedded at up to 1200 pixels on the longest side. Excel desktop documents **Save as Picture** in the picture's right-click menu; Excel mobile image saving has not been verified. For a separate image file, open its record in the app and choose **Download photo**. Word, CSV, and Google Sheets-compatible exports remain available.
 - Person groups with editable names, per-record assignment, and person tabs in Excel/Google Sheets.
 - Photo exports can save the report, photo gallery HTML, and record photos to a folder when the browser supports folder selection. Other browsers provide separate downloads for the report, the self-contained HTML gallery, and each photo. Split records use the cropped picture.
 - Best-effort device model classification from OCR text and filenames; unknown models can be edited.
