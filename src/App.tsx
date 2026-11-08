@@ -939,15 +939,18 @@ export default function App() {
       let newRows: RecordItem[] = [];
       let addedCount = 0;
       let needsReviewCount = 0;
+      let failedFiles = 0;
       const knownImeis = new Set(records.map(record => record.imei).filter(Boolean));
       let nextNumber = records.reduce((max, record) => Math.max(max, record.number), 2) + 1;
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        const beforeCount = newRows.length;
 
         setProgress(
           `Scanning ${i + 1} of ${files.length}: ${file.name}`
         );
+        try {
 
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -1059,6 +1062,12 @@ export default function App() {
           needsReviewCount += completed.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
           setRecords(old => [...old, ...completed]);
         }
+        } catch (error) {
+          if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'UnknownError')) throw error;
+          console.error(`Could not scan ${file.name}`, error);
+          newRows = newRows.slice(0, beforeCount);
+          failedFiles++;
+        }
         setCompletedFiles(i + 1);
         if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
       }
@@ -1075,7 +1084,7 @@ export default function App() {
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`Finished scanning ${addedCount} record(s). Duplicate IMEIs are skipped.${reviewMessage}`);
+      setToast(`Finished scanning ${addedCount} record(s). Duplicate IMEIs are skipped.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       setToast(
