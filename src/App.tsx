@@ -786,6 +786,10 @@ export default function App() {
   const [saveToFolder, setSaveToFolder] = useState(false);
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [imeiFilter, setImeiFilter] = useState<'all' | 'with' | 'without'>('all');
+  const [exportExcludedIds, setExportExcludedIds] = useState<string[]>([]);
+  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [exportSearch, setExportSearch] = useState('');
+  const [exportPreviewLimit, setExportPreviewLimit] = useState(30);
   const [reportLayout, setReportLayout] = useState<'simple' | 'person_photo'>('simple');
   const includePhotos = reportLayout === 'person_photo';
   const compactExport = false;
@@ -892,6 +896,15 @@ export default function App() {
   useEffect(() => { setRecordPage(1); }, [filter, query, personFilter]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedRows = records.filter(r => selectedIdSet.has(r.id));
+  const exportExcludedSet = useMemo(() => new Set(exportExcludedIds), [exportExcludedIds]);
+  const exportCandidates = (selectedOnly ? selectedRows : records).filter(record =>
+    imeiFilter === 'all' || (imeiFilter === 'with' ? !!record.imei : !record.imei)
+  );
+  const exportRows = exportCandidates.filter(record => !exportExcludedSet.has(record.id));
+  const searchedExportRows = exportCandidates.filter(record =>
+    `${record.number} ${record.pictureId} ${record.imei} ${record.model} ${personTitle(record, personGroups)}`
+      .toLowerCase().includes(exportSearch.trim().toLowerCase())
+  );
   const recordById = useMemo(() => new Map(records.map(record => [record.id, record])), [records]);
   const reviewRecords = reviewIds.map(id => recordById.get(id)).filter((record): record is RecordItem => !!record);
   const reviewIndex = selected ? reviewRecords.findIndex(record => record.id === selected.id) : -1;
@@ -1366,7 +1379,11 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      setToast('Export failed. Check Google Drive access and try again.');
+      const message = exportFormat === 'sheets'
+        ? 'Google Sheets export failed. Try the Excel download instead.'
+        : `Could not create the ${exportFormat.toUpperCase()} file. Try fewer records or another format.`;
+      setDownloadStatus(message);
+      setToast(message);
     } finally {
       setSyncing(false);
       setGoogleProgress('');
@@ -1440,6 +1457,7 @@ export default function App() {
         return;
       }
       setDownloadStatus('Could not prepare the spreadsheet and photos. Please try again.');
+      setToast('Could not prepare the spreadsheet and photos. Try fewer records.');
     } finally {
       setSyncing(false);
       setGoogleProgress('');
@@ -1447,11 +1465,9 @@ export default function App() {
   }
 
   function exportChosen() {
-    const rows = (selectedOnly ? selectedRows : records).filter(record =>
-      imeiFilter === 'all' || (imeiFilter === 'with' ? !!record.imei : !record.imei)
-    );
+    const rows = exportRows;
     if (!rows.length) {
-      setToast(selectedOnly ? 'Select at least one scanned record first.' : 'There are no records to export.');
+      setDownloadStatus('No records are included. Change the filter or check records in the preview.');
       return;
     }
 
@@ -1699,8 +1715,8 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={selectedOnly}
-                disabled={!selectedRows.length}
-                onChange={e => setSelectedOnly(e.target.checked)}
+                disabled={!selectedRows.length && !selectedOnly}
+                onChange={e => { setSelectedOnly(e.target.checked); setExportExcludedIds([]); setDownloadStatus(''); }}
               />
               <span>
                 <b>Export selected records only ({selectedRows.length})</b>
@@ -1729,12 +1745,56 @@ export default function App() {
 
             <label className="export-format-picker">
               <span>Records to export</span>
-              <select value={imeiFilter} onChange={e => setImeiFilter(e.target.value as typeof imeiFilter)}>
-                <option value="all">All records</option>
+              <select value={imeiFilter} onChange={e => { setImeiFilter(e.target.value as typeof imeiFilter); setDownloadStatus(''); }}>
+                <option value="all">All records ({selectedOnly ? selectedRows.length : records.length})</option>
                 <option value="with">Only records with IMEI</option>
                 <option value="without">Only records without IMEI</option>
               </select>
             </label>
+
+            <div className="export-preview">
+              <button
+                type="button"
+                className="export-preview-toggle"
+                aria-expanded={exportPreviewOpen}
+                aria-controls="export-record-list"
+                onClick={() => setExportPreviewOpen(open => !open)}
+              >
+                <span>{exportRows.length} of {exportCandidates.length} matching records included</span>
+                <span>{exportPreviewOpen ? 'Hide list ▴' : 'Choose records ▾'}</span>
+              </button>
+              {exportPreviewOpen && <div id="export-record-list" className="export-preview-content">
+                <input
+                  className="export-preview-search"
+                  aria-label="Find a record to include in export"
+                  placeholder="Find IMEI, model, picture ID, or person"
+                  value={exportSearch}
+                  onChange={event => { setExportSearch(event.target.value); setExportPreviewLimit(30); }}
+                />
+                <div className="export-preview-actions">
+                  <button type="button" disabled={!searchedExportRows.length} onClick={() => {
+                    const ids = new Set(searchedExportRows.map(record => record.id));
+                    setExportExcludedIds(old => old.filter(id => !ids.has(id)));
+                  }}>Include all matches</button>
+                  <button type="button" disabled={!searchedExportRows.length} onClick={() => {
+                    setExportExcludedIds(old => [...new Set([...old, ...searchedExportRows.map(record => record.id)])]);
+                  }}>Exclude all matches</button>
+                </div>
+                {searchedExportRows.length ? <div className="export-preview-list">
+                  {searchedExportRows.slice(0, exportPreviewLimit).map(record => <label key={record.id} className="export-preview-row">
+                    <input
+                      type="checkbox"
+                      checked={!exportExcludedSet.has(record.id)}
+                      onChange={event => setExportExcludedIds(old => event.target.checked
+                        ? old.filter(id => id !== record.id)
+                        : [...old, record.id])}
+                    />
+                    <span><strong>#{record.number} · {record.imei || 'No IMEI'}</strong><small>{exportModel(record.model) || 'Unknown model'} · {record.pictureId}</small></span>
+                  </label>)}
+                  {searchedExportRows.length > exportPreviewLimit && <button type="button" className="textbtn" onClick={() => setExportPreviewLimit(count => count + 30)}>Show more records</button>}
+                </div> : <p className="export-preview-empty">No matching records. Try another search or filter.</p>}
+              </div>}
+            </div>
 
             <label className="export-format-picker">
               <span>Export format</span>
@@ -1754,11 +1814,11 @@ export default function App() {
 
             <button
               className="primary export-button"
-              disabled={syncing || (selectedOnly ? !selectedRows.length : !records.length)}
+              disabled={syncing || !exportRows.length}
               onClick={exportChosen}
             >
               {syncing ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />}
-              {syncing ? googleProgress || 'Preparing export…' : `Export ${selectedOnly ? 'selected' : 'all'} records`}
+              {syncing ? googleProgress || 'Preparing export…' : `Export ${exportRows.length} record${exportRows.length === 1 ? '' : 's'}`}
             </button>
             {downloadStatus && <div className="download-status" role="status">{downloadStatus}</div>}
             {photoDownloads.length > 0 && (
