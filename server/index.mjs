@@ -3,16 +3,18 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import { createScanner } from './scan.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const dataRoot = resolve(process.env.IMEI_DATA_DIR || join(root, 'server-data'));
 const jobsRoot = join(dataRoot, 'jobs');
 const port = Number(process.env.PORT || 8787);
-const host = process.env.IMEI_HOST || '127.0.0.1';
+const host = process.env.IMEI_HOST || (process.argv.includes('--lan') ? '0.0.0.0' : '127.0.0.1');
 const allowedOrigins = new Set(['https://cjbarnes29.github.io', 'http://localhost:5173', 'http://127.0.0.1:5173']);
 let accessKey = '';
 let processing = false;
+const stoppedJobs = new Set();
 
 const jobPath = id => join(jobsRoot, id);
 const manifestPath = id => join(jobPath(id), 'manifest.json');
@@ -82,6 +84,10 @@ async function processQueue() {
         job.nextNumber = Math.max(2, ...rows.map(row => row.number || 2)) + 1;
         const seen = new Set(rows.map(row => row.imei).filter(Boolean));
         for (let index = job.completed; index < job.count; index++) {
+          if (stoppedJobs.has(id) || (await loadJob(id))?.status === 'stopped') {
+            job.status = 'stopped';
+            break;
+          }
           if (rows.some(row => row.photoIndex === index)) {
             job.completed = index + 1;
             await atomicJson(manifestPath(id), job);
@@ -90,6 +96,10 @@ async function processQueue() {
           try {
             const source = join(jobPath(id), 'input', `${index}.bin`);
             const results = await scanner.scan(source, job.files[index].name, job.mode);
+            if (stoppedJobs.has(id) || (await loadJob(id))?.status === 'stopped') {
+              job.status = 'stopped';
+              break;
+            }
             for (const result of results) {
               if (result.imei && seen.has(result.imei)) continue;
               if (result.imei) seen.add(result.imei);
@@ -105,10 +115,16 @@ async function processQueue() {
           }
           job.completed = index + 1;
           job.resultCount = rows.length;
+          if (stoppedJobs.has(id)) job.status = 'stopped';
+          await atomicJson(manifestPath(id), job);
+          if (job.status === 'stopped') break;
+        }
+        if (job.status !== 'stopped' && !stoppedJobs.has(id)) job.status = 'completed';
+        await atomicJson(manifestPath(id), job);
+        if (stoppedJobs.has(id) && job.status !== 'stopped') {
+          job.status = 'stopped';
           await atomicJson(manifestPath(id), job);
         }
-        job.status = 'completed';
-        await atomicJson(manifestPath(id), job);
       } catch (error) {
         console.error(`Job ${id} paused:`, error);
         job.status = 'queued';
@@ -153,7 +169,14 @@ async function handle(request, response) {
   if (request.method === 'OPTIONS') { response.writeHead(origin && !response.hasHeader('Access-Control-Allow-Origin') ? 403 : 204); response.end(); return; }
   const pathname = new URL(request.url, `http://${request.headers.host || 'localhost'}`).pathname;
   if (!pathname.startsWith('/api/')) return serveStatic(pathname, response);
-  if (pathname === '/api/health') return json(response, 200, { running: true, background: true });
+  if (pathname === '/api/health') {
+    const addresses = Object.entries(networkInterfaces())
+      .filter(([name]) => !/vmware|virtual|vethernet|docker|wsl|loopback/i.test(name))
+      .flatMap(([, items]) => items || [])
+      .filter(item => item.family === 'IPv4' && !item.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address))
+      .map(item => `http://${item.address}:${port}/`);
+    return json(response, 200, { running: true, background: true, phoneAddresses: host === '0.0.0.0' ? addresses : [] });
+  }
   if (!authorized(request)) return json(response, 401, { error: 'Enter the laptop scanner access code.' });
 
   if (pathname === '/api/jobs' && request.method === 'GET') {
@@ -177,7 +200,7 @@ async function handle(request, response) {
     return json(response, 201, { job: publicJob(job) });
   }
 
-  const match = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})(?:\/(photos|start|records|images)(?:\/([^/]+))?)?$/);
+  const match = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})(?:\/(photos|start|stop|records|images)(?:\/([^/]+))?)?$/);
   if (!match) return json(response, 404, { error: 'Not found' });
   const [, id, action, item] = match;
   const job = await loadJob(id);
@@ -200,6 +223,13 @@ async function handle(request, response) {
     await atomicJson(manifestPath(id), job);
     setImmediate(() => void processQueue());
     return json(response, 202, { job: publicJob(job) });
+  }
+  if (action === 'stop' && request.method === 'POST') {
+    if (!['uploading', 'queued', 'processing'].includes(job.status)) return json(response, 409, { error: 'This scan has already finished.' });
+    stoppedJobs.add(id);
+    job.status = 'stopped';
+    await atomicJson(manifestPath(id), job);
+    return json(response, 200, { job: publicJob(job) });
   }
   if (action === 'records' && request.method === 'GET') return json(response, 200, { records: await readJson(recordsPath(id), []) });
   if (action === 'images' && request.method === 'GET' && /^[a-f0-9-]{36}\.jpg$/.test(item || '')) {

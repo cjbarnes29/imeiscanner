@@ -38,6 +38,31 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 const digits = (s: string) => s.replace(/\D/g, '');
 
+function newId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(value); return true; } catch { /* Use the text-selection fallback. */ }
+  }
+  const field = document.createElement('textarea');
+  field.value = value;
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.appendChild(field);
+  field.focus();
+  field.select();
+  const copied = document.execCommand('copy');
+  field.remove();
+  return copied;
+}
+
 function removeDuplicateRecords(rows: RecordItem[]) {
   const seen = new Set<string>();
   return rows.filter(row => {
@@ -621,7 +646,7 @@ async function createInventoryWorkbook(
 
 async function uploadPhotoToDrive(record: RecordItem, token: string, folderId: string) {
   const photo = dataUrlBlob(recordPhoto(record));
-  const boundary = `imei-photo-${crypto.randomUUID()}`;
+  const boundary = `imei-photo-${newId()}`;
   const metadata = JSON.stringify({
     name: photoFilename(record),
     mimeType: photo.type || 'image/jpeg',
@@ -771,12 +796,14 @@ export default function App() {
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
   const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
-  const [laptopUrl, setLaptopUrl] = useState(() => localStorage.getItem('imei-lens-laptop-url') || 'http://127.0.0.1:8787');
+  const [laptopUrl, setLaptopUrl] = useState(() => localStorage.getItem('imei-lens-laptop-url') || (window.location.hostname === 'cjbarnes29.github.io' ? 'http://127.0.0.1:8787' : window.location.origin));
   const [laptopKey, setLaptopKey] = useState(() => localStorage.getItem('imei-lens-laptop-key') || '');
   const [laptopJobId, setLaptopJobId] = useState(() => localStorage.getItem('imei-lens-laptop-job') || '');
   const [laptopUploading, setLaptopUploading] = useState(false);
   const [laptopMessage, setLaptopMessage] = useState('');
   const [laptopJob, setLaptopJob] = useState<{ status: string; count: number; completed: number; resultCount: number; failed: number } | null>(null);
+  const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
+  const phoneOnLaptopNetwork = window.matchMedia('(pointer: coarse)').matches && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(window.location.hostname);
   const importingLaptop = useRef(false);
   const [filter, setFilter] = useState('All');
   const [query, setQuery] = useState('');
@@ -817,6 +844,12 @@ export default function App() {
   const saveChain = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => { localStorage.setItem('imei-lens-laptop-url', laptopUrl); }, [laptopUrl]);
+  useEffect(() => {
+    if (!['127.0.0.1', 'localhost'].includes(window.location.hostname)) return;
+    void fetch('/api/health').then(response => response.ok ? response.json() : null)
+      .then(data => setPhoneAddresses(data?.phoneAddresses || []))
+      .catch(() => {});
+  }, []);
   useEffect(() => { localStorage.setItem('imei-lens-laptop-key', laptopKey); }, [laptopKey]);
   useEffect(() => {
     if (laptopJobId) localStorage.setItem('imei-lens-laptop-job', laptopJobId);
@@ -956,7 +989,7 @@ export default function App() {
   function addPersonGroup() {
     const next = personGroups.length + 1;
     const person = {
-      id: `person-${crypto.randomUUID()}`,
+      id: `person-${newId()}`,
       label: `Person ${next}`,
       name: ''
     };
@@ -1014,7 +1047,7 @@ export default function App() {
   }
 
   async function startLaptopScan() {
-    if (!files.length || busy || laptopUploading) return;
+    if (!files.length || busy || laptopUploading || laptopJobId) return;
     if (!laptopKey.trim()) { setLaptopMessage('Enter the access code from server-data/access-code.txt on your laptop.'); return; }
     if (files.length > 500) { setLaptopMessage('Choose up to 500 photos per background scan.'); return; }
     setLaptopUploading(true);
@@ -1043,6 +1076,19 @@ export default function App() {
     } finally { setLaptopUploading(false); }
   }
 
+  async function stopLaptopScan() {
+    if (!laptopJobId) return;
+    setLaptopMessage('Stopping the background scan…');
+    try {
+      const response = await laptopRequest(`/api/jobs/${laptopJobId}/stop`, { method: 'POST' });
+      const { job } = await response.json();
+      setLaptopJob(job);
+      setLaptopMessage('Scan stopped. Finished photos will still appear in Scanned records.');
+    } catch (error) {
+      setLaptopMessage(error instanceof Error ? `Could not stop the scan: ${error.message}` : 'Could not stop the scan.');
+    }
+  }
+
   useEffect(() => {
     if (!laptopJobId || !laptopKey.trim() || !inventoryLoaded) return;
     let cancelled = false;
@@ -1053,7 +1099,7 @@ export default function App() {
         const { job } = await response.json();
         if (cancelled) return;
         setLaptopJob(job);
-        if (job.status !== 'completed') return;
+        if (job.status !== 'completed' && job.status !== 'stopped') return;
         importingLaptop.current = true;
         setLaptopMessage(`Scan finished. Importing ${job.resultCount} record(s) into this browser…`);
         const results = await laptopRequest(`/api/jobs/${laptopJobId}/records`);
@@ -1083,7 +1129,7 @@ export default function App() {
           });
           return added.length ? [...old, ...added] : old;
         });
-        setLaptopMessage(`Imported ${imported.length} record(s). ${job.failed ? `${job.failed} photo(s) could not be read.` : ''}`);
+        setLaptopMessage(`${job.status === 'stopped' ? 'Scan stopped.' : 'Scan finished.'} Imported ${imported.length} record(s). ${job.failed ? `${job.failed} photo(s) could not be read.` : ''}`);
         setLaptopJobId('');
       } catch (error) {
         if (!cancelled) setLaptopMessage(error instanceof Error ? `Waiting for laptop scanner: ${error.message}` : 'Waiting for laptop scanner to reconnect.');
@@ -1163,7 +1209,7 @@ export default function App() {
         }
         const cropNeedsReview = imeis.length > 1 && croppedPhotos.size !== imeis.length;
 
-        const pictureId = `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
         for (const detectedImei of cropNeedsReview ? [''] : imeis.length ? imeis : ['']) {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
@@ -1182,8 +1228,8 @@ export default function App() {
         if (/^\d{15}$/.test(imei)) knownImeis.add(imei);
 
         newRows.push({
-          id: crypto.randomUUID(),
-          pictureId: `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+          id: newId(),
+          pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
           sourcePictureId: pictureId,
           number: nextNumber++,
           personId: activePersonId,
@@ -1300,8 +1346,8 @@ export default function App() {
       }
       const patch: Partial<RecordItem> = { cropDataUrl, imei, raw, cropNeedsReview: !imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
-        const sourcePictureId = selected.sourcePictureId || `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-        const added: RecordItem = { ...selected, ...patch, id: crypto.randomUUID(), pictureId: `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, sourcePictureId, number: Math.max(2, ...records.map(r => r.number)) + 1, duplicate: false, createdAt: new Date().toISOString() };
+        const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
+        const added: RecordItem = { ...selected, ...patch, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: Math.max(2, ...records.map(r => r.number)) + 1, duplicate: false, createdAt: new Date().toISOString() };
         setRecords(old => [...old.map(r => r.id === selected.id ? { ...r, sourcePictureId } : r), added]);
         setReviewIds(old => { const index = old.indexOf(selected.id); return index < 0 ? [...old, added.id] : [...old.slice(0, index + 1), added.id, ...old.slice(index + 1)]; });
         setSelected(added);
@@ -1369,9 +1415,9 @@ export default function App() {
         setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
         setToast(`Crop ${crops.length} saved. Select the next label.`);
       } else {
-        const sourcePictureId = selected.sourcePictureId || `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
         const nextNumber = Math.max(2, ...records.map(r => r.number)) + 1;
-        const replacements: RecordItem[] = crops.map((crop, index) => ({ ...selected, id: crypto.randomUUID(), pictureId: `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1, cropDataUrl: crop.cropDataUrl, imei: crop.imei, raw: crop.raw, cropNeedsReview: !crop.imei, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review', duplicate: false, createdAt: new Date().toISOString() }));
+        const replacements: RecordItem[] = crops.map((crop, index) => ({ ...selected, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1, cropDataUrl: crop.cropDataUrl, imei: crop.imei, raw: crop.raw, cropNeedsReview: !crop.imei, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review', duplicate: false, createdAt: new Date().toISOString() }));
         setRecords(old => old.flatMap(r => r.id === selected.id ? replacements : [r]));
         setSelectedIds(old => old.filter(id => id !== selected.id));
         setReviewSplit(null);
@@ -1460,7 +1506,7 @@ export default function App() {
         if (!token) throw new Error('Google authorization is required for Sheets export.');
         setGoogleProgress('Building the model and person tabs…');
         const workbook = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
-        const boundary = `imei-lens-${crypto.randomUUID()}`;
+        const boundary = `imei-lens-${newId()}`;
         const metadata = JSON.stringify({
           name: `IMEI Scanner - ${new Date().toISOString().slice(0, 10)}`,
           mimeType: 'application/vnd.google-apps.spreadsheet'
@@ -1783,18 +1829,18 @@ export default function App() {
 
             <button
               className="primary scan-button"
-              disabled={!files.length || busy || !inventoryLoaded}
-              onClick={scan}
+              disabled={!files.length || busy || laptopUploading || (phoneOnLaptopNetwork && !!laptopJobId) || !inventoryLoaded}
+              onClick={() => phoneOnLaptopNetwork ? void startLaptopScan() : void scan()}
             >
-              {busy ? (
+              {busy || laptopUploading ? (
                 <>
                   <LoaderCircle className="spin" size={17} />
-                  Scanning photos…
+                  {laptopUploading ? 'Uploading photos to laptop…' : 'Scanning photos…'}
                 </>
               ) : (
                 <>
                   <ScanLine size={17} />
-                  Extract IMEI from {files.length || 0} photo(s)
+                  {phoneOnLaptopNetwork ? `Scan ${files.length || 0} photo(s) on laptop` : `Extract IMEI from ${files.length || 0} photo(s)`}
                 </>
               )}
             </button>
@@ -1808,19 +1854,21 @@ export default function App() {
               </div>
             )}
 
-            <details className="laptop-scan">
+            <details className="laptop-scan" open={phoneOnLaptopNetwork}>
               <summary>Keep scanning after closing the browser</summary>
-              <p>Start the laptop scanner first. Upload every photo, then close this page while your laptop stays awake. Results return here when you reopen the app.</p>
+              <p>On a phone, use the laptop address below while both devices are on the same private Wi-Fi. Wait for <strong>Upload finished</strong>; then you may minimize or close the phone app. Your laptop keeps scanning until completion or you press Stop. Reopen this same address on the phone to see the results.</p>
+              {phoneAddresses.length > 0 && <div className="phone-addresses">Phone address on this Wi-Fi: {phoneAddresses.map(address => <span key={address}><a href={address}>{address}</a><button type="button" className="subtle-btn" onClick={() => void copyText(address).then(copied => setLaptopMessage(copied ? 'Phone address copied. Open it on your phone using the same Wi-Fi.' : 'Could not copy the phone address.'))}>Copy</button></span>)}</div>}
               <label>Laptop scanner address
                 <input type="url" value={laptopUrl} onChange={event => setLaptopUrl(event.target.value)} placeholder="http://127.0.0.1:8787" />
               </label>
               <label>Access code from server-data/access-code.txt
                 <input type="password" value={laptopKey} onChange={event => setLaptopKey(event.target.value)} autoComplete="off" />
               </label>
-              <button type="button" className="subtle-btn laptop-start" disabled={!files.length || busy || laptopUploading || !inventoryLoaded} onClick={startLaptopScan}>
+              <button type="button" className="subtle-btn laptop-start" disabled={!files.length || busy || laptopUploading || !!laptopJobId || !inventoryLoaded} onClick={startLaptopScan}>
                 {laptopUploading ? <LoaderCircle className="spin" size={16} /> : <CloudUpload size={16} />}
                 {laptopUploading ? 'Uploading to laptop…' : `Scan ${files.length} photo${files.length === 1 ? '' : 's'} on laptop`}
               </button>
+              {laptopJobId && laptopJob && !['completed', 'stopped'].includes(laptopJob.status) && <button type="button" className="subtle-btn laptop-stop" onClick={() => void stopLaptopScan()}>Stop background scan</button>}
               {laptopJob && <div className="laptop-progress">Background scan: {laptopJob.completed} of {laptopJob.count} photos · {laptopJob.resultCount} record(s) · {laptopJob.status}</div>}
               {laptopMessage && <div className="laptop-progress" role="status">{laptopMessage}</div>}
             </details>
@@ -2195,10 +2243,7 @@ export default function App() {
                         <button
                           className="row-action"
                           title="Copy IMEI"
-                          onClick={() => {
-                            navigator.clipboard.writeText(r.imei);
-                            setToast('IMEI copied.');
-                          }}
+                          onClick={() => void copyText(r.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}
                         >
                           <Copy size={14} />
                         </button>
