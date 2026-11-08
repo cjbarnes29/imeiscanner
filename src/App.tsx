@@ -257,22 +257,23 @@ function ocrLines(page: Awaited<ReturnType<Awaited<ReturnType<typeof createWorke
   );
 }
 
-async function createCroppedPhotos(dataUrl: string, regions: CropRegion[], width: number, height: number) {
-  const image = new Image();
-  image.src = dataUrl;
-  await image.decode();
-  const scaleX = image.naturalWidth / width;
-  const scaleY = image.naturalHeight / height;
+async function createCroppedPhotos(image: HTMLCanvasElement | string, regions: CropRegion[], width: number, height: number) {
+  const source = typeof image === 'string' ? new Image() : image;
+  if (typeof image === 'string') { const photo = source as HTMLImageElement; photo.src = image; await photo.decode(); }
+  const imageWidth = source instanceof HTMLImageElement ? source.naturalWidth : source.width;
+  const imageHeight = source instanceof HTMLImageElement ? source.naturalHeight : source.height;
+  const scaleX = imageWidth / width;
+  const scaleY = imageHeight / height;
   const result = new Map<string, string>();
   for (const region of regions) {
     const canvas = document.createElement('canvas');
     const x = Math.round(region.x * scaleX);
     const y = Math.round(region.y * scaleY);
-    canvas.width = Math.max(1, Math.min(image.naturalWidth - x, Math.round(region.width * scaleX)));
-    canvas.height = Math.max(1, Math.min(image.naturalHeight - y, Math.round(region.height * scaleY)));
+    canvas.width = Math.max(1, Math.min(imageWidth - x, Math.round(region.width * scaleX)));
+    canvas.height = Math.max(1, Math.min(imageHeight - y, Math.round(region.height * scaleY)));
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Could not create the separated photos.');
-    context.drawImage(image, x, y, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+    context.drawImage(source, x, y, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
     result.set(region.imei, canvas.toDataURL('image/jpeg', 0.9));
   }
   return result;
@@ -293,7 +294,7 @@ async function rotatePhoto(dataUrl: string, direction: 'left' | 'right') {
   return canvas.toDataURL('image/jpeg', 0.95);
 }
 
-function createOcrImage(file: File): Promise<HTMLCanvasElement> {
+function createOcrImage(file: File, maxDimension = 2400): Promise<HTMLCanvasElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     const url = URL.createObjectURL(file);
@@ -301,7 +302,7 @@ function createOcrImage(file: File): Promise<HTMLCanvasElement> {
     image.onload = () => {
       URL.revokeObjectURL(url);
 
-      const scale = Math.min(3, 2400 / Math.max(image.naturalWidth, image.naturalHeight));
+      const scale = Math.min(3, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
       canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -328,16 +329,52 @@ function createOcrImage(file: File): Promise<HTMLCanvasElement> {
   });
 }
 
-async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cropDataUrl: string) {
+function createScanImages(file: File, maxDimension: number): Promise<{ color: HTMLCanvasElement; enhanced: HTMLCanvasElement }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      const longest = Math.max(image.naturalWidth, image.naturalHeight);
+      const colorScale = Math.min(1, maxDimension / longest);
+      const enhancedScale = Math.min(3, maxDimension / longest);
+      const color = document.createElement('canvas');
+      color.width = Math.max(1, Math.round(image.naturalWidth * colorScale));
+      color.height = Math.max(1, Math.round(image.naturalHeight * colorScale));
+      const enhanced = document.createElement('canvas');
+      enhanced.width = Math.max(1, Math.round(image.naturalWidth * enhancedScale));
+      enhanced.height = Math.max(1, Math.round(image.naturalHeight * enhancedScale));
+      const colorContext = color.getContext('2d');
+      const enhancedContext = enhanced.getContext('2d');
+      if (!colorContext || !enhancedContext) { reject(new Error('Could not prepare this photo.')); return; }
+      colorContext.drawImage(image, 0, 0, color.width, color.height);
+      enhancedContext.filter = 'grayscale(1) contrast(1.45)';
+      enhancedContext.drawImage(image, 0, 0, enhanced.width, enhanced.height);
+      resolve({ color, enhanced });
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('This image format could not be opened.')); };
+    image.src = url;
+  });
+}
+
+function scaleOcrLines(lines: OcrLine[], from: HTMLCanvasElement, to: HTMLCanvasElement): OcrLine[] {
+  const x = to.width / from.width, y = to.height / from.height;
+  return lines.map(line => ({ ...line, bbox: {
+    x0: line.bbox.x0 * x, x1: line.bbox.x1 * x,
+    y0: line.bbox.y0 * y, y1: line.bbox.y1 * y
+  } }));
+}
+
+async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cropDataUrl: string, mode: 'fast' | 'standard' | 'detailed' = 'detailed') {
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
   let raw = (await worker.recognize(cropDataUrl)).data.text || '';
   let first = extractImei1s(raw);
-  if (first.length !== 1 || !luhnValid(first[0])) {
+  if (mode !== 'fast' && (first.length !== 1 || !luhnValid(first[0]))) {
     const enhanced = await createOcrImage(new File([dataUrlBlob(cropDataUrl)], 'crop.jpg', { type: 'image/jpeg' }));
     const enhancedText = (await worker.recognize(enhanced)).data.text || '';
     if (enhancedText) raw += `\n${enhancedText}`;
     first = extractImei1s(raw);
-    if (first.length !== 1 || !luhnValid(first[0])) {
+    if (mode === 'detailed' && (first.length !== 1 || !luhnValid(first[0]))) {
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
       const blockText = (await worker.recognize(enhanced)).data.text || '';
       if (blockText) raw += `\n${blockText}`;
@@ -718,9 +755,12 @@ export default function App() {
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [recordPage, setRecordPage] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
+  const [queueDisplayCount, setQueueDisplayCount] = useState(30);
+  const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
+  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
   const [filter, setFilter] = useState('All');
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -930,6 +970,7 @@ export default function App() {
 
     setBusy(true);
     setCompletedFiles(0);
+    const startedAt = performance.now();
 
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
 
@@ -952,15 +993,8 @@ export default function App() {
         );
         try {
 
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        const ocrImage = await createOcrImage(file);
+        const { color, enhanced: ocrImage } = await createScanImages(file, scanMode === 'fast' ? 1600 : scanMode === 'detailed' ? 3000 : 2400);
+        const dataUrl = color.toDataURL('image/jpeg', 0.9);
         await worker.setParameters({
           tessedit_pageseg_mode: PSM.SPARSE_TEXT,
           user_defined_dpi: '300'
@@ -969,34 +1003,23 @@ export default function App() {
         const enhancedResult = await worker.recognize(ocrImage);
         let raw = enhancedResult.data.text || '';
         let imeis = extractImei1s(raw);
-        let lines = ocrLines(enhancedResult.data);
-        let sourceWidth = ocrImage.width;
-        let sourceHeight = ocrImage.height;
-        let segmentationCanvas = ocrImage;
+        let lines = scaleOcrLines(ocrLines(enhancedResult.data), ocrImage, color);
+        const sourceWidth = color.width;
+        const sourceHeight = color.height;
 
-        {
-          const originalResult = await worker.recognize(dataUrl);
+        if (scanMode === 'detailed' || (scanMode === 'standard' && (imeis.length === 0 || (imeis.length === 1 && !luhnValid(imeis[0]))))) {
+          const originalResult = await worker.recognize(color);
           const originalText = originalResult.data.text || '';
           const originalImeis = extractImei1s(originalText);
           if (originalImeis.length > imeis.length || (!imeis.length && originalText)) {
             raw = originalText;
             imeis = originalImeis;
             lines = ocrLines(originalResult.data);
-            const image = new Image();
-            image.src = dataUrl;
-            await image.decode();
-            sourceWidth = image.naturalWidth;
-            sourceHeight = image.naturalHeight;
-            segmentationCanvas = document.createElement('canvas');
-            segmentationCanvas.width = sourceWidth;
-            segmentationCanvas.height = sourceHeight;
-            const context = segmentationCanvas.getContext('2d');
-            if (context) context.drawImage(image, 0, 0);
           }
         }
 
-        const mostlyWhite = looksMostlyWhite(ocrImage);
-        const segmentationContext = segmentationCanvas.getContext('2d');
+        const mostlyWhite = looksMostlyWhite(color);
+        const segmentationContext = color.getContext('2d');
         const frame = imeis.length > 1 && segmentationContext
           ? segmentationContext.getImageData(0, 0, sourceWidth, sourceHeight)
           : undefined;
@@ -1004,7 +1027,7 @@ export default function App() {
         let croppedPhotos = new Map<string, string>();
         if (regions.length === imeis.length && imeis.length > 1) {
           try {
-            croppedPhotos = await createCroppedPhotos(dataUrl, regions, sourceWidth, sourceHeight);
+            croppedPhotos = await createCroppedPhotos(color, regions, sourceWidth, sourceHeight);
           } catch (error) {
             console.error('Unable to split photo', error);
           }
@@ -1015,7 +1038,7 @@ export default function App() {
         for (const detectedImei of cropNeedsReview ? [''] : imeis.length ? imeis : ['']) {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
-        const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl) : { raw, imei: extractPreferredImei(raw) };
+        const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw) };
         const cropRaw = cropResult.raw;
         const imei = cropNeedsReview ? '' : cropResult.imei;
         const regionText = region && cropDataUrl ? lines.filter(line => {
@@ -1084,7 +1107,7 @@ export default function App() {
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`Finished scanning ${addedCount} record(s). Duplicate IMEIs are skipped.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`Finished scanning ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds. Duplicate IMEIs are skipped.${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       setToast(
@@ -1592,7 +1615,7 @@ export default function App() {
                 </div>
 
                 <div className="filelist">
-                  {files.map((f, i) => (
+                  {files.slice(0, queueDisplayCount).map((f, i) => (
                     <div className="fileitem" key={`${f.name}-${i}`}>
                       <ImageIcon size={15} />
                       <span>{f.name}</span>
@@ -1608,8 +1631,23 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {files.length > queueDisplayCount && <button className="textbtn" onClick={() => setQueueDisplayCount(count => count + 30)}>Show {Math.min(30, files.length - queueDisplayCount)} more photos</button>}
               </div>
             )}
+
+            <label className="export-format-picker">
+              <span>Scan speed</span>
+              <select value={scanMode} disabled={busy} onChange={event => setScanMode(event.target.value as typeof scanMode)}>
+                <option value="fast">Fast · large batches</option>
+                <option value="standard">Standard · recommended</option>
+                <option value="detailed">Detailed · multiple boxes or difficult labels</option>
+              </select>
+            </label>
+            <p className="scan-mode-note">
+              {scanMode === 'fast' ? 'One OCR pass per photo. Review missed or unclear IMEIs manually.' :
+                scanMode === 'standard' ? 'Runs another pass only when the first result needs it.' :
+                  'Checks every photo twice and retries unclear crops. Best for photos with several labels.'}
+            </p>
 
             <button
               className="primary scan-button"
@@ -1729,11 +1767,12 @@ export default function App() {
                 <button className="subtle-btn" onClick={() => downloadBlob(new Blob([photoGallery], { type: 'text/html;charset=utf-8' }), 'open-photos.html')}>
                   <Download size={15} /> Download photo gallery HTML
                 </button>
-                {photoDownloads.map(record => (
+                {photoDownloads.slice(0, photoDisplayCount).map(record => (
                   <button key={record.id} className="subtle-btn" onClick={() => downloadBlob(dataUrlBlob(recordPhoto(record)), photoFilename(record).replace(/^#/, 'photo-'))}>
                     <Download size={15} /> Photo #{record.number} · {record.imei || 'No IMEI'}
                   </button>
                 ))}
+                {photoDownloads.length > photoDisplayCount && <button className="subtle-btn" onClick={() => setPhotoDisplayCount(count => count + 40)}>Show more photo downloads</button>}
               </div>
             )}
 
