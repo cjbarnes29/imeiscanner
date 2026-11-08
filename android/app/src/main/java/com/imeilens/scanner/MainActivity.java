@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -158,6 +159,37 @@ public final class MainActivity extends Activity {
                     while ((count = input.read(chunk)) != -1) bytes.write(chunk, 0, count);
                 }
                 return "data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP);
+            } catch (Exception error) { return ""; }
+        }
+
+        @JavascriptInterface public String sourceImage(String id) {
+            try {
+                JSONObject job = ScanStore.read(MainActivity.this);
+                JSONArray records = job.optJSONArray("records");
+                JSONArray queue = job.optJSONArray("queue");
+                String uri = "", filename = "";
+                if (records != null) for (int index = 0; index < records.length(); index++) {
+                    JSONObject row = records.optJSONObject(index);
+                    if (row != null && id.equals(row.optString("id"))) {
+                        uri = row.optString("sourceUri");
+                        filename = row.optString("name");
+                        break;
+                    }
+                }
+                if (uri.isEmpty() && queue != null) for (int index = 0; index < queue.length(); index++) {
+                    JSONObject photo = queue.optJSONObject(index);
+                    if (photo != null && filename.equals(photo.optString("name"))) {
+                        uri = photo.optString("uri");
+                        break;
+                    }
+                }
+                if (uri.isEmpty()) return "";
+                Bitmap source = ImageScanner.decode(MainActivity.this, Uri.parse(uri));
+                try {
+                    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                    source.compress(Bitmap.CompressFormat.JPEG, 88, bytes);
+                    return "data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP);
+                } finally { source.recycle(); }
             } catch (Exception error) { return ""; }
         }
 

@@ -15,8 +15,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -40,31 +40,18 @@ final class ImageScanner {
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, false, recognizer));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer));
                 return output;
             }
-            List<Rect> regions = new ArrayList<>();
-            boolean uncertain = false;
-            for (Rect label : labels) {
-                Rect region = stickerBoundary(bitmap, label, labels);
-                if (region == null) { region = conservativeBoundary(bitmap, label, labels); uncertain = true; }
-                regions.add(region);
-            }
-            for (int i = 0; i < regions.size(); i++) {
-                Rect region = regions.get(i);
-                boolean shared = false;
-                for (int j = 0; j < regions.size(); j++) {
-                    if (i != j && Rect.intersects(region, labels.get(j))) shared = true;
-                }
-                if (shared) {
-                    // Keep the full source visible for manual review when sticker boundaries overlap.
-                    output.put(makeRecord(context, bitmap, filename, personId, sourceId, true, recognizer));
-                    return output;
-                }
+            List<Rect> regions = boxRegions(bitmap, labels);
+            if (regions.isEmpty()) {
+                // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer));
+                return output;
             }
             for (Rect region : regions) {
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uncertain, recognizer)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, false, recognizer)); }
                 finally { crop.recycle(); }
             }
             return output;
@@ -72,7 +59,7 @@ final class ImageScanner {
     }
 
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
-                                         String sourceId, boolean cropReview, TextRecognizer recognizer) throws Exception {
+                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer) throws Exception {
         Text ocr = Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
         String raw = ocr.getText();
         String imei = preferredImei(ocr);
@@ -84,6 +71,7 @@ final class ImageScanner {
         row.put("id", id);
         row.put("pictureId", pictureId());
         row.put("sourcePictureId", sourceId);
+        row.put("sourceUri", sourceUri.toString());
         row.put("personId", personId);
         row.put("name", filename);
         row.put("imageName", id + ".jpg");
@@ -102,7 +90,7 @@ final class ImageScanner {
 
     private static String pictureId() { return "PIC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(); }
 
-    private static Bitmap decode(Context context, Uri uri) throws Exception {
+    static Bitmap decode(Context context, Uri uri) throws Exception {
         BitmapFactory.Options bounds = new BitmapFactory.Options(); bounds.inJustDecodeBounds = true;
         try (InputStream stream = context.getContentResolver().openInputStream(uri)) { BitmapFactory.decodeStream(stream, null, bounds); }
         int sample = 1;
@@ -140,60 +128,65 @@ final class ImageScanner {
         return found;
     }
 
-    private static Rect stickerBoundary(Bitmap image, Rect label, List<Rect> labels) {
-        int step = Math.max(4, Math.max(image.getWidth(), image.getHeight()) / 550);
-        int width = (image.getWidth() + step - 1) / step, height = (image.getHeight() + step - 1) / step;
-        int seedX = Math.max(0, Math.min(width - 1, (label.left - label.width() / 5) / step));
-        int seedY = Math.max(0, Math.min(height - 1, (label.top - label.height() * 2) / step));
-        int seed = image.getPixel(Math.min(image.getWidth() - 1, seedX * step), Math.min(image.getHeight() - 1, seedY * step));
-        boolean[] seen = new boolean[width * height];
-        ArrayDeque<Integer> queue = new ArrayDeque<>();
-        queue.add(seedY * width + seedX); seen[seedY * width + seedX] = true;
-        int minX = seedX, maxX = seedX, minY = seedY, maxY = seedY, count = 0;
-        while (!queue.isEmpty()) {
-            int point = queue.removeFirst(), x = point % width, y = point / width;
-            int color = image.getPixel(Math.min(image.getWidth() - 1, x * step), Math.min(image.getHeight() - 1, y * step));
-            if (distance(color, seed) > 55) continue;
-            count++; minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-            for (int next : new int[]{point - 1, point + 1, point - width, point + width}) {
-                if (next < 0 || next >= seen.length || seen[next]) continue;
-                if ((next == point - 1 && x == 0) || (next == point + 1 && x == width - 1)) continue;
-                seen[next] = true; queue.add(next);
-            }
-        }
-        Rect region = new Rect(Math.max(0, (minX - 3) * step), Math.max(0, (minY - 3) * step),
-            Math.min(image.getWidth(), (maxX + 4) * step), Math.min(image.getHeight(), (maxY + 4) * step));
-        if (count < 25 || region.width() < label.width() * 2 || region.height() < label.height() * 3
-            || region.width() * region.height() > image.getWidth() * image.getHeight() * 0.72
-            || !region.contains(label.centerX(), label.centerY())) return null;
-        for (Rect other : labels) if (other != label && Rect.intersects(region, other)) return null;
-        return region;
-    }
-
-    private static int distance(int a, int b) {
-        return Math.abs((a >> 16 & 255) - (b >> 16 & 255)) + Math.abs((a >> 8 & 255) - (b >> 8 & 255))
-            + Math.abs((a & 255) - (b & 255));
-    }
-
-    private static Rect conservativeBoundary(Bitmap image, Rect label, List<Rect> labels) {
+    private static List<Rect> boxRegions(Bitmap image, List<Rect> labels) {
         int width = image.getWidth(), height = image.getHeight();
-        int left = Math.max(0, label.left - Math.max(label.width(), width / 6));
-        int right = Math.min(width, label.right + Math.max(label.width(), width / 6));
-        int top = Math.max(0, label.top - Math.max(label.height() * 3, height / 7));
-        int bottom = Math.min(height, label.bottom + Math.max(label.height() * 8, height / 4));
-        for (Rect other : labels) {
-            if (other == label) continue;
-            int dx = other.centerX() - label.centerX(), dy = other.centerY() - label.centerY();
-            if (Math.abs(dx) >= Math.abs(dy)) {
-                int boundary = (other.centerX() + label.centerX()) / 2;
-                if (dx > 0) right = Math.min(right, boundary); else left = Math.max(left, boundary);
-            } else {
-                int boundary = (other.centerY() + label.centerY()) / 2;
-                if (dy > 0) bottom = Math.min(bottom, boundary); else top = Math.max(top, boundary);
-            }
+        int xSpread = labels.stream().mapToInt(Rect::centerX).max().orElse(0) - labels.stream().mapToInt(Rect::centerX).min().orElse(0);
+        int ySpread = labels.stream().mapToInt(Rect::centerY).max().orElse(0) - labels.stream().mapToInt(Rect::centerY).min().orElse(0);
+        boolean vertical = (double) ySpread / height >= (double) xSpread / width;
+        List<Rect> ordered = new ArrayList<>(labels);
+        ordered.sort(vertical ? Comparator.comparingInt(Rect::centerY) : Comparator.comparingInt(Rect::centerX));
+        int extent = vertical ? height : width;
+        List<Integer> seams = new ArrayList<>();
+        for (int index = 1; index < ordered.size(); index++) {
+            Rect before = ordered.get(index - 1), after = ordered.get(index);
+            int from = vertical ? before.bottom : before.right;
+            int to = vertical ? after.top : after.left;
+            if (to - from < Math.max(18, extent / 70)) return new ArrayList<>();
+            int seam = visibleSeam(image, vertical, from, to);
+            if (seam < 0) return new ArrayList<>();
+            seams.add(seam);
         }
-        return new Rect(left, top, Math.max(left + 1, right), Math.max(top + 1, bottom));
+        List<Rect> regions = new ArrayList<>();
+        int start = 0;
+        for (int index = 0; index < ordered.size(); index++) {
+            int end = index < seams.size() ? seams.get(index) : extent;
+            Rect region = vertical ? new Rect(0, start, width, end) : new Rect(start, 0, end, height);
+            if (!region.contains(ordered.get(index).centerX(), ordered.get(index).centerY())
+                || region.width() < width / 8 || region.height() < height / 8) return new ArrayList<>();
+            regions.add(region);
+            start = end;
+        }
+        return regions;
+    }
+
+    private static int visibleSeam(Bitmap image, boolean vertical, int from, int to) {
+        int extent = vertical ? image.getHeight() : image.getWidth();
+        int minor = vertical ? image.getWidth() : image.getHeight();
+        int stride = Math.max(2, extent / 900);
+        int probe = Math.max(3, extent / 240);
+        double bestScore = 0;
+        int best = -1;
+        for (int position = from + probe; position < to - probe; position += stride) {
+            double strength = 0;
+            int strong = 0, samples = 0;
+            for (int offset = minor / 12; offset < minor * 11 / 12; offset += Math.max(3, minor / 65)) {
+                int left = luminance(image, vertical, position - probe, offset);
+                int right = luminance(image, vertical, position + probe, offset);
+                int delta = Math.abs(left - right);
+                strength += delta;
+                if (delta > 24) strong++;
+                samples++;
+            }
+            double coverage = samples == 0 ? 0 : (double) strong / samples;
+            double score = samples == 0 ? 0 : strength / samples * coverage;
+            if (coverage >= 0.28 && score > bestScore) { bestScore = score; best = position; }
+        }
+        return bestScore >= 10 ? best : -1;
+    }
+
+    private static int luminance(Bitmap image, boolean vertical, int major, int minor) {
+        int color = image.getPixel(vertical ? minor : major, vertical ? major : minor);
+        return ((color >> 16 & 255) * 3 + (color >> 8 & 255) * 6 + (color & 255)) / 10;
     }
 
     private static String preferredImei(Text text) {

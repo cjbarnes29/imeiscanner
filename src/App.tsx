@@ -36,6 +36,7 @@ type AndroidBridge = {
   choosePhotos(personId: string): void;
   status(): string;
   image(id: string): string;
+  sourceImage(id: string): string;
   stop(): void;
   saveFile(filename: string, mimeType: string, base64: string): void;
 };
@@ -842,6 +843,8 @@ export default function App() {
   const [manualImei, setManualImei] = useState('');
   const [manualModel, setManualModel] = useState('');
   const [manualCrop, setManualCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
+  const [reviewSource, setReviewSource] = useState('');
+  const [cropEditorOpen, setCropEditorOpen] = useState(false);
   const [adjustingCrop, setAdjustingCrop] = useState(false);
   const [rotatingPhoto, setRotatingPhoto] = useState(false);
   const [reviewCountInput, setReviewCountInput] = useState(2);
@@ -955,6 +958,12 @@ export default function App() {
     setReviewSplit(null);
     setManualImei(selected?.imei || '');
     setManualModel(selected ? exportModel(selected.model) : '');
+    setReviewSource(selected?.originalDataUrl || selected?.dataUrl || '');
+    setCropEditorOpen(!!selected?.cropNeedsReview);
+    if (selected && androidBridge?.sourceImage && !selected.originalDataUrl) {
+      const original = androidBridge.sourceImage(selected.id);
+      if (original) setReviewSource(original);
+    }
   }, [selected?.id]);
 
   function cropPoint(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1410,15 +1419,19 @@ export default function App() {
     setAdjustingCrop(true);
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
     try {
-      const photos = await createCroppedPhotos(selected.dataUrl, [{ imei: 'manual', x, y, width, height }], 100, 100);
+      const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
+      const photos = await createCroppedPhotos(source, [{ imei: 'manual', x, y, width, height }], 100, 100);
       const cropDataUrl = photos.get('manual')!;
-      worker = await createWorker('eng');
-      const { raw, imei } = await readCropImei(worker, cropDataUrl);
+      let raw = '', imei = '';
+      try {
+        worker = await createWorker('eng');
+        ({ raw, imei } = await readCropImei(worker, cropDataUrl));
+      } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       if (imei && records.some(r => (addAnother || r.id !== selected.id) && r.imei === imei)) {
         setToast('This IMEI already has a record. Draw a crop around a different label.');
         return;
       }
-      const patch: Partial<RecordItem> = { cropDataUrl, imei, raw, cropNeedsReview: !imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
+      const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, cropNeedsReview: !imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
         const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
         const added: RecordItem = { ...selected, ...patch, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: Math.max(2, ...records.map(r => r.number)) + 1, duplicate: false, createdAt: new Date().toISOString() };
@@ -1446,12 +1459,13 @@ export default function App() {
     setRotatingPhoto(true);
     try {
       const [dataUrl, cropDataUrl] = await Promise.all([
-        rotatePhoto(selected.dataUrl, direction),
+        rotatePhoto(reviewSource || selected.dataUrl, direction),
         selected.cropDataUrl ? rotatePhoto(selected.cropDataUrl, direction) : Promise.resolve(undefined)
       ]);
-      const patch = { dataUrl, cropDataUrl, originalDataUrl: selected.originalDataUrl || selected.dataUrl };
+      const patch = { dataUrl, cropDataUrl, originalDataUrl: dataUrl };
       setRecords(old => old.map(r => r.id === selected.id ? { ...r, ...patch } : r));
       setSelected({ ...selected, ...patch });
+      setReviewSource(dataUrl);
       setReviewSplit(null);
       setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
       setToast('Photo rotated. Adjust the crop and read the IMEI again if needed.');
@@ -1475,10 +1489,14 @@ export default function App() {
     setAdjustingCrop(true);
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
     try {
-      const photos = await createCroppedPhotos(selected.dataUrl, [{ imei: 'manual', x, y, width, height }], 100, 100);
+      const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
+      const photos = await createCroppedPhotos(source, [{ imei: 'manual', x, y, width, height }], 100, 100);
       const cropDataUrl = photos.get('manual')!;
-      worker = await createWorker('eng');
-      const { raw, imei } = await readCropImei(worker, cropDataUrl);
+      let raw = '', imei = '';
+      try {
+        worker = await createWorker('eng');
+        ({ raw, imei } = await readCropImei(worker, cropDataUrl));
+      } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       if (imei && (records.some(r => r.id !== selected.id && r.imei === imei) || reviewSplit.crops.some(crop => crop.imei === imei))) {
         setToast('This IMEI already has a record. Select a different label.');
         return;
@@ -1491,7 +1509,7 @@ export default function App() {
       } else {
         const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
         const nextNumber = Math.max(2, ...records.map(r => r.number)) + 1;
-        const replacements: RecordItem[] = crops.map((crop, index) => ({ ...selected, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1, cropDataUrl: crop.cropDataUrl, imei: crop.imei, raw: crop.raw, cropNeedsReview: !crop.imei, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review', duplicate: false, createdAt: new Date().toISOString() }));
+        const replacements: RecordItem[] = crops.map((crop, index) => ({ ...selected, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1, dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl, imei: crop.imei, raw: crop.raw, cropNeedsReview: !crop.imei, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review', duplicate: false, createdAt: new Date().toISOString() }));
         setRecords(old => old.flatMap(r => r.id === selected.id ? replacements : [r]));
         setSelectedIds(old => old.filter(id => id !== selected.id));
         setReviewSplit(null);
@@ -2434,6 +2452,10 @@ export default function App() {
             </div>
 
             <img className="preview" src={recordPhoto(selected)} alt="Selected record photo" />
+            <button className="subtle-btn fix-crop-button" onClick={() => {
+              setCropEditorOpen(true);
+              window.setTimeout(() => document.getElementById('crop-editor-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+            }}>Adjust crop or split photo</button>
 
             {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
               <button className="subtle-btn" disabled={reviewIndex === 0 || adjustingCrop || rotatingPhoto || !!reviewSplit || manualModel !== exportModel(selected.model) || manualImei !== selected.imei} onClick={() => setSelected(reviewRecords[reviewIndex - 1])}>← Previous</button>
@@ -2476,7 +2498,7 @@ export default function App() {
             {selected.cropDataUrl && (
               <details>
                 <summary>View full original photo</summary>
-                <img className="preview" src={selected.dataUrl} />
+                <img className="preview" src={reviewSource || selected.dataUrl} alt="Full original photo" />
               </details>
             )}
 
@@ -2490,13 +2512,13 @@ export default function App() {
                   setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
                 }}>Start cropping</button></div>
             </div>}
-            <details open={reviewSplit ? true : undefined}>
+            <details id="crop-editor-panel" open={cropEditorOpen || !!reviewSplit} onToggle={event => setCropEditorOpen(event.currentTarget.open)}>
               <summary>Adjust crop</summary>
-              <p>{reviewSplit ? `Crop ${reviewSplit.crops.length + 1} of ${reviewSplit.target}: drag a box around one label and its number.` : 'Drag a box around one IMEI label and its number. Save the first crop, then draw another box and choose Add another crop.'}</p>
+              <p>{reviewSplit ? `Crop ${reviewSplit.crops.length + 1} of ${reviewSplit.target}: drag around the whole sticker or box face, including the IMEI and barcode.` : 'Drag around the whole sticker or box face, including the IMEI and barcode. Save this crop, or add another.'}</p>
               {reviewSplit && reviewSplit.crops.length > 0 && <div className="review-crop-list">{reviewSplit.crops.map((crop, index) => <div key={index}><img src={crop.cropDataUrl} alt={`Saved crop ${index + 1}`} /><span>Crop {index + 1}{crop.imei ? '' : ' · Needs review'}</span></div>)}</div>}
               {selected.cropDataUrl && <div className="crop-saved-preview"><strong>Saved crop for this record</strong><img src={selected.cropDataUrl} alt="Saved crop for this record" /></div>}
               <div className="crop-editor" onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); cropStart.current = cropPoint(event); drawCrop(event); }} onPointerMove={drawCrop} onPointerUp={event => { drawCrop(event); cropStart.current = null; }} onPointerCancel={() => { cropStart.current = null; }}>
-                <img src={selected.dataUrl} alt="Original photo: drag to select the IMEI label" draggable={false} />
+                <img src={reviewSource || selected.dataUrl} alt="Original photo: drag to select the whole sticker or box" draggable={false} />
                 <div className="crop-selection" style={{ left: `${manualCrop.x}%`, top: `${manualCrop.y}%`, width: `${manualCrop.width}%`, height: `${manualCrop.height}%` }} />
               </div>
               <button className="subtle-btn" onClick={() => setManualCrop({ x: 0, y: 0, width: 100, height: 100 })}>Reset selection</button>

@@ -12,6 +12,7 @@ Android may pause and retry queued work when it restricts background activity, a
 - Bulk image upload with browser OCR or a laptop background scan queue.
 - IMEI extraction prioritizes a readable `IMEI 1`, then a readable `IMEI 2` from the same picture. Ambiguous or unreadable numbers are left for review.
 - When multiple distinct IMEI 1 labels are detected, the scanner attempts to separate them using visible box edges. Uncertain splits are marked for review and crops can be adjusted manually.
+- The Android scanner frames each separated box using a visible seam between labels and keeps the full width or height of that box face. If it cannot find a reliable seam, it keeps the full photo as one review record for manual splitting instead of saving a cut-off label. The review editor loads the original photo and saves manually selected crops even when automatic text reading fails.
 - Review a photo to rotate it, draw crops by touch or mouse, and enter an unreadable IMEI manually. Guided cropping can replace one review record with several separate records.
 - Luhn checksum validation.
 - Duplicate 15-digit IMEIs are removed automatically, keeping the existing record; records without a complete IMEI are retained for review.
