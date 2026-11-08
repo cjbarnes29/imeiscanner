@@ -31,6 +31,15 @@ type RecordItem = {
 
 type PersonGroup = { id: string; label: string; name: string };
 type LaptopRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; photoIndex: number };
+type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string };
+type AndroidBridge = {
+  choosePhotos(personId: string): void;
+  status(): string;
+  image(id: string): string;
+  stop(): void;
+  saveFile(filename: string, mimeType: string, base64: string): void;
+};
+const androidBridge = (window as Window & { AndroidScanner?: AndroidBridge }).AndroidScanner;
 
 const STORE = 'imei-lens-records-v1';
 const PEOPLE_STORE = 'imei-lens-people-v1';
@@ -236,6 +245,12 @@ function personTitle(record: RecordItem, people: PersonGroup[]) {
 }
 
 function downloadBlob(blob: Blob, filename: string) {
+  if (androidBridge) {
+    const reader = new FileReader();
+    reader.onload = () => androidBridge.saveFile(filename, blob.type || 'application/octet-stream', String(reader.result).split(',')[1] || '');
+    reader.readAsDataURL(blob);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
 
@@ -804,6 +819,9 @@ export default function App() {
   const [laptopMessage, setLaptopMessage] = useState('');
   const [laptopJob, setLaptopJob] = useState<{ status: string; count: number; completed: number; resultCount: number; failed: number } | null>(null);
   const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
+  const [androidJob, setAndroidJob] = useState<{ status: string; count: number; completed: number; failed: number; error?: string } | null>(null);
+  const importedAndroidIds = useRef(new Set<string>());
+  const importingAndroid = useRef(false);
   const phoneOnLaptopNetwork = window.matchMedia('(pointer: coarse)').matches && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(window.location.hostname);
   const useBackgroundByDefault = hostedScanner || phoneOnLaptopNetwork;
   const scannerLocation = hostedScanner ? 'online server' : 'laptop';
@@ -878,6 +896,50 @@ export default function App() {
       });
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!androidBridge || !inventoryLoaded) return;
+    for (const row of records) importedAndroidIds.current.add(row.id);
+    let cancelled = false;
+    async function refreshAndroid() {
+      if (!androidBridge || importingAndroid.current || cancelled) return;
+      importingAndroid.current = true;
+      try {
+        const job = JSON.parse(androidBridge.status()) as { status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[] };
+        if (cancelled) return;
+        setAndroidJob({ status: job.status, count: job.count, completed: job.completed, failed: job.failed, error: job.error });
+        const scanned = job.records || [];
+        const counts = new Map<string, number>();
+        for (const item of scanned) counts.set(item.sourcePictureId || '', (counts.get(item.sourcePictureId || '') || 0) + 1);
+        const pending = scanned.filter(item => !importedAndroidIds.current.has(item.id)).slice(0, 6);
+        const added: RecordItem[] = [];
+        for (const item of pending) {
+          const dataUrl = androidBridge.image(item.id);
+          if (!dataUrl) continue;
+          const { imageName, ...row } = item;
+          added.push({ ...row, dataUrl, cropDataUrl: (counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
+          importedAndroidIds.current.add(item.id);
+        }
+        if (added.length && !cancelled) setRecords(old => {
+          const ids = new Set(old.map(row => row.id));
+          const imeis = new Set(old.map(row => row.imei).filter(Boolean));
+          let number = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
+          const unique = added.filter(row => {
+            if (ids.has(row.id) || (row.imei && imeis.has(row.imei))) return false;
+            ids.add(row.id); if (row.imei) imeis.add(row.imei);
+            row.number = number++;
+            return true;
+          });
+          return unique.length ? [...old, ...unique] : old;
+        });
+      } catch (error) { console.error('Unable to read Android scan', error); }
+      finally { importingAndroid.current = false; }
+    }
+    void refreshAndroid();
+    const timer = window.setInterval(() => void refreshAndroid(), 2500);
+    window.addEventListener('android-scan-updated', refreshAndroid);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('android-scan-updated', refreshAndroid); };
+  }, [inventoryLoaded]);
 
   useEffect(() => {
     setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
@@ -1751,6 +1813,21 @@ export default function App() {
               <span className="tag">BULK UPLOAD</span>
             </div>
 
+            {androidBridge && <div className="android-scan">
+              <strong>Scan on this phone in the background</strong>
+              <p>Choose photos here. Android keeps scanning with a progress notification when you minimize or close this screen. Your photos and results stay on this phone.</p>
+              <button type="button" className="primary" disabled={androidJob?.status === 'queued' || androidJob?.status === 'processing'} onClick={() => androidBridge.choosePhotos(activePersonId)}>
+                <ScanLine size={17} /> Choose photos and scan
+              </button>
+              {androidJob && androidJob.status !== 'idle' && <div className="android-progress" role="status">
+                {androidJob.completed} of {androidJob.count} photos scanned · {androidJob.status}{androidJob.failed ? ` · ${androidJob.failed} failed` : ''}
+              </div>}
+              {androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing') && <button type="button" className="subtle-btn laptop-stop" onClick={() => androidBridge.stop()}>Stop scan</button>}
+              {androidJob?.error && <p>{androidJob.error}</p>}
+            </div>}
+
+            {androidBridge && <p className="micro">The browser upload below runs only while this screen is open. Use the button above for background scans.</p>}
+
             <div
               className="dropzone"
               onDragOver={e => e.preventDefault()}
@@ -1843,7 +1920,7 @@ export default function App() {
               ) : (
                 <>
                   <ScanLine size={17} />
-                  {useBackgroundByDefault ? `Scan ${files.length || 0} photo(s) in background` : `Extract IMEI from ${files.length || 0} photo(s)`}
+                  {androidBridge ? `Quick scan ${files.length || 0} photo(s) while open` : useBackgroundByDefault ? `Scan ${files.length || 0} photo(s) in background` : `Extract IMEI from ${files.length || 0} photo(s)`}
                 </>
               )}
             </button>
@@ -1857,7 +1934,7 @@ export default function App() {
               </div>
             )}
 
-            <details className="laptop-scan" open={useBackgroundByDefault}>
+            {!androidBridge && <details className="laptop-scan" open={useBackgroundByDefault}>
               <summary>Keep scanning after closing the browser</summary>
               <p>{hostedScanner ? 'Wait for Upload finished; then you may minimize or close the phone app. The online scanner continues until completion or you press Stop. Reopen this address to see the results.' : 'On a phone, use the laptop address below while both devices are on the same private Wi-Fi. Wait for Upload finished; then you may minimize or close the phone app. Your laptop keeps scanning until completion or you press Stop. Reopen this same address on the phone to see the results.'}</p>
               {phoneAddresses.length > 0 && <div className="phone-addresses">Phone address on this Wi-Fi: {phoneAddresses.map(address => <span key={address}><a href={address}>{address}</a><button type="button" className="subtle-btn" onClick={() => void copyText(address).then(copied => setLaptopMessage(copied ? 'Phone address copied. Open it on your phone using the same Wi-Fi.' : 'Could not copy the phone address.'))}>Copy</button></span>)}</div>}
@@ -1874,11 +1951,11 @@ export default function App() {
               {laptopJobId && laptopJob && !['completed', 'stopped'].includes(laptopJob.status) && <button type="button" className="subtle-btn laptop-stop" onClick={() => void stopLaptopScan()}>Stop background scan</button>}
               {laptopJob && <div className="laptop-progress">Background scan: {laptopJob.completed} of {laptopJob.count} photos · {laptopJob.resultCount} record(s) · {laptopJob.status}</div>}
               {laptopMessage && <div className="laptop-progress" role="status">{laptopMessage}</div>}
-            </details>
+            </details>}
 
             <div className="privacy-note">
               <CheckCircle2 size={15} />
-              {hostedScanner ? 'Background scans and photos are saved on your online scanner.' : 'Browser scans stay in this browser. Background scans are saved on your laptop.'}
+              {androidBridge ? 'Android background scans and photos stay on this phone.' : hostedScanner ? 'Background scans and photos are saved on your online scanner.' : 'Browser scans stay in this browser. Background scans are saved on your laptop.'}
             </div>
           </div>
 

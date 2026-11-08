@@ -11,3 +11,6 @@ publish-ready/
 github-deploy-work/
 github-live/
 server-data/
+android/.gradle/
+android/app/build/
+android/app/src/main/assets/
