@@ -30,6 +30,7 @@ type RecordItem = {
 };
 
 type PersonGroup = { id: string; label: string; name: string };
+type LaptopRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; photoIndex: number };
 
 const STORE = 'imei-lens-records-v1';
 const PEOPLE_STORE = 'imei-lens-people-v1';
@@ -233,6 +234,15 @@ function dataUrlBlob(dataUrl: string) {
   }
 
   return new Blob([bytes], { type: mime });
+}
+
+function blobDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function compactPhoto(dataUrl: string): Promise<string> {
@@ -761,6 +771,13 @@ export default function App() {
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
   const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
+  const [laptopUrl, setLaptopUrl] = useState(() => localStorage.getItem('imei-lens-laptop-url') || 'http://127.0.0.1:8787');
+  const [laptopKey, setLaptopKey] = useState(() => localStorage.getItem('imei-lens-laptop-key') || '');
+  const [laptopJobId, setLaptopJobId] = useState(() => localStorage.getItem('imei-lens-laptop-job') || '');
+  const [laptopUploading, setLaptopUploading] = useState(false);
+  const [laptopMessage, setLaptopMessage] = useState('');
+  const [laptopJob, setLaptopJob] = useState<{ status: string; count: number; completed: number; resultCount: number; failed: number } | null>(null);
+  const importingLaptop = useRef(false);
   const [filter, setFilter] = useState('All');
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -798,6 +815,13 @@ export default function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const cropStart = useRef<{ x: number; y: number } | null>(null);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => { localStorage.setItem('imei-lens-laptop-url', laptopUrl); }, [laptopUrl]);
+  useEffect(() => { localStorage.setItem('imei-lens-laptop-key', laptopKey); }, [laptopKey]);
+  useEffect(() => {
+    if (laptopJobId) localStorage.setItem('imei-lens-laptop-job', laptopJobId);
+    else localStorage.removeItem('imei-lens-laptop-job');
+  }, [laptopJobId]);
 
   useEffect(() => {
     let mounted = true;
@@ -977,6 +1001,98 @@ export default function App() {
       setToast('Only image files were added.');
     }
   }
+
+  async function laptopRequest(path: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers);
+    headers.set('Authorization', `Bearer ${laptopKey.trim()}`);
+    const response = await fetch(`${laptopUrl.trim().replace(/\/$/, '')}${path}`, { ...options, headers });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `Laptop scanner returned ${response.status}.`);
+    }
+    return response;
+  }
+
+  async function startLaptopScan() {
+    if (!files.length || busy || laptopUploading) return;
+    if (!laptopKey.trim()) { setLaptopMessage('Enter the access code from server-data/access-code.txt on your laptop.'); return; }
+    if (files.length > 500) { setLaptopMessage('Choose up to 500 photos per background scan.'); return; }
+    setLaptopUploading(true);
+    setLaptopMessage('Connecting to the laptop scanner…');
+    try {
+      const created = await laptopRequest('/api/jobs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: files.length, mode: scanMode, personId: activePersonId })
+      });
+      const { job } = await created.json();
+      for (let index = 0; index < files.length; index++) {
+        setLaptopMessage(`Uploading ${index + 1} of ${files.length}: ${files[index].name}. Keep this page open until upload finishes.`);
+        await laptopRequest(`/api/jobs/${job.id}/photos/${index}`, {
+          method: 'PUT', headers: { 'Content-Type': files[index].type, 'X-File-Name': encodeURIComponent(files[index].name) },
+          body: files[index]
+        });
+      }
+      await laptopRequest(`/api/jobs/${job.id}/start`, { method: 'POST' });
+      setLaptopJobId(job.id);
+      setLaptopJob({ status: 'queued', count: files.length, completed: 0, resultCount: 0, failed: 0 });
+      setLaptopMessage('Upload finished. You can close the browser now; the laptop will keep scanning.');
+      setFiles([]);
+    } catch (error) {
+      console.error('Laptop scan upload failed', error);
+      setLaptopMessage(error instanceof Error ? `Laptop scan could not start: ${error.message}` : 'Laptop scan could not start.');
+    } finally { setLaptopUploading(false); }
+  }
+
+  useEffect(() => {
+    if (!laptopJobId || !laptopKey.trim() || !inventoryLoaded) return;
+    let cancelled = false;
+    async function poll() {
+      if (importingLaptop.current || cancelled) return;
+      try {
+        const response = await laptopRequest(`/api/jobs/${laptopJobId}`);
+        const { job } = await response.json();
+        if (cancelled) return;
+        setLaptopJob(job);
+        if (job.status !== 'completed') return;
+        importingLaptop.current = true;
+        setLaptopMessage(`Scan finished. Importing ${job.resultCount} record(s) into this browser…`);
+        const results = await laptopRequest(`/api/jobs/${laptopJobId}/records`);
+        const { records: scanned } = await results.json() as { records: LaptopRecord[] };
+        const imported: RecordItem[] = [];
+        const sourceCounts = new Map<string, number>();
+        for (const item of scanned) sourceCounts.set(item.sourcePictureId || '', (sourceCounts.get(item.sourcePictureId || '') || 0) + 1);
+        for (const item of scanned) {
+          if (cancelled) return;
+          const photoResponse = await laptopRequest(`/api/jobs/${laptopJobId}/images/${item.imageName}`);
+          const photo = await blobDataUrl(await photoResponse.blob());
+          const { imageName, photoIndex, ...record } = item;
+          imported.push({ ...record, dataUrl: photo, cropDataUrl: (sourceCounts.get(item.sourcePictureId || '') || 0) > 1 ? photo : undefined });
+          if (imported.length % 20 === 0) setLaptopMessage(`Importing ${imported.length} of ${scanned.length} completed records…`);
+        }
+        if (cancelled) return;
+        setRecords(old => {
+          const seenIds = new Set(old.map(row => row.id));
+          const seenImeis = new Set(old.map(row => row.imei).filter(Boolean));
+          let nextNumber = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
+          const added = imported.filter(row => {
+            if (seenIds.has(row.id) || (row.imei && seenImeis.has(row.imei))) return false;
+            seenIds.add(row.id);
+            if (row.imei) seenImeis.add(row.imei);
+            row.number = nextNumber++;
+            return true;
+          });
+          return added.length ? [...old, ...added] : old;
+        });
+        setLaptopMessage(`Imported ${imported.length} record(s). ${job.failed ? `${job.failed} photo(s) could not be read.` : ''}`);
+        setLaptopJobId('');
+      } catch (error) {
+        if (!cancelled) setLaptopMessage(error instanceof Error ? `Waiting for laptop scanner: ${error.message}` : 'Waiting for laptop scanner to reconnect.');
+      } finally { importingLaptop.current = false; }
+    }
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [laptopJobId, laptopKey, laptopUrl, inventoryLoaded]);
 
   async function scan() {
     if (!files.length || busy || !inventoryLoaded) return;
@@ -1692,9 +1808,26 @@ export default function App() {
               </div>
             )}
 
+            <details className="laptop-scan">
+              <summary>Keep scanning after closing the browser</summary>
+              <p>Start the laptop scanner first. Upload every photo, then close this page while your laptop stays awake. Results return here when you reopen the app.</p>
+              <label>Laptop scanner address
+                <input type="url" value={laptopUrl} onChange={event => setLaptopUrl(event.target.value)} placeholder="http://127.0.0.1:8787" />
+              </label>
+              <label>Access code from server-data/access-code.txt
+                <input type="password" value={laptopKey} onChange={event => setLaptopKey(event.target.value)} autoComplete="off" />
+              </label>
+              <button type="button" className="subtle-btn laptop-start" disabled={!files.length || busy || laptopUploading || !inventoryLoaded} onClick={startLaptopScan}>
+                {laptopUploading ? <LoaderCircle className="spin" size={16} /> : <CloudUpload size={16} />}
+                {laptopUploading ? 'Uploading to laptop…' : `Scan ${files.length} photo${files.length === 1 ? '' : 's'} on laptop`}
+              </button>
+              {laptopJob && <div className="laptop-progress">Background scan: {laptopJob.completed} of {laptopJob.count} photos · {laptopJob.resultCount} record(s) · {laptopJob.status}</div>}
+              {laptopMessage && <div className="laptop-progress" role="status">{laptopMessage}</div>}
+            </details>
+
             <div className="privacy-note">
               <CheckCircle2 size={15} />
-              Photos and extracted records stay in this browser unless you export them.
+              Browser scans stay in this browser. Background scans are saved on your laptop.
             </div>
           </div>
 

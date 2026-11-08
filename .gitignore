@@ -9,3 +9,5 @@ npm-debug.log*
 verification-*
 publish-ready/
 github-deploy-work/
+github-live/
+server-data/
