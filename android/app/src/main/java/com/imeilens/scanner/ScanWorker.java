@@ -6,6 +6,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -28,7 +29,7 @@ public final class ScanWorker extends Worker {
     private ForegroundInfo foreground(int completed, int total) {
         Context context = getApplicationContext();
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        manager.createNotificationChannel(new NotificationChannel(CHANNEL, "IMEI scans", NotificationManager.IMPORTANCE_LOW));
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(new NotificationChannel(CHANNEL, "IMEI scans", NotificationManager.IMPORTANCE_LOW));
         PendingIntent stopAction = PendingIntent.getBroadcast(context, 1001,
             new Intent(context, StopReceiver.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL)
@@ -39,7 +40,8 @@ public final class ScanWorker extends Worker {
             .setOngoing(true)
             .setProgress(total, completed, false)
             .addAction(android.R.drawable.ic_delete, "Stop", stopAction);
-        return new ForegroundInfo(1001, builder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
+        if (Build.VERSION.SDK_INT >= 35) return new ForegroundInfo(1001, builder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
+        return new ForegroundInfo(1001, builder.build());
     }
 
     @NonNull @Override public Result doWork() {

@@ -40,6 +40,11 @@ type AndroidBridge = {
   saveFile(filename: string, mimeType: string, base64: string): void;
 };
 const androidBridge = (window as Window & { AndroidScanner?: AndroidBridge }).AndroidScanner;
+const NATIVE_IMPORTED_STORE = 'imei-lens-native-imported-v1';
+function readNativeImportedIds(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(NATIVE_IMPORTED_STORE) || '[]') as string[]); }
+  catch { return new Set(); }
+}
 
 const STORE = 'imei-lens-records-v1';
 const PEOPLE_STORE = 'imei-lens-people-v1';
@@ -820,7 +825,7 @@ export default function App() {
   const [laptopJob, setLaptopJob] = useState<{ status: string; count: number; completed: number; resultCount: number; failed: number } | null>(null);
   const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
   const [androidJob, setAndroidJob] = useState<{ status: string; count: number; completed: number; failed: number; error?: string } | null>(null);
-  const importedAndroidIds = useRef(new Set<string>());
+  const importedAndroidIds = useRef(readNativeImportedIds());
   const importingAndroid = useRef(false);
   const phoneOnLaptopNetwork = window.matchMedia('(pointer: coarse)').matches && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(window.location.hostname);
   const useBackgroundByDefault = hostedScanner || phoneOnLaptopNetwork;
@@ -919,6 +924,10 @@ export default function App() {
           const { imageName, ...row } = item;
           added.push({ ...row, dataUrl, cropDataUrl: (counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
           importedAndroidIds.current.add(item.id);
+        }
+        if (added.length) {
+          try { localStorage.setItem(NATIVE_IMPORTED_STORE, JSON.stringify([...importedAndroidIds.current])); }
+          catch (error) { console.error('Unable to save imported Android IDs', error); }
         }
         if (added.length && !cancelled) setRecords(old => {
           const ids = new Set(old.map(row => row.id));

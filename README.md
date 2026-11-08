@@ -2,6 +2,12 @@
 
 An inventory scanner for phone-label photos. Regular OCR runs in the browser. Optional laptop background scanning keeps processing after the browser closes, provided the laptop stays powered on and awake.
 
+## Free Android app for scanning after closing the screen
+
+Install the Android APK from the [latest Android release](https://github.com/cjbarnes29/imeiscanner/releases). Open **IMEI Lens**, then choose **Scan on this phone in the background** and select up to 500 photos. Keep the scan notification enabled. The phone saves progress after each photo and shows the cropped records when you reopen the app. Use **Stop scan** in the app or notification to stop it. Exports use Android's save-file picker. Photos and IMEIs remain on the phone; no laptop, paid server, or Google authorization is needed. The GitHub Pages website remains available for browser-only scanning.
+
+Android may pause and retry queued work when it restricts background activity, and force-stopping the app in phone settings prevents work until the app is opened again. Android 15 also limits `mediaProcessing` foreground services to six hours in a 24-hour period. This APK is a debug-signed preview; later APKs may require uninstalling it before installation, which erases its local records. Export important records first. A phone test is still needed to validate scanning on your device.
+
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
 - IMEI extraction prioritizes a readable `IMEI 1`, then a readable `IMEI 2` from the same picture. Ambiguous or unreadable numbers are left for review.

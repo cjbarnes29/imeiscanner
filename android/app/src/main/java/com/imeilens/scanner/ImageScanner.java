@@ -92,7 +92,9 @@ final class ImageScanner {
         row.put("status", imei.isEmpty() ? "Review" : "Valid");
         row.put("cropNeedsReview", cropReview);
         row.put("duplicate", false);
-        row.put("createdAt", java.time.Instant.now().toString());
+        java.text.SimpleDateFormat clock = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+        clock.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+        row.put("createdAt", clock.format(new java.util.Date()));
         row.put("raw", raw);
         row.put("number", 0);
         return row;
