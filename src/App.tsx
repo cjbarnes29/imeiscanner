@@ -1,3 +1,4 @@
+import { extractSerial, serialLabelRegion, serialReading } from './serial';
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
@@ -27,6 +28,7 @@ type RecordItem = {
   model: string;
   imei: string;
   serial?: string;
+  serialNeedsReview?: boolean;
   status: 'Valid' | 'Invalid' | 'Review';
   duplicate: boolean;
   createdAt: string;
@@ -123,8 +125,9 @@ async function uniqueUploadPhotos(files: File[]) {
 }
 
 function reviewStatus(row: RecordItem) {
-  const needsReview = row.cropNeedsReview || row.status !== 'Valid';
-  return row.duplicate ? needsReview ? 'Duplicate IMEI · Needs review' : 'Duplicate IMEI' : needsReview ? 'Needs review' : 'Valid';
+  const serialOnly = !row.imei && !!recordSerial(row);
+  const needsReview = row.cropNeedsReview || row.serialNeedsReview || (!serialOnly && row.status !== 'Valid');
+  return row.duplicate ? needsReview ? 'Duplicate IMEI · Needs review' : 'Duplicate IMEI' : needsReview ? 'Needs review' : serialOnly ? 'Serial only' : 'Valid';
 }
 
 function luhnValid(value: string) {
@@ -188,10 +191,7 @@ function extractImei1s(text: string) {
 }
 
 function recordSerial(record: RecordItem) {
-  if (record.serial !== undefined) return record.serial;
-  const values = [...record.raw.matchAll(/\b(?:S\s*\/\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#-]?\s*([A-Z0-9]{5,25})\b/gi)].map(match => match[1]);
-  const unique = [...new Set(values.filter(value => !/^(?:MODEL|IMEI|SERIAL|NUMBER)$/i.test(value)))];
-  return unique.length === 1 ? unique[0] : '';
+  return record.serial ?? extractSerial(record.raw);
 }
 
 function cameraImei(text: string) {
@@ -391,7 +391,7 @@ function recordPhoto(record: RecordItem) {
 function createPhotoGalleryHtml(rows: RecordItem[], people: PersonGroup[]) {
   const photoItems = rows.map(record => {
     const name = photoFilename(record).replace(/^#/, 'photo-');
-    return `<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, people))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`;
+    return `<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>S/N</span><strong>${htmlEscape(recordSerial(record) || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, people))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`;
   });
   const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IMEI Lens — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> IMEI LENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
   return makeStableGalleryHtml(galleryHtml);
@@ -542,6 +542,23 @@ function scaleOcrLines(lines: OcrLine[], from: HTMLCanvasElement, to: HTMLCanvas
   } }));
 }
 
+async function readSerialPhoto(worker: Awaited<ReturnType<typeof createWorker>>, photo: string) {
+  const image = new Image(); image.src=photo; await image.decode();
+  const canvas=document.createElement('canvas'); canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+  const ctx=canvas.getContext('2d')!;ctx.drawImage(image,0,0);
+  const region=serialLabelRegion(ctx.getImageData(0,0,canvas.width,canvas.height));
+  await worker.setParameters({tessedit_pageseg_mode: PSM.SINGLE_BLOCK});
+  for(const angle of [6,0,-6]) {
+    const target=document.createElement('canvas'); const scale=Math.min(3,2200/Math.max(region.width,region.height));
+    target.width=Math.ceil(region.width*scale*1.2);target.height=Math.ceil(region.height*scale*1.2);
+    const c=target.getContext('2d')!;c.fillStyle='white';c.fillRect(0,0,target.width,target.height);c.translate(target.width/2,target.height/2);c.rotate(angle*Math.PI/180);
+    c.filter='grayscale(1) contrast(1.15)';c.drawImage(canvas,region.x,region.y,region.width,region.height,-region.width*scale/2,-region.height*scale/2,region.width*scale,region.height*scale);
+    const raw=(await worker.recognize(target)).data.text || ''; if(serialReading(raw).serial) { await worker.setParameters({tessedit_pageseg_mode: PSM.SPARSE_TEXT}); return raw; }
+  }
+  await worker.setParameters({tessedit_pageseg_mode: PSM.SPARSE_TEXT});
+  return '';
+}
+
 async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cropDataUrl: string, mode: 'fast' | 'standard' | 'detailed' = 'detailed') {
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
   let raw = (await worker.recognize(cropDataUrl)).data.text || '';
@@ -558,6 +575,7 @@ async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cr
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
     }
   }
+  if (!extractPreferredImei(raw) && !extractSerial(raw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl); if (serialRaw) raw = serialRaw; }
   return { raw, imei: extractPreferredImei(raw) };
 }
 
@@ -581,21 +599,21 @@ function recordsCsv(
   if (layout) {
     const rich = layout === 'person_photo';
     const values = [
-      ['IMEI', 'Model', 'Review status', ...(rich ? ['Assigned person', 'Download photo'] : [])],
-      ...rows.map(r => [r.imei, exportModel(r.model), reviewStatus(r), ...(rich ? [personTitle(r, people), photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download photo")` : ''] : [])])
+      ['IMEI', 'Serial number', 'Model', 'Review status', ...(rich ? ['Assigned person', 'Download photo'] : [])],
+      ...rows.map(r => [r.imei, recordSerial(r), exportModel(r.model), reviewStatus(r), ...(rich ? [personTitle(r, people), photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download photo")` : ''] : [])])
     ];
     return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
   }
   if (compact) {
     const values = [
-      ['Model', 'IMEI', 'Review status', 'Duplicate', 'Download photo'],
-      ...rows.map(r => [exportModel(r.model), r.imei, reviewStatus(r), r.duplicate ? 'Yes' : 'No',
+      ['Model', 'IMEI', 'Serial number', 'Review status', 'Duplicate', 'Download photo'],
+      ...rows.map(r => [exportModel(r.model), r.imei, recordSerial(r), reviewStatus(r), r.duplicate ? 'Yes' : 'No',
         photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download image")` : ''])
     ];
     return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
   }
   const values = [
-    ['No.', 'Picture ID', 'Person', 'Person name', 'Image filename', 'Model', 'IMEI', 'Review status', 'Validation', 'Duplicate', 'Scanned at', 'Download photo'],
+    ['No.', 'Picture ID', 'Person', 'Person name', 'Image filename', 'Model', 'IMEI', 'Serial number', 'Review status', 'Validation', 'Duplicate', 'Scanned at', 'Download photo'],
     ...rows.map(r => {
       const person = people.find(item => item.id === r.personId);
       return [
@@ -606,6 +624,7 @@ function recordsCsv(
         r.name,
         exportModel(r.model),
         r.imei,
+        recordSerial(r),
         reviewStatus(r),
         r.status,
         r.duplicate ? 'Yes' : 'No',
@@ -706,6 +725,7 @@ async function createInventoryWorkbook(
       { header: 'Image filename', key: 'filename', width: 36 },
       { header: 'Model', key: 'model', width: 28 },
       { header: 'IMEI', key: 'imei', width: 20 },
+      { header: 'Serial number', key: 'serial', width: 22 },
       { header: 'Review status', key: 'reviewStatus', width: 18 },
       { header: 'Validation', key: 'validation', width: 14 },
       { header: 'Duplicate', key: 'duplicate', width: 12 },
@@ -715,10 +735,10 @@ async function createInventoryWorkbook(
     ];
     const columns = layout
       ? (layout === 'simple'
-        ? ['imei', 'model', 'reviewStatus'].map(key => allColumns.find(column => column.key === key)!)
-        : ['imei', 'photo', 'model', 'person', 'reviewStatus', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
+        ? ['imei', 'serial', 'model', 'reviewStatus'].map(key => allColumns.find(column => column.key === key)!)
+        : ['imei', 'serial', 'photo', 'model', 'person', 'reviewStatus', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
       : compact
-      ? allColumns.filter(column => ['model', 'imei', 'reviewStatus', 'duplicate', 'download', 'folder'].includes(column.key))
+      ? allColumns.filter(column => ['model', 'imei', 'serial', 'reviewStatus', 'duplicate', 'download', 'folder'].includes(column.key))
       : allColumns;
     sheet.columns = columns;
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -740,6 +760,7 @@ async function createInventoryWorkbook(
         filename: record.name,
         model: exportModel(record.model),
         imei: record.imei,
+        serial: recordSerial(record),
         reviewStatus: reviewStatus(record),
         validation: record.status,
         duplicate: record.duplicate ? 'Yes' : 'No',
@@ -993,6 +1014,7 @@ export default function App() {
   const [deleteReviewConfirm, setDeleteReviewConfirm] = useState(false);
   const [reviewIds, setReviewIds] = useState<string[]>([]);
   const [manualImei, setManualImei] = useState('');
+  const [manualSerial, setManualSerial] = useState('');
   const [manualModel, setManualModel] = useState('');
   const [manualCrop, setManualCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
   const [reviewSource, setReviewSource] = useState('');
@@ -1134,6 +1156,7 @@ export default function App() {
     setCropZoom(1);
     setReviewSplit(null);
     setManualImei(selected?.imei || '');
+    setManualSerial(selected ? recordSerial(selected) : '');
     setManualModel(selected ? exportModel(selected.model) : '');
     setReviewSource(selected?.originalDataUrl || selected?.dataUrl || '');
     setCropEditorOpen(cropRequestedId.current === selected?.id);
@@ -1232,7 +1255,7 @@ export default function App() {
   }, [toast]);
 
   const validCount = records.filter(r => r.status === 'Valid').length;
-  const reviewCount = records.filter(r => r.status !== 'Valid' || r.cropNeedsReview).length;
+  const reviewCount = records.filter(r => reviewStatus(r).includes('Needs review')).length;
 
   const models = useMemo(() => {
     const m = new Map<string, number>();
@@ -1247,7 +1270,7 @@ export default function App() {
   const visible = records.filter(r =>
     (filter === 'All' ||
       (filter === 'Duplicates' ? r.duplicate :
-        filter === 'Review' ? r.status !== 'Valid' || r.cropNeedsReview :
+        filter === 'Review' ? reviewStatus(r).includes('Needs review') :
           r.model === filter)) &&
     (`${r.name} ${r.model} ${r.imei}`)
       .toLowerCase()
@@ -1566,7 +1589,8 @@ export default function App() {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
         const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw) };
-        const cropRaw = file.name.startsWith('camera-imei1-') ? await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw) : cropResult.raw;
+        let cropRaw = file.name.startsWith('camera-imei1-') ? await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw) : cropResult.raw;
+        if (!cropNeedsReview && !extractPreferredImei(cropRaw) && !extractSerial(cropRaw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl || dataUrl); if (serialRaw) cropRaw = serialRaw; }
         const cameraImeis = file.name.startsWith('camera-imei1-') ? extractImei1s(cropRaw).filter(luhnValid) : null;
         const imei = cropNeedsReview ? '' : cameraImeis ? cameraImeis.length === 1 ? cameraImeis[0] : '' : cropResult.imei;
         if (/^\d{15}$/.test(imei)) {
@@ -1579,7 +1603,7 @@ export default function App() {
           const y = (line.bbox.y0 + line.bbox.y1) / 2;
           return x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height;
         }).map(line => line.text).join('\n') : raw;
-        const model = identifyModel(regionText, file.name, mostlyWhite);
+        const model = identifyModel(cropRaw, file.name, mostlyWhite);
         newRows.push({
           id: newId(),
           pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
@@ -1592,6 +1616,7 @@ export default function App() {
           cropDataUrl,
           cropNeedsReview: cropNeedsReview || !!region?.needsReview,
           model,
+          ...serialReading(cropRaw),
           imei,
           status: imei
             ? (luhnValid(imei) ? 'Valid' : 'Invalid')
@@ -1611,7 +1636,7 @@ export default function App() {
           const completed = newRows;
           newRows = [];
           addedCount += completed.length;
-          needsReviewCount += completed.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
+          needsReviewCount += completed.filter(row => reviewStatus(row).includes('Needs review')).length;
           setRecords(old => markDuplicateRecords([...old, ...completed]));
         }
         } catch (error) {
@@ -1669,7 +1694,7 @@ export default function App() {
     const imeiChanged = manualImei !== selected.imei;
     const latestBatch = records.filter(r => r.uploadBatchId).reduce<RecordItem | undefined>((current, row) => !current || row.createdAt > current.createdAt ? row : current, undefined)?.uploadBatchId;
     const duplicate = !!manualImei && !!latestBatch && selected.uploadBatchId === latestBatch && records.some(r => r.id !== selected.id && r.uploadBatchId === latestBatch && r.imei === manualImei);
-    const patch: Partial<RecordItem> = { model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
+    const patch: Partial<RecordItem> = { serial: manualSerial.trim(), serialNeedsReview: false, model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
     updateRow(selected.id, patch);
     if (advance && reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1) {
       setSelected(reviewRecords[reviewIndex + 1]);
@@ -1700,7 +1725,7 @@ export default function App() {
         ({ raw, imei } = await readCropImei(worker, cropDataUrl));
         if (selected.name.startsWith('camera-imei1-')) { raw = await cameraBarcodeText(cropDataUrl, raw); imei = cameraImei(raw); }
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
-      const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, cropNeedsReview: !imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
+      const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, ...serialReading(raw), cropNeedsReview: !imei && !serialReading(raw).serial, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
         const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
         const added: RecordItem = { ...selected, ...patch, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: Math.max(2, ...records.map(r => r.number)) + 1, duplicate: false, createdAt: new Date().toISOString() };
@@ -1794,8 +1819,8 @@ export default function App() {
       ...selected, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
       sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1,
       dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl,
-      imei: crop.imei, model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
-      cropNeedsReview: !crop.imei, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
+      ...serialReading(crop.raw), imei: crop.imei, model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
+      cropNeedsReview: !crop.imei && !serialReading(crop.raw).serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
       duplicate: false, createdAt: new Date().toISOString()
     }));
     setRecords(old => markDuplicateRecords(old.flatMap(r => r.id === selected.id ? replacements : [r])));
@@ -2564,7 +2589,7 @@ export default function App() {
                   <button className="subtle-btn" disabled={!exportModel(record.model)} onClick={() => void copyText(exportModel(record.model)).then(ok => setToast(ok ? 'Model copied.' : 'Copy failed.'))}>Copy model</button>
                   <label>IMEI <input aria-label={`IMEI for record ${record.number}`} inputMode="numeric" value={record.imei} onChange={e => { const imei = digits(e.target.value).slice(0, 15); updateRow(record.id, { imei, status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
                   <button className="subtle-btn" disabled={!record.imei} onClick={() => void copyText(record.imei).then(ok => setToast(ok ? 'IMEI copied.' : 'Copy failed.'))}>Copy IMEI</button>
-                  <label>Serial number <input aria-label={`Serial number for record ${record.number}`} value={recordSerial(record)} onChange={e => updateRow(record.id, { serial: e.target.value })} /></label>
+                  <label>Serial number <input aria-label={`Serial number for record ${record.number}`} value={recordSerial(record)} onChange={e => updateRow(record.id, { serial: e.target.value, serialNeedsReview: false })} /></label>
                   <button className="subtle-btn" disabled={!recordSerial(record)} onClick={() => void copyText(recordSerial(record)).then(ok => setToast(ok ? 'Serial number copied.' : 'Copy failed.'))}>Copy serial</button>
                   {reviewStatus(record) !== 'Valid' && <small>{reviewStatus(record)}</small>}
                 </div>
@@ -2597,7 +2622,7 @@ export default function App() {
                     <th>PERSON</th>
                     <th>DEVICE MODEL</th>
                     <th>IMEI</th>
-                    <th>VALIDATION</th>
+                    <th>SERIAL NUMBER</th><th>VALIDATION</th>
                     <th>STATUS</th>
                     <th />
                   </tr>
@@ -2685,12 +2710,13 @@ export default function App() {
                         </button>
                       </td>
 
+                      <td data-label="Serial number"><input aria-label={`Serial number for record ${r.number}`} value={recordSerial(r)} onChange={e => updateRow(r.id, {serial:e.target.value,serialNeedsReview:false})} /></td>
                       <td data-label="Validation">
                         <span className={`status ${(r.cropNeedsReview ? 'Review' : r.status).toLowerCase()}`}>
                           {r.status === 'Valid' && !r.cropNeedsReview
                             ? <CheckCircle2 size={13} />
                             : <AlertTriangle size={13} />}
-                          {' '}{r.cropNeedsReview ? 'Needs review' : r.status}
+                          {' '}{reviewStatus(r)}
                         </span>
                       </td>
 
@@ -2799,6 +2825,7 @@ export default function App() {
             {!cropEditorOpen && <div className="manual-imei-entry">
               <label className="review-model" htmlFor="manual-model">Device model</label>
               <input id="manual-model" value={manualModel} onChange={event => setManualModel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); document.getElementById('manual-imei')?.focus(); } }} />
+              <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
               <label htmlFor="manual-imei">IMEI</label>
               <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
               <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
@@ -2808,6 +2835,7 @@ export default function App() {
 
             <div className="modal-meta">
               <span>Picture ID: {selected.pictureId}</span>
+              <span>Serial: {recordSerial(selected) || 'Not detected'}</span><span>Status: {reviewStatus(selected)}</span>
               <span>IMEI: {selected.imei || 'Not detected'}</span>
               {selected.sourcePictureId && records.filter(r => r.sourcePictureId === selected.sourcePictureId).length > 1 && (
                 <span>Same source photo: {records.filter(r => r.sourcePictureId === selected.sourcePictureId).map(r => `#${r.number} ${r.imei}`).join(' · ')}</span>

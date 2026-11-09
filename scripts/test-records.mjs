@@ -15,6 +15,7 @@ for (const name of names) {
 }
 const layout = ts.createSourceFile('scan-layout.ts', await readFile('src/scan-layout.ts','utf8'), ts.ScriptTarget.Latest, true);
 helpers += layout.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'exportModel').getText(layout);
+helpers += await readFile('src/serial.ts','utf8');
 helpers += `\nexport { ${names.join(',')} };`;
 const runtime = new URL('../verification-records-runtime.mjs', import.meta.url);
 await writeFile(runtime, ts.transpileModule(helpers, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
@@ -35,6 +36,11 @@ try {
   assert.equal(f.recordSerial({raw:'S/N: OLD12345',serial:'000012'}),'000012');
   const row = {id:'one',pictureId:'PIC-ONE',number:3,personId:'p',name:'photo.jpg',dataUrl:'data:image/jpeg;base64,ORIGINAL',cropDataUrl:'data:image/jpeg;base64,CROP',model:'Unknown unit',imei:first,status:'Valid',duplicate:false,createdAt:'2026-11-09',uploadBatchId:'latest',raw:''};
   const blank = {...row,id:'two',pictureId:'PIC-TWO',number:4,imei:'',status:'Review',cropDataUrl:'data:image/jpeg;base64,CROP2'};
+  const serialOnly = {...blank,serial:'RFGYC2L1PLK'};
+  assert.equal(f.reviewStatus(serialOnly),'Serial only');
+  assert.equal(f.reviewStatus({...serialOnly,serialNeedsReview:true}),'Needs review');
+  assert.ok(f.recordsCsv([serialOnly],new Map(),peopleForTest(),false,'simple').includes('RFGYC2L1PLK'));
+  function peopleForTest(){return [{id:'p',label:'Person 1',name:''}];}
   assert.equal(f.recordPhoto(row),row.cropDataUrl);
   assert.equal(f.markDuplicateRecords([row])[0],row, 'Unchanged records retain identity for storage performance');
   assert.ok(f.markDuplicateRecords([row,{...row,id:'duplicate'}]).every(r=>r.duplicate));
@@ -47,10 +53,10 @@ try {
   const csv=f.recordsCsv([row,blank],new Map(),people,false,'simple');
   assert.equal(csv.split('\r\n').length,3);
   assert.ok(!csv.includes('Unknown unit') && !csv.includes('IMEI type'));
-  const blob=await f.createInventoryWorkbook([row,blank],new Map(),false,people,'',false,'simple');
+  const blob=await f.createInventoryWorkbook([row,serialOnly],new Map(),false,people,'',false,'simple');
   const workbook=new ExcelJS.Workbook(); await workbook.xlsx.load(await blob.arrayBuffer());
   const sheet=workbook.getWorksheet('All IMEIs');
   assert.equal(sheet.getCell('A2').value,first); assert.equal(sheet.getCell('A3').value,'');
-  assert.equal(sheet.getCell('B2').value,''); assert.equal(sheet.rowCount,3);
+  assert.equal(sheet.getCell('B3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
   console.log('PASS: camera IMEI 1 selection, upload fallback, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip.');
 } finally { await unlink(runtime); }

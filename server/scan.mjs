@@ -1,3 +1,4 @@
+import { extractSerial, serialLabelRegion, serialReading } from '../src/serial.ts';
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
@@ -110,6 +111,12 @@ export async function createScanner() {
           cropRaw += `\n${(await worker.recognize(improved)).data.text || ''}`;
           imei = preferredImei(cropRaw, filename.startsWith('camera-imei1-'));
         }
+        if (!imei && !extractSerial(cropRaw)) {
+          const {data,info}=await sharp(photo).ensureAlpha().raw().toBuffer({resolveWithObject:true});const box=serialLabelRegion({data,width:info.width,height:info.height});
+          await worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK});
+          for(const angle of [6,0,-6]) { const focus=await sharp(photo).extract({left:box.x,top:box.y,width:box.width,height:box.height}).resize({width:2200,height:2200,fit:'inside'}).rotate(angle,{background:'white'}).grayscale().normalise().sharpen().toBuffer();const text=(await worker.recognize(focus)).data.text||'';if(serialReading(text).serial){cropRaw=text;break;} }
+        }
+        await worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT});
         results.push({
           id: crypto.randomUUID(),
           pictureId: `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
@@ -117,6 +124,7 @@ export async function createScanner() {
           name: filename,
           model: modelFrom(cropRaw, filename),
           imei,
+          ...serialReading(cropRaw),
           status: imei ? 'Valid' : 'Review',
           cropNeedsReview: splitFailed || !!region?.needsReview,
           raw: cropRaw,
