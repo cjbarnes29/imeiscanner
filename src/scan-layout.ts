@@ -34,7 +34,7 @@ export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, 
   // them inside the sticker/box search area when they belong to one anchor.
   const context = items.map(item => ({ ...item.box }));
   for (const line of lines) {
-    if (!line.bbox || !validBox(line.bbox) || !(/\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?/i.test(line.text) || /\bI\s*M\s*E\s*I\s*[:#-]?\s*2\b/i.test(line.text))) continue;
+    if (!line.bbox || !validBox(line.bbox) || !(/\bS\s*\/\s*N\b|\bSERIAL(?:\s+NUMBER)?\b/i.test(line.text) || /\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?/i.test(line.text) || /\bI\s*M\s*E\s*I\s*[:#-]?\s*2\b/i.test(line.text))) continue;
     const cx = (line.bbox.x0 + line.bbox.x1) / 2, cy = (line.bbox.y0 + line.bbox.y1) / 2;
     const distances = items.map(item => Math.hypot((cx - item.x) / width, (cy - item.y) / height));
     const closest = distances.indexOf(Math.min(...distances));

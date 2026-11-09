@@ -188,7 +188,10 @@ function extractImei1s(text: string) {
 }
 
 function recordSerial(record: RecordItem) {
-  return record.serial ?? record.raw.match(/\b(?:S\s*\/\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#-]?\s*([A-Z0-9]{5,25})\b/i)?.[1] ?? '';
+  if (record.serial !== undefined) return record.serial;
+  const values = [...record.raw.matchAll(/\b(?:S\s*\/\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#-]?\s*([A-Z0-9]{5,25})\b/gi)].map(match => match[1]);
+  const unique = [...new Set(values.filter(value => !/^(?:MODEL|IMEI|SERIAL|NUMBER)$/i.test(value)))];
+  return unique.length === 1 ? unique[0] : '';
 }
 
 function cameraImei(text: string) {
@@ -944,6 +947,11 @@ function safeFileName(s: string) {
 }
 
 export default function App() {
+  const [collapsedPanels, setCollapsedPanels] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-collapsed-panels') || '[]'); } catch { return []; } });
+  useEffect(() => { localStorage.setItem('imei-collapsed-panels', JSON.stringify(collapsedPanels)); }, [collapsedPanels]);
+  function togglePanel(id: string) { setCollapsedPanels(old => old.includes(id) ? old.filter(key => key !== id) : [...old, id]); }
+  function goToPanel(id: string) { setCollapsedPanels(old => old.filter(key => key !== id)); requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'})); }
+
   const hostedScanner = import.meta.env.VITE_HOSTED_SCANNER === 'true' || window.location.hostname.endsWith('.onrender.com');
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
@@ -1246,7 +1254,7 @@ export default function App() {
       .includes(query.toLowerCase()) &&
     (personFilter === 'All' || r.personId === personFilter)
   );
-  const pageSize = 40;
+  const pageSize = 10;
   const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
   const currentPage = Math.min(recordPage, pageCount);
   const pageRows = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -2058,7 +2066,8 @@ export default function App() {
         </div>
       </header>
 
-      <main>
+      <main className={collapsedPanels.length ? 'compact-page' : ''}>
+        <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button></nav>
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
         <section className="hero">
           <div>
@@ -2107,7 +2116,7 @@ export default function App() {
         </section>
 
         <section className="workspace">
-          <div className="panel upload-panel">
+          <div id="upload" className={`panel upload-panel ${collapsedPanels.includes('upload') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('upload')} onClick={() => togglePanel('upload')}>{collapsedPanels.includes('upload') ? '▸' : '▾'} Upload photos {collapsedPanels.includes('upload') ? '— expand' : '— minimize'}</button>
             <div className="section-head">
               <div>
                 <div className="eyebrow">STEP 01</div>
@@ -2269,7 +2278,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="panel export-panel">
+          <div id="export" className={`panel export-panel ${collapsedPanels.includes('export') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('export')} onClick={() => togglePanel('export')}>{collapsedPanels.includes('export') ? '▸' : '▾'} Export inventory {collapsedPanels.includes('export') ? '— expand' : '— minimize'}</button>
             <div className="section-head">
               <div>
                 <div className="eyebrow">STEP 02</div>
@@ -2422,7 +2431,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="results panel">
+        <section id="records" className={`results panel ${collapsedPanels.includes('records') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('records')} onClick={() => togglePanel('records')}>{collapsedPanels.includes('records') ? '▸' : '▾'} Scanned records {collapsedPanels.includes('records') ? '— expand' : '— minimize'}</button>
           <div className="results-top">
             <div>
               <div className="eyebrow">STEP 03</div>

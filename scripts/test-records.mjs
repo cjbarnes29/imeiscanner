@@ -28,6 +28,10 @@ try {
   assert.equal(f.extractPreferredImei(`IMEI 1: unreadable\nIMEI 2: ${second}`),second);
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 1: ${second}`),'');
   assert.equal(f.recordSerial({raw:'S/N: 00012345AB'}),'00012345AB');
+  assert.equal(f.recordSerial({raw:'S / N:\nR8YL6ABC012'}),'R8YL6ABC012');
+  assert.equal(f.recordSerial({raw:'S/N: R8YL6ABC012\nS/N: R8YL6ABC012'}),'R8YL6ABC012');
+  assert.equal(f.recordSerial({raw:'S/N: R8YL6ABC012\nS/N: OTHER12345'}),'');
+  assert.equal(f.recordSerial({raw:'S/N:\nMODEL: SM-A075F'}),'');
   assert.equal(f.recordSerial({raw:'S/N: OLD12345',serial:'000012'}),'000012');
   const row = {id:'one',pictureId:'PIC-ONE',number:3,personId:'p',name:'photo.jpg',dataUrl:'data:image/jpeg;base64,ORIGINAL',cropDataUrl:'data:image/jpeg;base64,CROP',model:'Unknown unit',imei:first,status:'Valid',duplicate:false,createdAt:'2026-11-09',uploadBatchId:'latest',raw:''};
   const blank = {...row,id:'two',pictureId:'PIC-TWO',number:4,imei:'',status:'Review',cropDataUrl:'data:image/jpeg;base64,CROP2'};
