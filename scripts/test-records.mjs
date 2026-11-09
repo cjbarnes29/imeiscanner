@@ -16,11 +16,17 @@ for (const name of names) {
 const layout = ts.createSourceFile('scan-layout.ts', await readFile('src/scan-layout.ts','utf8'), ts.ScriptTarget.Latest, true);
 helpers += layout.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'exportModel').getText(layout);
 helpers += await readFile('src/serial.ts','utf8');
+const catalogAst=ts.createSourceFile('SamsungCatalog.tsx',await readFile('src/SamsungCatalog.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+helpers += catalogAst.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='catalogModel').getText(catalogAst);
 helpers += `\nexport { ${names.join(',')} };`;
 const runtime = new URL('../verification-records-runtime.mjs', import.meta.url);
 await writeFile(runtime, ts.transpileModule(helpers, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
 try {
   const f = await import(runtime.href + '?test=' + Date.now());
+  globalThis.localStorage={getItem:key=>key==='samsung-catalog'?JSON.stringify({products:[{modelCode:'SM-L320NZKAXAA',name:'Galaxy Watch9',id:'one'},{modelCode:'SM-L320NZWAXAA',name:'Galaxy Watch9',id:'two'}]}):'{}'};
+  assert.equal(f.catalogModel('Model: SM-L320'),'Galaxy Watch9');
+  assert.equal(f.catalogModel('IMEI: 490154203237518'),undefined);
+  delete globalThis.localStorage;
   const first = '490154203237518', second = '356938035643809';
   assert.ok(f.luhnValid(first)); assert.ok(f.luhnValid(second));
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 2: ${second}`),first);

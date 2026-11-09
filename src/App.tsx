@@ -1505,8 +1505,9 @@ export default function App() {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [laptopJobId, laptopKey, laptopUrl, inventoryLoaded]);
 
-  async function scan() {
-    if (!files.length || busy || !inventoryLoaded) return;
+  async function scan(capturedFiles?: File[]) {
+    const inputFiles = capturedFiles || files;
+    if (!inputFiles.length || busy || !inventoryLoaded) return;
 
     setBusy(true);
     stopScanRequested.current = false;
@@ -1517,9 +1518,9 @@ export default function App() {
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
 
     try {
-      const scanFiles = await uniqueUploadPhotos(files);
+      const scanFiles = await uniqueUploadPhotos(inputFiles);
       if (stopScanRequested.current) { setToast('Scan stopped. Photos remain in the queue.'); return; }
-      const skippedPhotos = files.length - scanFiles.length;
+      const skippedPhotos = inputFiles.length - scanFiles.length;
       const uploadBatchId = newId();
       worker = await createWorker('eng');
 
@@ -1657,7 +1658,9 @@ export default function App() {
       addedCount += newRows.length;
       needsReviewCount += newRows.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
       if (newRows.length) setRecords(old => markDuplicateRecords([...old, ...newRows]));
-      setFiles(stopScanRequested.current ? scanFiles.slice(processedFiles) : []);
+      if (!capturedFiles) setFiles(stopScanRequested.current ? scanFiles.slice(processedFiles) : []);
+      else if (failedFiles) setFiles(old => [...old, ...capturedFiles]);
+      else if (stopScanRequested.current) setFiles(old => [...old, ...scanFiles.slice(processedFiles)]);
 
       const reviewMessage = needsReviewCount
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
@@ -2049,6 +2052,14 @@ export default function App() {
     void performExport(rows);
   }
 
+  function shareRecord(record: RecordItem) {
+    try {
+      const file = new File([dataUrlBlob(recordPhoto(record))], photoFilename(record), {type:dataUrlBlob(recordPhoto(record)).type});
+      if (!navigator.share || !navigator.canShare?.({files:[file]})) { setToast('Photo sharing is unavailable here. Copy the IMEI or serial and use Download photo, then attach it in Samsung Promoter.'); return; }
+      void navigator.share({files:[file],text:record.imei || recordSerial(record),title:exportModel(record.model) || 'Device label'}).then(()=>setToast('Share request completed. Check the receiving app before submitting.')).catch(error=>{ if(error?.name !== 'AbortError') setToast('Sharing failed. Copy the number and download the photo instead.'); });
+    } catch { setToast('Could not prepare this photo for sharing. Download it and attach it manually.'); }
+  }
+
   function saveDirectFile(blob: Blob, filename: string) {
     void downloadBlob(blob, filename).catch(error => {
       console.error(error);
@@ -2091,8 +2102,9 @@ export default function App() {
         </div>
       </header>
 
+      {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={file => void scan([file])} />}
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
-        <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button></nav>
+        <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button><button disabled={busy || !inventoryLoaded} onClick={() => setCameraOpen(true)}>📷 Camera</button></nav>
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
         <section className="hero">
           <div>
@@ -2166,8 +2178,8 @@ export default function App() {
             {androidBridge && <p className="micro">The browser upload below runs only while this screen is open. Use the button above for background scans.</p>}
 
             <SamsungCatalog />
-            <button className="subtle-btn" disabled={busy} onClick={() => setCameraOpen(true)}>Scan with camera</button>
-            {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={file => setFiles(old => [...old, file])} />}
+            <button className="subtle-btn" disabled={busy || !inventoryLoaded} onClick={() => setCameraOpen(true)}>Scan with camera</button>
+
             <div
               className="dropzone"
               onDragOver={e => e.preventDefault()}
@@ -2597,7 +2609,7 @@ export default function App() {
                   <button className="subtle-btn" onClick={() => openReview(record)}>View</button>
                   <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), photoFilename(record))}>Download photo</button>
                   <button className="subtle-btn" onClick={() => void copyText(`Model: ${exportModel(record.model)}\nIMEI: ${record.imei}\nSerial number: ${recordSerial(record)}`).then(ok => setToast(ok ? 'Record copied.' : 'Copy failed.'))}>Copy all</button>
-                  <button className="subtle-btn" onClick={() => openCropReview(record)}>Edit</button>
+                  <button className="subtle-btn" onClick={() => shareRecord(record)}>Share photo + number</button><button className="subtle-btn" onClick={() => openCropReview(record)}>Edit</button>
                   <button className="subtle-btn danger" onClick={() => deleteRecord(record)}>Delete</button>
                 </div>
               </article>)}
@@ -2835,6 +2847,8 @@ export default function App() {
 
             <div className="modal-meta">
               <span>Picture ID: {selected.pictureId}</span>
+              <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button><p>Choose Samsung Promoter if it appears in your phone’s share menu. Otherwise copy the number and download the photo, then attach them in Sales Registration. Sharing does not confirm a sales submission. <a href="https://play.google.com/store/apps/details?id=com.samsung.promoter" target="_blank" rel="noreferrer">Samsung Promoter app details</a></p>
+              <span>Catalog: {catalogModel(selected.raw) || 'No confirmed catalog match — verify the model manually'}</span>
               <span>Serial: {recordSerial(selected) || 'Not detected'}</span><span>Status: {reviewStatus(selected)}</span>
               <span>IMEI: {selected.imei || 'Not detected'}</span>
               {selected.sourcePictureId && records.filter(r => r.sourcePictureId === selected.sourcePictureId).length > 1 && (
