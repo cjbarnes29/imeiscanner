@@ -16,6 +16,7 @@ for (const name of names) {
 const layout = ts.createSourceFile('scan-layout.ts', await readFile('src/scan-layout.ts','utf8'), ts.ScriptTarget.Latest, true);
 helpers += layout.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'exportModel').getText(layout);
 helpers += await readFile('src/serial.ts','utf8');
+helpers += await readFile('src/share-package.ts','utf8');
 const catalogAst=ts.createSourceFile('SamsungCatalog.tsx',await readFile('src/SamsungCatalog.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 helpers += catalogAst.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='catalogModel').getText(catalogAst);
 helpers += `\nexport { ${names.join(',')} };`;
@@ -47,6 +48,17 @@ try {
   assert.equal(f.reviewStatus({...serialOnly,serialNeedsReview:true}),'Needs review');
   assert.ok(f.recordsCsv([serialOnly],new Map(),peopleForTest(),false,'simple').includes('RFGYC2L1PLK'));
   function peopleForTest(){return [{id:'p',label:'Person 1',name:''}];}
+  const share=f.buildSharePackage([{number:3,pictureId:'PIC-ONE',model:'Watch',imei:'490154203237518',serial:'',photo:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}]);
+  assert.equal(share.files.length,2);
+  assert.equal(await share.files[0].text(),'CROPONE');
+  assert.equal(await share.files[1].text(),'CROP2TWO');
+  assert.ok(share.files[0].name.includes('490154203237518_PIC-ONE'));
+  assert.ok(share.files[1].name.includes('000ABC123_PIC-TWO'));
+  assert.ok(share.text.includes(share.files[0].name)&&share.text.includes(share.files[1].name));
+  assert.ok(share.text.includes('IMEI: Not detected\nS/N: 000ABC123'));
+  assert.throws(()=>f.buildSharePackage([]),/Select at least one/);
+  assert.throws(()=>f.buildSharePackage(Array(51).fill({})),/50 photos/);
+  assert.throws(()=>f.buildSharePackage([{photo:'blob:temporary',pictureId:'bad'}]),/unavailable/);
   assert.equal(f.recordPhoto(row),row.cropDataUrl);
   assert.equal(f.markDuplicateRecords([row])[0],row, 'Unchanged records retain identity for storage performance');
   assert.ok(f.markDuplicateRecords([row,{...row,id:'duplicate'}]).every(r=>r.duplicate));
@@ -64,5 +76,5 @@ try {
   const sheet=workbook.getWorksheet('All IMEIs');
   assert.equal(sheet.getCell('A2').value,first); assert.equal(sheet.getCell('A3').value,'');
   assert.equal(sheet.getCell('B3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
-  console.log('PASS: camera IMEI 1 selection, upload fallback, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip.');
+  console.log('PASS: camera IMEI 1 selection, upload fallback, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
 } finally { await unlink(runtime); }

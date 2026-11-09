@@ -1,3 +1,4 @@
+import { buildSharePackage } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading } from './serial';
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
@@ -391,7 +392,7 @@ function recordPhoto(record: RecordItem) {
 function createPhotoGalleryHtml(rows: RecordItem[], people: PersonGroup[]) {
   const photoItems = rows.map(record => {
     const name = photoFilename(record).replace(/^#/, 'photo-');
-    return `<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>S/N</span><strong>${htmlEscape(recordSerial(record) || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, people))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`;
+    return `<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>S/N</span><strong>${htmlEscape(recordSerial(record) || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, people))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" data-imei="${htmlEscape(recordSerial(record))}" onclick="copyImei(this)" ${recordSerial(record) ? '' : 'disabled'}>Copy S/N</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`;
   });
   const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IMEI Lens — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> IMEI LENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
   return makeStableGalleryHtml(galleryHtml);
@@ -979,6 +980,9 @@ export default function App() {
   const [recordPage, setRecordPage] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [shareIds,setShareIds]=useState<string[]>([]);
+  const [shareStatus,setShareStatus]=useState('');
+  const [sharing,setSharing]=useState(false);
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
   const [busy, setBusy] = useState(false);
@@ -2052,12 +2056,20 @@ export default function App() {
     void performExport(rows);
   }
 
-  function shareRecord(record: RecordItem) {
+  const shareRows = records.filter(row=>shareIds.includes(row.id));
+  function shareRecord(record:RecordItem) {setShareIds([record.id]);setShareStatus('');}
+  function copyShareMessage() {
+    const message=shareRows.map(row=>`Photo #${row.number} · ${row.pictureId}\nModel: ${exportModel(row.model)||'Not identified'}\nIMEI: ${row.imei||'Not detected'}${recordSerial(row)?'\nS/N: '+recordSerial(row):''}`).join('\n\n');
+    void copyText(message).then(ok=>setShareStatus(ok?'Message copied. Paste it into your chat.':'Copy failed. Try copying individual numbers below.'));
+  }
+  function sharePhotos() {
+    if(sharing)return;
     try {
-      const file = new File([dataUrlBlob(recordPhoto(record))], photoFilename(record), {type:dataUrlBlob(recordPhoto(record)).type});
-      if (!navigator.share || !navigator.canShare?.({files:[file]})) { setToast('Photo sharing is unavailable here. Copy the IMEI or serial and use Download photo, then attach it in Samsung Promoter.'); return; }
-      void navigator.share({files:[file],text:record.imei || recordSerial(record),title:exportModel(record.model) || 'Device label'}).then(()=>setToast('Share request completed. Check the receiving app before submitting.')).catch(error=>{ if(error?.name !== 'AbortError') setToast('Sharing failed. Copy the number and download the photo instead.'); });
-    } catch { setToast('Could not prepare this photo for sharing. Download it and attach it manually.'); }
+      const payload=buildSharePackage(shareRows.map(row=>({number:row.number,pictureId:row.pictureId,model:exportModel(row.model),imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})));
+      if(!navigator.share||!navigator.canShare?.({files:payload.files})){setShareStatus('This browser cannot share these photos together. Try fewer photos, or use Copy message and the Download photo buttons below.');return;}
+      setSharing(true);setShareStatus('Choose WhatsApp, Messenger, Facebook or another available app.');
+      void navigator.share({...payload,title:'IMEI Lens device photos'}).then(()=>setShareStatus('Share request completed. Check that photos and numbers are present in your chat before sending.')).catch(error=>setShareStatus(error?.name==='AbortError'?'Sharing cancelled. Your records are still here.':'Sharing failed. Try fewer photos, or copy the message and attach downloaded photos.')).finally(()=>setSharing(false));
+    } catch(error) {setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
   }
 
   function saveDirectFile(blob: Blob, filename: string) {
@@ -2102,7 +2114,7 @@ export default function App() {
         </div>
       </header>
 
-      {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={file => void scan([file])} />}
+      {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
         <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button><button disabled={busy || !inventoryLoaded} onClick={() => setCameraOpen(true)}>📷 Camera</button></nav>
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
@@ -2556,6 +2568,7 @@ export default function App() {
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
+              <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{setShareIds(selectedRows.map(row=>row.id));setShareStatus('');}}>Share selected ({selectedRows.length})</button>
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
@@ -2910,6 +2923,14 @@ export default function App() {
         </div>
       )}
 
+      {shareIds.length>0&&<div className="modal-backdrop share-backdrop"><section className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share device photos">
+        <div className="modal-head"><h2>Share {shareRows.length} record(s)</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
+        <p>1. Share photos + numbers. 2. Choose WhatsApp, Messenger, Facebook or another app. 3. Check the photos and caption, then send.</p>
+        <p>If your chat app leaves out the caption, use Copy message here and paste it before sending. Numbers stay matched by photo number and filename.</p>
+        <div className="share-toolbar"><button className="primary" disabled={!shareRows.length||sharing} onClick={sharePhotos}>{sharing?'Sharing…':'Share photos + numbers'}</button><button className="subtle-btn" disabled={!shareRows.length} onClick={copyShareMessage}>Copy message</button><button className="subtle-btn" disabled={!shareRows.length} onClick={()=>saveDirectFile(new Blob([createPhotoGalleryHtml(shareRows,personGroups)],{type:'text/html;charset=utf-8'}),'device-photos-copy-and-download.html')}>Download viewer with Copy / Download buttons</button></div>
+        <p role="status">{shareStatus}</p><p>Downloads are saved by your browser. Gallery visibility and captions depend on your phone and the receiving app. Share up to 50 photos / 100 MB per batch.</p>
+        <div className="share-records">{shareRows.map(row=><article key={row.id}><img src={recordPhoto(row)} alt={`Photo #${row.number}`}/><div><strong>Photo #{row.number} · {row.pictureId}</strong><p>{exportModel(row.model)||'Model not identified'}</p><p>IMEI: {row.imei||'Not detected'}{recordSerial(row)&&` · S/N: ${recordSerial(row)}`}</p><button className="subtle-btn" disabled={!row.imei} onClick={()=>void copyText(row.imei).then(ok=>setShareStatus(ok?`IMEI for photo #${row.number} copied.`:'Copy failed.'))}>Copy IMEI</button>{recordSerial(row)&&<button className="subtle-btn" onClick={()=>void copyText(recordSerial(row)).then(ok=>setShareStatus(ok?'Serial copied.':'Copy failed.'))}>Copy S/N</button>}<button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(row)),photoFilename(row))}>Download photo</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds(old=>old.filter(id=>id!==row.id))}>Remove from sharing</button></div></article>)}</div>
+      </section></div>}
       {toast && (
         <div className="toast">
           <AlertTriangle size={16} />

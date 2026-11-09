@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
-export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) => void; onClose: () => void }) {
+function CameraThumbnail({file}: {file:File}) {
+  const [url,setUrl]=useState('');
+  useEffect(()=>{const value=URL.createObjectURL(file);setUrl(value);return()=>URL.revokeObjectURL(value);},[file]);
+  return <img src={url} alt={file.name} />;
+}
+
+export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[]) => void; onClose: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream>();
   const [error, setError] = useState('');
@@ -17,6 +23,15 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
   const [zoom,setZoom] = useState(1);
   const [zoomMax,setZoomMax] = useState(1);
   const alive = useRef(true);
+  const [photos,setPhotos]=useState<File[]>([]);
+  const submitted=useRef(false);
+  function currentPhoto() {return photo ? new File([photo],`camera-imei1-${crypto.randomUUID()}.jpg`,{type:'image/jpeg'}) : undefined;}
+  function finish() {
+    const current=currentPhoto(), batch=current?[...photos,current]:photos;
+    if(!batch.length||submitted.current)return;
+    submitted.current=true;onCapture(batch);onClose();
+  }
+  function close() {if((photos.length||photo)&&!window.confirm('Discard these unscanned camera photos? Choose Cancel to keep taking photos or scan them.'))return;onClose();}
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   useEffect(() => {
     let cancelled = false;
@@ -55,15 +70,17 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
     canvas.toBlob(blob => { if(!alive.current)return;setCapturing(false);if (blob) setPhoto(blob); else setError('Capture failed. Please try again.'); }, 'image/jpeg', 0.94);
   }
   return <div className="modal-backdrop"><div className="modal camera-modal" role="dialog" aria-modal="true" aria-label="Camera scanner">
-    <div className="modal-head"><h2>Scan with camera</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
-    <p>Frame the complete label: model, IMEI 1 and S/N. Check your photo, then scan it automatically.</p>
+    <div className="modal-head"><h2>Scan with camera</h2><button className="subtle-btn" onClick={close}>Close</button></div>
+    <p>Capture → Take another → Scan all. Keep one complete device label in each photo. Up to 50 photos per camera batch.</p>
     {error && <p role="alert">{error}</p>}
     {barcodeStatus && <p role="status">{barcodeStatus}</p>}
     <div className="review-photo-stage"><video ref={video} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', display: photo ? 'none' : 'block' }} />{preview && <img className="preview" src={preview} alt="Captured label" />}</div>
+    {photos.length>0&&<div className="camera-batch" aria-label="Saved camera photos">{photos.map((file,index)=><div key={file.name}><CameraThumbnail file={file}/><button onClick={()=>setPhotos(old=>old.filter(item=>item!==file))} aria-label={`Remove camera photo ${index+1}`}>× {index+1}</button></div>)}</div>}
+    <p role="status">{photos.length} kept{photo?' + 1 current photo':''} · Not scanned yet</p>
     {!photo && <div className="camera-options"><button className="subtle-btn" disabled={capturing} onClick={()=>setFacing(facing==='environment'?'user':'environment')}>Switch camera</button><label>Timer <select disabled={capturing} value={timer} onChange={e=>setTimer(Number(e.target.value))}><option value={0}>Off</option><option value={3}>3 seconds</option><option value={5}>5 seconds</option></select></label>{zoomMax>1&&<label>Zoom {zoom.toFixed(1)}× <input aria-label="Camera zoom" type="range" min={1} max={zoomMax} step={0.1} value={zoom} onChange={async e=>{const value=Number(e.target.value);try{await stream.current?.getVideoTracks()[0].applyConstraints({advanced:[{zoom:value} as MediaTrackConstraintSet]});setZoom(value);}catch{setError('Zoom is unavailable. Move closer to the label.');}}}/></label>}</div>}
     {countdown>0&&<div className="camera-countdown" role="status">{countdown}</div>}
     <div className="review-fixed-actions">
-      {photo ? <><button className="subtle-btn" onClick={() => setPhoto(undefined)}>Retake</button><button className="primary" onClick={() => { onCapture(new File([photo], `camera-imei1-${Date.now()}.jpg`, { type: 'image/jpeg' })); onClose(); }}>Scan this photo</button></> : <button className="primary camera-shutter" disabled={!ready || capturing} onClick={capture}>{capturing?'Capturing…':'● Capture'}</button>}
+      {photo ? <><button className="subtle-btn" onClick={() => setPhoto(undefined)}>Retake</button><button className="subtle-btn" disabled={photos.length>=49} onClick={()=>{const file=currentPhoto();if(file)setPhotos(old=>[...old,file]);setPhoto(undefined);setBarcodeStatus('');}}>Take another</button><button className="primary" onClick={finish}>Scan all ({photos.length+1})</button></> : <><button className="primary camera-shutter" disabled={!ready || capturing || photos.length>=50} onClick={capture}>{capturing?'Capturing…':'● Capture'}</button>{photos.length>0&&<button className="primary" disabled={capturing} onClick={finish}>Scan all ({photos.length})</button>}</>}
       {hasTorch && !photo && <button className="subtle-btn" onClick={async () => { try { await stream.current?.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: !torch } as MediaTrackConstraintSet] }); setTorch(!torch); } catch { setError('Flashlight is unavailable on this camera.'); } }}>{torch ? 'Flashlight off' : 'Flashlight on'}</button>}
     </div>
   </div></div>;
