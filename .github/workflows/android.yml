@@ -1,6 +1,8 @@
 name: Android APK
 
 on:
+  push:
+    tags: ['android-v*']
   workflow_dispatch:
 
 permissions:

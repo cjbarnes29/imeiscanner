@@ -9,6 +9,8 @@ import {
 import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
 import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
+import { CameraCapture } from './CameraCapture';
+import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 
 type RecordItem = {
   id: string;
@@ -24,6 +26,7 @@ type RecordItem = {
   cropNeedsReview?: boolean;
   model: string;
   imei: string;
+  serial?: string;
   status: 'Valid' | 'Invalid' | 'Review';
   duplicate: boolean;
   createdAt: string;
@@ -88,7 +91,10 @@ function markDuplicateRecords(rows: RecordItem[]) {
   const batchId = latest?.uploadBatchId;
   const counts = new Map<string, number>();
   for (const row of rows) if (batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei)) counts.set(row.imei, (counts.get(row.imei) || 0) + 1);
-  return rows.map(row => ({ ...row, duplicate: !!batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1 }));
+  return rows.map(row => {
+    const duplicate = !!batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1;
+    return row.duplicate === duplicate ? row : { ...row, duplicate };
+  });
 }
 
 async function photoFingerprint(file: Blob) {
@@ -181,6 +187,28 @@ function extractImei1s(text: string) {
   return [...new Set(labelled)];
 }
 
+function recordSerial(record: RecordItem) {
+  return record.serial ?? record.raw.match(/\b(?:S\s*\/\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#-]?\s*([A-Z0-9]{5,25})\b/i)?.[1] ?? '';
+}
+
+function cameraImei(text: string) {
+  const values = extractImei1s(text).filter(luhnValid);
+  return values.length === 1 ? values[0] : '';
+}
+
+async function cameraBarcodeText(photo: string, raw: string) {
+  const Detector = (window as any).BarcodeDetector;
+  if (!Detector) return raw;
+  try {
+    const image = new Image(); image.src = photo; await image.decode();
+    const codes = await new Detector().detect(image) as {rawValue:string}[];
+    // A bare 15-digit barcode cannot identify IMEI 1 versus IMEI 2.
+    // Only payloads explicitly naming IMEI 1 can supplement unreadable text.
+    const labelled = codes.map(code => code.rawValue).filter(value => cameraImei(value));
+    return [raw, ...labelled].join('\n');
+  } catch { return raw; }
+}
+
 function extractPreferredImei(text: string) {
   const first = extractImei1s(text).filter(luhnValid);
   if (first.length === 1) return first[0];
@@ -191,6 +219,8 @@ function extractPreferredImei(text: string) {
 }
 
 function identifyModel(text: string, filename: string, mostlyWhite = false) {
+  const verified = catalogModel(text);
+  if (verified) return verified;
   const labelledCode = text.match(/\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?\s*([A-Z0-9]{5})/i);
   const codes = [...new Set([...text.matchAll(/\bS\s*M\s*[-–—]\s*([A-Z0-9]{5})/gi)].map(match => match[1].toUpperCase()))];
   const labelled = labelledCode?.[1].toUpperCase();
@@ -626,7 +656,9 @@ async function createInventoryWorkbook(
 ) {
   includePhotos = layout ? layout === 'person_photo' : includePhotos && !compact;
   const ExcelJS = await import('exceljs');
-  const workbook = new ExcelJS.Workbook();
+  const Workbook = ExcelJS.Workbook || ExcelJS.default?.Workbook;
+  if (!Workbook) throw new Error('The Excel exporter could not load. Please reload the app and retry.');
+  const workbook = new Workbook();
   workbook.creator = 'IMEI Lens';
   workbook.created = new Date();
 
@@ -917,6 +949,7 @@ export default function App() {
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [recordPage, setRecordPage] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
   const [busy, setBusy] = useState(false);
@@ -1525,10 +1558,11 @@ export default function App() {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
         const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw) };
-        const cropRaw = cropResult.raw;
-        const imei = cropNeedsReview ? '' : cropResult.imei;
+        const cropRaw = file.name.startsWith('camera-imei1-') ? await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw) : cropResult.raw;
+        const cameraImeis = file.name.startsWith('camera-imei1-') ? extractImei1s(cropRaw).filter(luhnValid) : null;
+        const imei = cropNeedsReview ? '' : cameraImeis ? cameraImeis.length === 1 ? cameraImeis[0] : '' : cropResult.imei;
         if (/^\d{15}$/.test(imei)) {
-          if (seenImeis.has(imei)) { skippedImeis++; continue; }
+          if (seenImeis.has(imei) || (file.name.startsWith('camera-imei1-') && records.some(record => record.imei === imei))) { skippedImeis++; continue; }
           seenImeis.add(imei);
           fileImeis.add(imei);
         }
@@ -1656,6 +1690,7 @@ export default function App() {
       try {
         worker = await createWorker('eng');
         ({ raw, imei } = await readCropImei(worker, cropDataUrl));
+        if (selected.name.startsWith('camera-imei1-')) { raw = await cameraBarcodeText(cropDataUrl, raw); imei = cameraImei(raw); }
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, cropNeedsReview: !imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
@@ -1723,6 +1758,7 @@ export default function App() {
       try {
         if (!guidedCropWorker.current) guidedCropWorker.current = await createWorker('eng');
         ({ raw, imei } = await readCropImei(guidedCropWorker.current, cropDataUrl));
+        if (selected.name.startsWith('camera-imei1-')) { raw = await cameraBarcodeText(cropDataUrl, raw); imei = cameraImei(raw); }
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       const crops = [...reviewSplit.crops, { cropDataUrl, imei, model: manualModel.trim() || selected.model, raw }];
       setReviewSplit({ ...reviewSplit, crops });
@@ -2095,6 +2131,9 @@ export default function App() {
 
             {androidBridge && <p className="micro">The browser upload below runs only while this screen is open. Use the button above for background scans.</p>}
 
+            <SamsungCatalog />
+            <button className="subtle-btn" disabled={busy} onClick={() => setCameraOpen(true)}>Scan with camera</button>
+            {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={file => setFiles(old => [...old, file])} />}
             <div
               className="dropzone"
               onDragOver={e => e.preventDefault()}
@@ -2512,12 +2551,18 @@ export default function App() {
                 <input className="selection-check" type="checkbox" aria-label={`Select photo #${record.number}`} checked={selectedIdSet.has(record.id)} onChange={() => toggleSelected(record.id)} />
                 <button className="simple-record-photo" onClick={() => openReview(record)} aria-label={`View photo #${record.number}`}><img src={recordPhoto(record)} alt="" /></button>
                 <div className="simple-record-info">
-                  <strong>#{record.number} · {record.imei || 'IMEI needs review'}</strong>
-                  <span>{exportModel(record.model) || 'Unknown model'} · {personTitle(record, personGroups)}</span>
-                  <small>{record.pictureId}{reviewStatus(record) !== 'Valid' ? ` · ${reviewStatus(record)}` : ''}</small>
+                  <label>Model <input aria-label={`Model for record ${record.number}`} value={exportModel(record.model)} onChange={e => updateRow(record.id, { model: e.target.value })} /></label>
+                  <button className="subtle-btn" disabled={!exportModel(record.model)} onClick={() => void copyText(exportModel(record.model)).then(ok => setToast(ok ? 'Model copied.' : 'Copy failed.'))}>Copy model</button>
+                  <label>IMEI <input aria-label={`IMEI for record ${record.number}`} inputMode="numeric" value={record.imei} onChange={e => { const imei = digits(e.target.value).slice(0, 15); updateRow(record.id, { imei, status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
+                  <button className="subtle-btn" disabled={!record.imei} onClick={() => void copyText(record.imei).then(ok => setToast(ok ? 'IMEI copied.' : 'Copy failed.'))}>Copy IMEI</button>
+                  <label>Serial number <input aria-label={`Serial number for record ${record.number}`} value={recordSerial(record)} onChange={e => updateRow(record.id, { serial: e.target.value })} /></label>
+                  <button className="subtle-btn" disabled={!recordSerial(record)} onClick={() => void copyText(recordSerial(record)).then(ok => setToast(ok ? 'Serial number copied.' : 'Copy failed.'))}>Copy serial</button>
+                  {reviewStatus(record) !== 'Valid' && <small>{reviewStatus(record)}</small>}
                 </div>
                 <div className="simple-record-actions">
                   <button className="subtle-btn" onClick={() => openReview(record)}>View</button>
+                  <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), photoFilename(record))}>Download photo</button>
+                  <button className="subtle-btn" onClick={() => void copyText(`Model: ${exportModel(record.model)}\nIMEI: ${record.imei}\nSerial number: ${recordSerial(record)}`).then(ok => setToast(ok ? 'Record copied.' : 'Copy failed.'))}>Copy all</button>
                   <button className="subtle-btn" onClick={() => openCropReview(record)}>Edit</button>
                   <button className="subtle-btn danger" onClick={() => deleteRecord(record)}>Delete</button>
                 </div>

@@ -17,8 +17,8 @@ function luhnValid(value) {
   return total % 10 === 0;
 }
 
-function preferredImei(text) {
-  for (const type of [1, 2]) {
+function preferredImei(text, firstOnly = false) {
+  for (const type of firstOnly ? [1] : [1, 2]) {
     const valid = labelledNumbers(text, type).filter(luhnValid);
     if (valid.length === 1) return valid[0];
   }
@@ -104,11 +104,11 @@ export async function createScanner() {
       for (const region of selections) {
         const photo = region ? await sharp(color).extract({ left: Math.max(0, Math.floor(region.x)), top: Math.max(0, Math.floor(region.y)), width: Math.min(colorSize.width - Math.floor(region.x), Math.ceil(region.width)), height: Math.min(colorSize.height - Math.floor(region.y), Math.ceil(region.height)) }).jpeg({ quality: 85 }).toBuffer() : color;
         let cropRaw = region ? (await worker.recognize(photo)).data.text || '' : raw;
-        let imei = splitFailed ? '' : preferredImei(cropRaw);
+        let imei = splitFailed ? '' : preferredImei(cropRaw, filename.startsWith('camera-imei1-'));
         if (region && !imei && mode !== 'fast') {
           const improved = await sharp(photo).grayscale().linear(1.5, -40).jpeg().toBuffer();
           cropRaw += `\n${(await worker.recognize(improved)).data.text || ''}`;
-          imei = preferredImei(cropRaw);
+          imei = preferredImei(cropRaw, filename.startsWith('camera-imei1-'));
         }
         results.push({
           id: crypto.randomUUID(),
