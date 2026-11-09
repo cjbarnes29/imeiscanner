@@ -14,3 +14,5 @@ server-data/
 android/.gradle/
 android/app/build/
 android/app/src/main/assets/
+*.traineddata
+*.traineddata.gz

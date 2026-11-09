@@ -20,4 +20,8 @@ Chrome: app loading, camera dialog opening/closing, catalog refresh/search and p
 
 Catalog coverage is incomplete. The initial snapshot contains 109 variants; daily discovery expands the queue. This is not a complete Samsung historical catalog. Older models, all regions and full accessory compatibility still need coverage verification.
 
+The first hosted catalog job succeeded on November 9, 2026: 80 pages checked, zero fetch failures, 162 verified variants saved by commit `145163a`. The Android debug build and artifact publication succeeded for `android-v1.4-preview` at app commit `820ab77`. Downloaded artifact SHA-256: `6b7fce28b2170d9900790cc34b9286993efc62bdb59310812e8fb72200bc4dc6`.
+
+A local real-photo OCR run using the existing laptop scanner returned model `SM-A075F`, a valid IMEI and one record from the supplied single-box photo. This checks the shared OCR/crop helper path, not browser upload or physical camera capture. The detailed output remains local in `verification-real-photo.json`, excluded from Git.
+
 The Android download is a debug preview, not a production-signed Play Store release. Export important records before replacing an older debug APK: generated debug keys can differ and require uninstalling the old build.
