@@ -17,6 +17,7 @@ const layout = ts.createSourceFile('scan-layout.ts', await readFile('src/scan-la
 helpers += layout.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'exportModel').getText(layout);
 helpers += await readFile('src/serial.ts','utf8');
 helpers += await readFile('src/share-package.ts','utf8');
+helpers += await readFile('src/barcode-imei.ts','utf8');
 const catalogAst=ts.createSourceFile('SamsungCatalog.tsx',await readFile('src/SamsungCatalog.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 helpers += catalogAst.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='catalogModel').getText(catalogAst);
 helpers += `\nexport { ${names.join(',')} };`;
@@ -29,9 +30,16 @@ try {
   assert.equal(f.catalogModel('IMEI: 490154203237518'),undefined);
   delete globalThis.localStorage;
   const first = '490154203237518', second = '356938035643809';
+  const positioned=[{rawValue:first,boundingBox:{x:20,y:100,width:220,height:50}},{rawValue:second,boundingBox:{x:20,y:400,width:220,height:50}}];
+  const barcodeLines=[{text:'IMEI 1:',bbox:{x0:20,y0:160,x1:220,y1:182}},{text:'IMEI 2:',bbox:{x0:20,y0:460,x1:220,y1:482}}];
+  const barcodeText=f.labelledBarcodeImeis(positioned,barcodeLines);
+  assert.equal(f.cameraImei(barcodeText),first);
+  assert.equal(f.cameraImei(f.labelledBarcodeImeis([positioned[1]],[barcodeLines[1]])),second);
+  assert.equal(f.labelledBarcodeImeis(positioned,[{...barcodeLines[0],text:'IMEI 1 IMEI 2'}]),'');
+  assert.equal(f.labelledBarcodeImeis([{rawValue:first}],barcodeLines),'');
   assert.ok(f.luhnValid(first)); assert.ok(f.luhnValid(second));
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 2: ${second}`),first);
-  assert.equal(f.cameraImei(`IMEI 2: ${second}`),'');
+  assert.equal(f.cameraImei(`IMEI 2: ${second}`),second);
   assert.equal(f.cameraImei('IMEI 1: 490154203237519'),'');
   assert.equal(f.extractPreferredImei(`IMEI 1: unreadable\nIMEI 2: ${second}`),second);
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 1: ${second}`),'');
@@ -76,5 +84,5 @@ try {
   const sheet=workbook.getWorksheet('All IMEIs');
   assert.equal(sheet.getCell('A2').value,first); assert.equal(sheet.getCell('A3').value,'');
   assert.equal(sheet.getCell('B3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
-  console.log('PASS: camera IMEI 1 selection, upload fallback, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
+  console.log('PASS: camera/upload IMEI 1 then IMEI 2 priority, positioned barcode matching, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
 } finally { await unlink(runtime); }

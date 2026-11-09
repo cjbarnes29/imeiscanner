@@ -19,4 +19,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/test-records.mjs
+      - run: node scripts/test-device-splitting.mjs
       - run: npm run build

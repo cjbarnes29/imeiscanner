@@ -1,3 +1,5 @@
+import { labelledBarcodeImeis, type PositionedBarcode } from './barcode-imei';
+import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading } from './serial';
 
@@ -196,21 +198,20 @@ function recordSerial(record: RecordItem) {
 }
 
 function cameraImei(text: string) {
-  const values = extractImei1s(text).filter(luhnValid);
-  return values.length === 1 ? values[0] : '';
+  return extractPreferredImei(text);
 }
 
-async function cameraBarcodeText(photo: string, raw: string) {
-  const Detector = (window as any).BarcodeDetector;
-  if (!Detector) return raw;
+async function cameraBarcodeText(photo: string, raw: string, lines:OcrLine[] = []) {
   try {
-    const image = new Image(); image.src = photo; await image.decode();
-    const codes = await new Detector().detect(image) as {rawValue:string}[];
-    // A bare 15-digit barcode cannot identify IMEI 1 versus IMEI 2.
-    // Only payloads explicitly naming IMEI 1 can supplement unreadable text.
-    const labelled = codes.map(code => code.rawValue).filter(value => cameraImei(value));
-    return [raw, ...labelled].join('\n');
-  } catch { return raw; }
+    const image=new Image();image.src=photo;await image.decode();
+    let values:string[]=[];let positioned:PositionedBarcode[]=[];
+    const Detector=(window as any).BarcodeDetector;
+    if(Detector){try{positioned=await new Detector().detect(image);values=positioned.map(code=>code.rawValue);}catch{}}
+    if(!values.length){const {BrowserMultiFormatReader}=await import('@zxing/browser');try{const result=await new BrowserMultiFormatReader().decodeFromImageElement(image);values=[result.getText()];}catch{}}
+    // A bare barcode cannot tell us IMEI 1 versus IMEI 2. Only explicitly
+    // labelled payloads supplement OCR; conflicting numbers remain for review.
+    return [raw,labelledBarcodeImeis(positioned,lines),...values.filter(value=>extractPreferredImei(value)||extractSerial(value))].join('\n');
+  }catch{return raw;}
 }
 
 function extractPreferredImei(text: string) {
@@ -543,7 +544,7 @@ function scaleOcrLines(lines: OcrLine[], from: HTMLCanvasElement, to: HTMLCanvas
   } }));
 }
 
-async function readSerialPhoto(worker: Awaited<ReturnType<typeof createWorker>>, photo: string) {
+async function readSerialPhoto(worker: Awaited<ReturnType<typeof createWorker>>, photo: string, onLines?: (lines:OcrLine[])=>void) {
   const image = new Image(); image.src=photo; await image.decode();
   const canvas=document.createElement('canvas'); canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
   const ctx=canvas.getContext('2d')!;ctx.drawImage(image,0,0);
@@ -554,7 +555,12 @@ async function readSerialPhoto(worker: Awaited<ReturnType<typeof createWorker>>,
     target.width=Math.ceil(region.width*scale*1.2);target.height=Math.ceil(region.height*scale*1.2);
     const c=target.getContext('2d')!;c.fillStyle='white';c.fillRect(0,0,target.width,target.height);c.translate(target.width/2,target.height/2);c.rotate(angle*Math.PI/180);
     c.filter='grayscale(1) contrast(1.15)';c.drawImage(canvas,region.x,region.y,region.width,region.height,-region.width*scale/2,-region.height*scale/2,region.width*scale,region.height*scale);
-    const raw=(await worker.recognize(target)).data.text || ''; if(serialReading(raw).serial) { await worker.setParameters({tessedit_pageseg_mode: PSM.SPARSE_TEXT}); return raw; }
+    const result=await worker.recognize(target);const raw=result.data.text || '';
+    if(extractPreferredImei(raw)||serialReading(raw).serial) {
+      if(onLines){const radians=angle*Math.PI/180,cos=Math.cos(radians),sin=Math.sin(radians);
+        onLines(ocrLines(result.data).map(line=>{const points=[[line.bbox.x0,line.bbox.y0],[line.bbox.x1,line.bbox.y0],[line.bbox.x0,line.bbox.y1],[line.bbox.x1,line.bbox.y1]].map(([x,y])=>{const dx=x-target.width/2,dy=y-target.height/2;return {x:region.x+region.width/2+(dx*cos+dy*sin)/scale,y:region.y+region.height/2+(-dx*sin+dy*cos)/scale};});return {text:line.text,bbox:{x0:Math.max(0,Math.min(...points.map(p=>p.x))),y0:Math.max(0,Math.min(...points.map(p=>p.y))),x1:Math.min(canvas.width,Math.max(...points.map(p=>p.x))),y1:Math.min(canvas.height,Math.max(...points.map(p=>p.y)))}};}));
+      }
+ await worker.setParameters({tessedit_pageseg_mode: PSM.SPARSE_TEXT}); return raw; }
   }
   await worker.setParameters({tessedit_pageseg_mode: PSM.SPARSE_TEXT});
   return '';
@@ -562,7 +568,9 @@ async function readSerialPhoto(worker: Awaited<ReturnType<typeof createWorker>>,
 
 async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cropDataUrl: string, mode: 'fast' | 'standard' | 'detailed' = 'detailed') {
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
-  let raw = (await worker.recognize(cropDataUrl)).data.text || '';
+  const firstRead=await worker.recognize(cropDataUrl);
+  let cropLines=ocrLines(firstRead.data);
+  let raw=firstRead.data.text || '';
   let first = extractImei1s(raw);
   if (mode !== 'fast' && (first.length !== 1 || !luhnValid(first[0]))) {
     const enhanced = await createOcrImage(new File([dataUrlBlob(cropDataUrl)], 'crop.jpg', { type: 'image/jpeg' }));
@@ -576,8 +584,8 @@ async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cr
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
     }
   }
-  if (!extractPreferredImei(raw) && !extractSerial(raw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl); if (serialRaw) raw = serialRaw; }
-  return { raw, imei: extractPreferredImei(raw) };
+  if (!extractPreferredImei(raw) && !extractSerial(raw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl,focusedLines=>{cropLines=focusedLines;}); if (serialRaw) raw = serialRaw; }
+  return { raw, imei: extractPreferredImei(raw), lines:cropLines };
 }
 
 function csvCell(value: string) {
@@ -1523,7 +1531,7 @@ export default function App() {
 
     try {
       const scanFiles = await uniqueUploadPhotos(inputFiles);
-      if (stopScanRequested.current) { setToast('Scan stopped. Photos remain in the queue.'); return; }
+      if (stopScanRequested.current) { if(capturedFiles)setFiles(old=>[...old,...capturedFiles]);setToast('Scan stopped. Photos remain in the queue.'); return; }
       const skippedPhotos = inputFiles.length - scanFiles.length;
       const uploadBatchId = newId();
       worker = await createWorker('eng');
@@ -1533,6 +1541,8 @@ export default function App() {
       let needsReviewCount = 0;
       let failedFiles = 0;
       let skippedImeis = 0;
+      let skippedSerials = 0;
+      const seenSerials = new Set<string>();
       const seenImeis = new Set<string>();
       let processedFiles = 0;
       let nextNumber = records.reduce((max, record) => Math.max(max, record.number), 2) + 1;
@@ -1542,6 +1552,7 @@ export default function App() {
         const file = scanFiles[i];
         const beforeCount = newRows.length;
         const fileImeis = new Set<string>();
+        const fileSerials = new Set<string>();
 
         setProgress(
           `Scanning ${i + 1} of ${scanFiles.length}: ${file.name}`
@@ -1573,35 +1584,40 @@ export default function App() {
           }
         }
 
-        const mostlyWhite = looksMostlyWhite(color);
-        const segmentationContext = color.getContext('2d');
-        const frame = imeis.length > 1 && segmentationContext
-          ? segmentationContext.getImageData(0, 0, sourceWidth, sourceHeight)
-          : undefined;
-        const regions = planImeiCrops(imeis, lines, sourceWidth, sourceHeight, frame);
-        let croppedPhotos = new Map<string, string>();
-        if (regions.length === imeis.length && imeis.length > 1) {
-          try {
-            croppedPhotos = await createCroppedPhotos(color, regions, sourceWidth, sourceHeight);
-          } catch (error) {
-            console.error('Unable to split photo', error);
-          }
+        // Focus and deskew only when the first passes cannot identify a device.
+        // Re-OCR the returned text on the original coordinates for split planning.
+        if(!extractPreferredImei(raw)&&!extractSerial(raw)&&scanMode!=='fast'){
+          const focused=await readSerialPhoto(worker,dataUrl,focusedLines=>{lines=focusedLines;});
+          if(focused){raw += '\n'+focused;}
         }
-        const cropNeedsReview = imeis.length > 1 && croppedPhotos.size !== imeis.length;
+        const mostlyWhite = looksMostlyWhite(color);
+        let anchors=deviceAnchors(lines,sourceWidth,sourceHeight);
+        const multiText=extractImei1s(raw).length>1 || [...new Set([...raw.matchAll(/\bIMEI\s*2\s*[:#-]?\s*((?:\d[ -]*){15})/gi)].map(m=>m[1].replace(/\D/g,'')))].length>1 || serialReading(raw).serialNeedsReview;
+        const frame=anchors.length>1?color.getContext('2d')?.getImageData(0,0,sourceWidth,sourceHeight):undefined;
+        if(frame)anchors=deviceAnchors(lines,sourceWidth,sourceHeight,frame);
+        const regions=planDeviceCrops(anchors,lines,sourceWidth,sourceHeight,frame);
+        let croppedPhotos=new Map<string,string>();
+        if(regions.length===anchors.length&&anchors.length>1){try{croppedPhotos=await createCroppedPhotos(color,regions,sourceWidth,sourceHeight);}catch(error){console.error('Unable to split labels',error);}}
+        const cropNeedsReview=(anchors.length>1&&croppedPhotos.size!==anchors.length)||(anchors.length<2&&multiText);
+        const cropKeys=croppedPhotos.size?[...croppedPhotos.keys()]:[''];
 
         const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
-        for (const detectedImei of cropNeedsReview ? [''] : imeis.length ? imeis : ['']) {
+        for (const detectedImei of cropNeedsReview ? [''] : cropKeys) {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
-        const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw) };
-        let cropRaw = file.name.startsWith('camera-imei1-') ? await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw) : cropResult.raw;
+        const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw), lines };
+        let cropRaw = file.name.startsWith('camera-') ? await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines) : cropResult.raw;
         if (!cropNeedsReview && !extractPreferredImei(cropRaw) && !extractSerial(cropRaw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl || dataUrl); if (serialRaw) cropRaw = serialRaw; }
-        const cameraImeis = file.name.startsWith('camera-imei1-') ? extractImei1s(cropRaw).filter(luhnValid) : null;
-        const imei = cropNeedsReview ? '' : cameraImeis ? cameraImeis.length === 1 ? cameraImeis[0] : '' : cropResult.imei;
+        const imei = cropNeedsReview ? '' : extractPreferredImei(cropRaw);
         if (/^\d{15}$/.test(imei)) {
-          if (seenImeis.has(imei) || (file.name.startsWith('camera-imei1-') && records.some(record => record.imei === imei))) { skippedImeis++; continue; }
+          if (seenImeis.has(imei) || (file.name.startsWith('camera-') && records.some(record => record.imei === imei))) { skippedImeis++; continue; }
           seenImeis.add(imei);
           fileImeis.add(imei);
+        }
+        const serialChoice=serialReading(cropRaw);
+        if(file.name.startsWith('camera-')&&!imei&&!cropNeedsReview&&serialChoice.serial&&!serialChoice.serialNeedsReview){
+          if(seenSerials.has(serialChoice.serial)||records.some(row=>!row.imei&&recordSerial(row)===serialChoice.serial)){skippedSerials++;continue;}
+          seenSerials.add(serialChoice.serial);fileSerials.add(serialChoice.serial);
         }
         const regionText = region && cropDataUrl ? lines.filter(line => {
           const x = (line.bbox.x0 + line.bbox.x1) / 2;
@@ -1649,6 +1665,7 @@ export default function App() {
           console.error(`Could not scan ${file.name}`, error);
           newRows = newRows.slice(0, beforeCount);
           for (const imei of fileImeis) seenImeis.delete(imei);
+          for (const serial of fileSerials) seenSerials.delete(serial);
           failedFiles++;
         }
         setCompletedFiles(i + 1);
@@ -1670,12 +1687,11 @@ export default function App() {
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${skippedSerials ? ` Removed ${skippedSerials} repeated serial row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
-      setToast(
-        'Scanning failed. Try a clearer image or smaller batch.'
-      );
+      if(capturedFiles)setFiles(old=>[...old,...capturedFiles]);
+      setToast('Scanning failed. Captured photos stay in the upload queue for retry. Check your connection for OCR resources, or try Phone camera and a clearer label.');
     } finally {
       if (worker) await worker.terminate();
 
@@ -1726,11 +1742,11 @@ export default function App() {
       const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
       const photos = await createCroppedPhotos(source, [{ imei: 'manual', x, y, width, height }], 100, 100);
       const cropDataUrl = photos.get('manual')!;
-      let raw = '', imei = '';
+      let raw = '', imei = '';let barcodeLines:OcrLine[]=[];
       try {
         worker = await createWorker('eng');
-        ({ raw, imei } = await readCropImei(worker, cropDataUrl));
-        if (selected.name.startsWith('camera-imei1-')) { raw = await cameraBarcodeText(cropDataUrl, raw); imei = cameraImei(raw); }
+        ({ raw, imei, lines:barcodeLines } = await readCropImei(worker, cropDataUrl));
+        if (selected.name.startsWith('camera-')) { raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw); }
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, ...serialReading(raw), cropNeedsReview: !imei && !serialReading(raw).serial, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
@@ -1794,11 +1810,11 @@ export default function App() {
       const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
       const photos = await createCroppedPhotos(source, [{ imei: 'manual', x, y, width, height }], 100, 100);
       const cropDataUrl = photos.get('manual')!;
-      let raw = '', imei = '';
+      let raw = '', imei = '';let barcodeLines:OcrLine[]=[];
       try {
         if (!guidedCropWorker.current) guidedCropWorker.current = await createWorker('eng');
-        ({ raw, imei } = await readCropImei(guidedCropWorker.current, cropDataUrl));
-        if (selected.name.startsWith('camera-imei1-')) { raw = await cameraBarcodeText(cropDataUrl, raw); imei = cameraImei(raw); }
+        ({ raw, imei, lines:barcodeLines } = await readCropImei(guidedCropWorker.current, cropDataUrl));
+        if (selected.name.startsWith('camera-')) { raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw); }
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       const crops = [...reviewSplit.crops, { cropDataUrl, imei, model: manualModel.trim() || selected.model, raw }];
       setReviewSplit({ ...reviewSplit, crops });

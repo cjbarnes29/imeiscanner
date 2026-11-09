@@ -23,5 +23,5 @@ export function serialLabelRegion(frame: {data:ArrayLike<number>;width:number;he
 
 export function serialReading(text: string) {
  const values = [...text.toUpperCase().matchAll(/\b(?:S\s*[/|I]\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#.-]?\s*([A-Z0-9]{5,25})\b/g)].map(m=>m[1]).filter(v=>! /^(MODEL|IMEI|SERIAL|NUMBER)$/.test(v));
- return {serial:values[0] || '',serialNeedsReview:new Set(values).size>1};
+ return {serial:values[0] || '',serialNeedsReview:new Set(values).size>1 || values.some(value=>value.length<8)};
 }

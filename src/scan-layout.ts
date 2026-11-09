@@ -8,10 +8,10 @@ export function exportModel(model: string) {
 }
 
 /** Use visible, high-coverage edges to separate distinct label groups. */
-export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, height: number, frame?: PixelFrame): CropRegion[] {
+export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, height: number, frame?: PixelFrame, anchors?: {key:string;box:OcrLine['bbox']}[]): CropRegion[] {
   if (imeis.length < 2 || width <= 0 || height <= 0 || !frame || frame.width !== width || frame.height !== height) return [];
   const validBox = (box: OcrLine['bbox']) => [box.x0, box.x1, box.y0, box.y1].every(Number.isFinite) && box.x1 > box.x0 && box.y1 > box.y0;
-  const located = imeis.map(imei => {
+  const located = anchors ? anchors.map(anchor=>({imei:anchor.key,box:anchor.box,x:(anchor.box.x0+anchor.box.x1)/2,y:(anchor.box.y0+anchor.box.y1)/2})) : imeis.map(imei => {
     let matches = lines.filter(line => line.bbox && validBox(line.bbox) && line.text.replace(/\D/g, '').includes(imei));
     if (!matches.length) {
       // OCR sometimes wraps the number onto the line after "IMEI 1".
@@ -34,7 +34,7 @@ export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, 
   // them inside the sticker/box search area when they belong to one anchor.
   const context = items.map(item => ({ ...item.box }));
   for (const line of lines) {
-    if (!line.bbox || !validBox(line.bbox) || !(/\bS\s*\/\s*N\b|\bSERIAL(?:\s+NUMBER)?\b/i.test(line.text) || /\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?/i.test(line.text) || /\bI\s*M\s*E\s*I\s*[:#-]?\s*2\b/i.test(line.text))) continue;
+    if (!line.bbox || !validBox(line.bbox) || !(/\bS\s*[/I|]\s*N\b|\bSERIAL(?:\s+NUMBER)?\b/i.test(line.text) || /\bmodel\s*[:：-]?\s*S\s*M\s*[-–—]?/i.test(line.text) || /\bI\s*M\s*E\s*I\s*[:#-]?\s*[12]\b/i.test(line.text))) continue;
     const cx = (line.bbox.x0 + line.bbox.x1) / 2, cy = (line.bbox.y0 + line.bbox.y1) / 2;
     const distances = items.map(item => Math.hypot((cx - item.x) / width, (cy - item.y) / height));
     const closest = distances.indexOf(Math.min(...distances));
