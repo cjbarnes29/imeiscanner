@@ -223,6 +223,11 @@ function extractPreferredImei(text: string) {
   return unique.length === 1 ? unique[0] : '';
 }
 
+function hasMultipleDeviceText(raw:string) {
+  const second=[...new Set([...raw.matchAll(/\bIMEI\s*2\s*[:#-]?\s*((?:\d[ -]*){15})/gi)].map(m=>m[1].replace(/\D/g,'')))];
+  return extractImei1s(raw).length>1 || second.length>1 || (!extractPreferredImei(raw) && !extractSerial(raw) && !!serialReading(raw).serial);
+}
+
 function identifyModel(text: string, filename: string, mostlyWhite = false) {
   const verified = catalogModel(text);
   if (verified) return verified;
@@ -1592,7 +1597,7 @@ export default function App() {
         }
         const mostlyWhite = looksMostlyWhite(color);
         let anchors=deviceAnchors(lines,sourceWidth,sourceHeight);
-        const multiText=extractImei1s(raw).length>1 || [...new Set([...raw.matchAll(/\bIMEI\s*2\s*[:#-]?\s*((?:\d[ -]*){15})/gi)].map(m=>m[1].replace(/\D/g,'')))].length>1 || serialReading(raw).serialNeedsReview;
+        const multiText=hasMultipleDeviceText(raw);
         const frame=anchors.length>1?color.getContext('2d')?.getImageData(0,0,sourceWidth,sourceHeight):undefined;
         if(frame)anchors=deviceAnchors(lines,sourceWidth,sourceHeight,frame);
         const regions=planDeviceCrops(anchors,lines,sourceWidth,sourceHeight,frame);

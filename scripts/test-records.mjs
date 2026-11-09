@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -37,6 +37,9 @@ try {
   assert.equal(f.cameraImei(f.labelledBarcodeImeis([positioned[1]],[barcodeLines[1]])),second);
   assert.equal(f.labelledBarcodeImeis(positioned,[{...barcodeLines[0],text:'IMEI 1 IMEI 2'}]),'');
   assert.equal(f.labelledBarcodeImeis([{rawValue:first}],barcodeLines),'');
+  assert.equal(f.hasMultipleDeviceText(`IMEI 1: ${first}\nIMEI 2: ${second}\nS/N: R8YL6`),false);
+  assert.equal(f.hasMultipleDeviceText('S/N: FIRST0001\nS/N: SECOND002'),true);
+  assert.equal(f.hasMultipleDeviceText('S/N: RFGYC2L1PLK'),false);
   assert.ok(f.luhnValid(first)); assert.ok(f.luhnValid(second));
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 2: ${second}`),first);
   assert.equal(f.cameraImei(`IMEI 2: ${second}`),second);
