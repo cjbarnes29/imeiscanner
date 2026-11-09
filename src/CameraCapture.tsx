@@ -38,7 +38,7 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
     } else setBarcodeStatus('This browser does not provide barcode detection. Reading the printed label instead.');
     canvas.toBlob(blob => { if (blob) setPhoto(blob); else setError('Capture failed. Please try again.'); }, 'image/jpeg', 0.94);
   }
-  return <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label="Camera scanner">
+  return <div className="modal-backdrop"><div className="modal camera-modal" role="dialog" aria-modal="true" aria-label="Camera scanner">
     <div className="modal-head"><h2>Scan with camera</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     <p>Frame the complete label, including IMEI 1 and the model. Capture, check the photo, then add it to the scan queue.</p>
     {error && <p role="alert">{error}</p>}

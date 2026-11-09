@@ -25,3 +25,5 @@ The first hosted catalog job succeeded on November 9, 2026: 80 pages checked, ze
 A local real-photo OCR run using the existing laptop scanner returned model `SM-A075F`, a valid IMEI and one record from the supplied single-box photo. This checks the shared OCR/crop helper path, not browser upload or physical camera capture. The detailed output remains local in `verification-real-photo.json`, excluded from Git.
 
 The Android download is a debug preview, not a production-signed Play Store release. Export important records before replacing an older debug APK: generated debug keys can differ and require uninstalling the old build.
+
+The 1.4.1 follow-up enlarges camera/catalog touch targets and matches the catalog controls to the app theme. Chrome phone-width testing found no horizontal page overflow (375px content / 375px viewport); this is browser emulation, not a physical device test.
