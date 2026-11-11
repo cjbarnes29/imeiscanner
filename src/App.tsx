@@ -2,7 +2,7 @@ import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickIm
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
-import { planMove, planUnassign, planDeletePerson, planAllocation, formatModelReview, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
+import { planMove, planUnassign, planDeletePerson, planAllocation, formatModelReview, formatPersonShare, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
@@ -1481,6 +1481,13 @@ export default function App() {
   const [collapsedPanels, setCollapsedPanels] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-collapsed-panels') || '[]'); } catch { return []; } });
   useEffect(() => { localStorage.setItem('imei-collapsed-panels', JSON.stringify(collapsedPanels)); }, [collapsedPanels]);
   function togglePanel(id: string) { setCollapsedPanels(old => old.includes(id) ? old.filter(key => key !== id) : [...old, id]); }
+  /** Stat cards and tabs: open a tab (and optionally a filter), then scroll to the records. */
+  function jumpTo(tab: 'records' | 'models' | 'share', nextFilter?: string) {
+    setRecordsTab(tab);
+    if (nextFilter) { setFilter(nextFilter); setQuery(''); setPersonFilter('All'); setRecordPage(1); }
+    setCollapsedPanels(old => old.filter(key => key !== 'records'));
+    requestAnimationFrame(() => document.getElementById('records')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
   function goToPanel(id: string) { setCollapsedPanels(old => old.filter(key => key !== id)); requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'})); }
 
   const hostedScanner = import.meta.env.VITE_HOSTED_SCANNER === 'true' || window.location.hostname.endsWith('.onrender.com');
@@ -1560,8 +1567,11 @@ export default function App() {
   const [bulkEditChecked, setBulkEditChecked] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState('');
   const [deletePersonId, setDeletePersonId] = useState('');
-  const [splitModel, setSplitModel] = useState<{ key: string; label: string; ids: string[] } | null>(null);
-  const [splitCounts, setSplitCounts] = useState<Record<string, number>>({});
+  const [peopleOpen, setPeopleOpen] = useState(true);
+  /** The tab under Scanned records (Detailed mode): the list, giving models out, or sharing. */
+  const [recordsTab, setRecordsTab] = useState<'records' | 'models' | 'share'>('records');
+  /** Unconfirmed amounts: model -> person -> how many. Only models you changed appear here. */
+  const [giveDraft, setGiveDraft] = useState<Record<string, Record<string, number>>>({});
   const [personUndo, setPersonUndo] = useState<{ people: PersonGroup[]; records: RecordItem[]; text: string; activePersonId: string } | null>(null);
   useEffect(() => { if (!personUndo) return; const timer = setTimeout(() => setPersonUndo(null), 12000); return () => clearTimeout(timer); }, [personUndo]);
   // People whose phones were all moved away (so their empty view can say "All IMEIs moved."); kept across reloads.
@@ -1780,7 +1790,6 @@ export default function App() {
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
-  useBackLayer(!!splitModel, () => setSplitModel(null), 'split-model');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
 
@@ -1898,8 +1907,163 @@ export default function App() {
       .map(model => ({ ...model, total: model.holders.reduce((sum, holder) => sum + holder.count, 0) }));
   }, [review, reviewPerson, reviewQuery]);
   const reviewText = (models: typeof reviewShown) => formatModelReview(models.map(model => ({ label: model.label, holders: model.holders })), overviewNumbers);
+  /** For each person (and Unassigned): the models they already have, with counts. */
+  const personModels = useMemo(() => {
+    const map = new Map<string, { label: string; count: number; numbers: string[]; ids: string[] }[]>();
+    for (const model of review) for (const holder of model.holders) {
+      const list = map.get(holder.id) || [];
+      list.push({ label: model.label, count: holder.count, numbers: holder.numbers, ids: holder.ids });
+      map.set(holder.id, list);
+    }
+    for (const list of map.values()) list.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    return map;
+  }, [review]);
+  /** Amounts you are editing in the Give models tab: what the draft says, else what the person holds now. */
+  const giveValue = (group: { key: string; byPerson: Record<string, number> }, personId: string) => giveDraft[group.key]?.[personId] ?? (group.byPerson[personId] || 0);
+  const giveRest = (group: { key: string; ids: string[]; byPerson: Record<string, number> }) => group.ids.length - personGroups.reduce((sum, person) => sum + giveValue(group, person.id), 0);
+  function giveSet(group: { key: string; ids: string[]; byPerson: Record<string, number> }, personId: string, wanted: number) {
+    const now = giveValue(group, personId), value = Math.max(0, Math.min(Math.floor(wanted) || 0, now + giveRest(group)));
+    setGiveDraft(old => ({ ...old, [group.key]: { ...Object.fromEntries(personGroups.map(person => [person.id, giveValue(group, person.id)])), [personId]: value } }));
+  }
+  function giveAll(group: { key: string; ids: string[]; byPerson: Record<string, number> }, personId: string) {
+    setGiveDraft(old => ({ ...old, [group.key]: Object.fromEntries(personGroups.map(person => [person.id, person.id === personId ? group.ids.length : 0])) }));
+  }
+  const giveChanged = modelGroups.filter(group => giveDraft[group.key] && personGroups.some(person => giveValue(group, person.id) !== (group.byPerson[person.id] || 0)));
+  /** Confirm: apply every edited model, then open the Share tab. */
+  function confirmGive() {
+    if (!giveChanged.length) return;
+    let next = records;
+    for (const group of giveChanged) next = planAllocation(next, group.ids, personGroups.map(person => ({ personId: person.id, count: giveValue(group, person.id) }))).records;
+    setRecords(next);
+    setSelectedIds([]);
+    setEmptiedPeople(old => old.filter(id => next.some(row => row.personId === id)));
+    setGiveDraft({});
+    setRecordsTab('share');
+    setToast(`Changes confirmed for ${giveChanged.length} model${giveChanged.length === 1 ? '' : 's'}. Share the lists below.`);
+  }
+  /** WhatsApp opens with the text ready; you choose the chat. Very long texts go through the share menu instead. */
+  function openWhatsApp(text: string) {
+    if (!text) return;
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    if (url.length > 7000) { void shareOrCopyText(text, 'The list'); return; }
+    window.open(url, '_blank', 'noopener');
+  }
+  const [shareSerial, setShareSerial] = useState(false);
+  /** The text sent for one person: each phone's IMEI (and IMEI 2) on its own line; serial numbers only if ticked. */
+  const sharePayload = (section: { name: string; items: { label: string; count: number; ids: string[] }[] }) => ({
+    name: section.name,
+    items: section.items.map(item => ({
+      label: item.label,
+      count: item.count,
+      numbers: item.ids.flatMap(id => {
+        const row = records.find(candidate => candidate.id === id);
+        if (!row) return [];
+        const pair = recordImeiPair(row), serial = recordSerial(row);
+        const lines = [pair.imei1, pair.imei2].filter(Boolean);
+        if (serial && (shareSerial || !lines.length)) lines.push(`S/N ${serial}`);
+        return lines.length ? lines : ['No number detected'];
+      }),
+    })),
+  });
+  const shareSections = [
+    ...personGroups.map(person => ({ id: person.id, name: personName(person), items: personModels.get(person.id) || [] })),
+    { id: UNASSIGNED_FILTER, name: 'Unassigned', items: personModels.get(UNASSIGNED_FILTER) || [] },
+  ].filter(section => section.items.length);
+  const idsOfSection = (id: string) => records.filter(row => id === UNASSIGNED_FILTER ? !personGroups.some(person => person.id === row.personId) : row.personId === id).map(row => row.id);
+
+  const peoplePanel = (
+            <details className="people-panel" open={peopleOpen} onToggle={event => setPeopleOpen((event.currentTarget as HTMLDetailsElement).open)}>
+              <summary>People <b>{personGroups.length}</b></summary>
+              <ul className="people-list">
+                {personGroups.map(person => <li key={person.id}>
+                  {editingPersonId === person.id
+                    ? <>
+                      <input autoFocus aria-label="Person name" value={personDraft} placeholder="Type a name" maxLength={60} onChange={event => setPersonDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { renamePerson(person.id, personDraft.trim()); setEditingPersonId(''); } if (event.key === 'Escape') setEditingPersonId(''); }} />
+                      <button className="primary" onClick={() => { renamePerson(person.id, personDraft.trim()); setEditingPersonId(''); }}>Save name</button>
+                      <button className="subtle-btn" onClick={() => setEditingPersonId('')}>Cancel</button>
+                    </>
+                    : <>
+                      <span className="person-name"><strong>{personName(person)}</strong><small>{(personModels.get(person.id) || []).reduce((sum, item) => sum + item.count, 0)} phone{(personModels.get(person.id) || []).reduce((sum, item) => sum + item.count, 0) === 1 ? '' : 's'}</small></span>
+                      <button className="subtle-btn" aria-label={`Rename ${personName(person)}`} onClick={() => { setEditingPersonId(person.id); setPersonDraft(person.name); }}><Pencil size={14} /> Rename</button>
+                      <button className="subtle-btn danger" aria-label={`Delete ${personName(person)}`} disabled={personGroups.length < 2} title={personGroups.length < 2 ? 'Keep at least one person' : undefined} onClick={() => setDeletePersonId(person.id)}><Trash2 size={14} /> Delete</button>
+                      <div className="person-models" aria-label={`Models ${personName(person)} has`}>
+                        {(personModels.get(person.id) || []).length ? (personModels.get(person.id) || []).map(item => <span key={item.label}>{item.label} <b>× {item.count}</b></span>) : <em>No models yet</em>}
+                      </div>
+                    </>}
+                </li>)}
+                {(personModels.get(UNASSIGNED_FILTER) || []).length > 0 && <li className="people-unassigned">
+                  <span className="person-name"><strong>Unassigned</strong><small>{(personModels.get(UNASSIGNED_FILTER) || []).reduce((sum, item) => sum + item.count, 0)} phones</small></span>
+                  <div className="person-models" aria-label="Models that are unassigned">{(personModels.get(UNASSIGNED_FILTER) || []).map(item => <span key={item.label}>{item.label} <b>× {item.count}</b></span>)}</div>
+                </li>}
+              </ul>
+              <button className="subtle-btn" onClick={addPersonGroup}>+ Add person</button>
+            </details>
+  );
   /** Models panel: when a person is chosen, only the models that person holds. */
   const panelGroups = modelGroups.filter(group => !reviewPerson || (reviewPerson === UNASSIGNED_FILTER ? group.ids.length - personGroups.reduce((sum, person) => sum + (group.byPerson[person.id] || 0), 0) > 0 : (group.byPerson[reviewPerson] || 0) > 0));
+  const modelsTab = (
+    <div className="give-tab">
+      {peoplePanel}
+      <label className="models-filter">Show models of
+        <select aria-label="Show models of a person" value={reviewPerson} onChange={event => setReviewPerson(event.target.value)}>
+          <option value="">Everyone</option>
+          {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+          <option value={UNASSIGNED_FILTER}>Unassigned</option>
+        </select>
+      </label>
+      <p className="settings-help">Tap − or + to change how many of each model a person gets. Phones nobody gets stay Unassigned. Then press Confirm.</p>
+      <ul className="models-list">
+        {panelGroups.length === 0 && <li><em>{modelGroups.length ? 'That person holds no models yet.' : 'Scan some phones first and their models appear here.'}</em></li>}
+        {panelGroups.map(group => <li key={group.key} className="give-card">
+          <div className="give-head"><strong>{group.label}</strong><small>{group.code ? `${group.code} · ` : ''}{group.ids.length} phone{group.ids.length === 1 ? '' : 's'}</small></div>
+          <ul className="split-list">
+            {personGroups.map(person => <li key={person.id}>
+              <span>{personName(person)}</span>
+              <button type="button" className="subtle-btn" aria-label={`One less ${group.label} for ${personName(person)}`} disabled={giveValue(group, person.id) <= 0} onClick={() => giveSet(group, person.id, giveValue(group, person.id) - 1)}>−</button>
+              <input type="number" inputMode="numeric" min={0} max={group.ids.length} aria-label={`How many ${group.label} for ${personName(person)}`} value={giveValue(group, person.id)} onChange={event => giveSet(group, person.id, Number(event.target.value))} />
+              <button type="button" className="subtle-btn" aria-label={`One more ${group.label} for ${personName(person)}`} disabled={giveRest(group) <= 0} onClick={() => giveSet(group, person.id, giveValue(group, person.id) + 1)}>+</button>
+            </li>)}
+            <li className="split-rest"><span>Unassigned (the rest)</span><b>{giveRest(group)}</b></li>
+          </ul>
+          <label className="move-to">Give all to
+            <select aria-label={`Give all ${group.label} to`} value="" onChange={event => { if (event.target.value) giveAll(group, event.target.value); }}>
+              <option value="">Choose person</option>
+              {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+            </select>
+          </label>
+        </li>)}
+      </ul>
+      <div className="confirm-bar" role="group" aria-label="Confirm changes">
+        <span>{giveChanged.length ? `${giveChanged.length} model${giveChanged.length === 1 ? '' : 's'} changed` : 'No changes yet'}</span>
+        <button className="primary" disabled={!giveChanged.length} onClick={confirmGive}>Confirm changes</button>
+        <button className="subtle-btn" disabled={!giveChanged.length} onClick={() => setGiveDraft({})}>Reset</button>
+      </div>
+    </div>
+  );
+  const shareTab = (
+    <div className="share-tab">
+      {shareSections.length === 0 ? <p>No phones yet.</p> : <>
+        <p className="settings-help">Send each person their phones: the model and the IMEI numbers.</p>
+        <div className="share-toolbar">
+          <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp — everyone</button>
+          <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
+          <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Include serial numbers</label>
+        </div>
+        <ul className="overview-list">
+          {shareSections.map(section => <li key={section.id}>
+            <h3>{section.name} <b>{section.items.reduce((sum, item) => sum + item.count, 0)}</b></h3>
+            <ul>{section.items.map(item => <li key={item.label}>{item.label} <b>× {item.count}</b></li>)}</ul>
+            <div className="share-toolbar">
+              <button className="primary whatsapp-btn" aria-label={`WhatsApp ${section.name}`} onClick={() => openWhatsApp(formatPersonShare([sharePayload(section)]))}>WhatsApp</button>
+              <button className="subtle-btn" aria-label={`Copy ${section.name}`} onClick={() => void copyText(formatPersonShare([sharePayload(section)])).then(ok => setToast(ok ? `${section.name}'s list copied.` : 'Copy failed.'))}>Copy</button>
+              <button className="subtle-btn" aria-label={`More apps for ${section.name}`} onClick={() => void shareOrCopyText(formatPersonShare([sharePayload(section)]), `${section.name}'s list`)}>More apps</button>
+              <button className="subtle-btn" aria-label={`Pictures for ${section.name}`} onClick={() => openSharing(idsOfSection(section.id))}>With pictures</button>
+            </div>
+          </li>)}
+        </ul>
+      </>}
+    </div>
+  );
   async function shareOrCopyText(text: string, what: string) {
     if (!text) return;
     if (typeof navigator.share === 'function') {
@@ -1913,6 +2077,7 @@ export default function App() {
     (filter === 'All' ||
       (filter === 'Duplicates' ? r.duplicate :
         filter === 'Review' ? reviewStatus(r).includes('Needs review') :
+          filter === 'Valid' ? r.status === 'Valid' :
           (infoOf(r).series === filter || modelKeyOf(r) === filter))) &&
     (`${r.name} ${r.model} ${infoOf(r).name} ${r.imei} ${recordSerial(r)}`)
       .toLowerCase()
@@ -2010,27 +2175,6 @@ export default function App() {
     setToast('Ready for new entries. Your saved records were not changed.');
   }
 
-  /** Open the "give this model to people in amounts" dialog, starting from who holds how many now. */
-  function openSplit(group: { key: string; label: string; ids: string[] }) {
-    const counts: Record<string, number> = {};
-    for (const person of personGroups) counts[person.id] = records.filter(row => row.personId === person.id && group.ids.includes(row.id)).length;
-    setSplitCounts(counts);
-    setSplitModel(group);
-  }
-
-  function applySplit() {
-    if (!splitModel) return;
-    const plan = planAllocation(records, splitModel.ids, personGroups.map(person => ({ personId: person.id, count: splitCounts[person.id] || 0 })));
-    setRecords(plan.records);
-    setSelectedIds(old => old.filter(id => !plan.moved.includes(id)));
-    const receivers = personGroups.filter(person => (plan.given[person.id] || 0) > 0).map(person => person.id);
-    setEmptiedPeople(old => [...old.filter(id => !receivers.includes(id)), ...plan.emptiedSources.filter(id => !old.includes(id))]);
-    const parts = personGroups.filter(person => (plan.given[person.id] || 0) > 0).map(person => `${personName(person)} ${plan.given[person.id]}`);
-    const rest = plan.given[UNASSIGNED] || 0;
-    setToast(`${splitModel.label}: ${parts.length ? parts.join(', ') : 'nobody'}${rest ? `; ${rest} Unassigned` : ''}.${plan.blocked.length ? ` ${plan.blocked.length} stayed where ${plan.blocked.length === 1 ? 'it is' : 'they are'} because the person already has the same IMEI.` : ''}`);
-    setSplitModel(null);
-  }
-
   function addPersonGroup() {
     const next = nextPersonNumber(personGroups.map(item => item.label));
     const person = {
@@ -2043,6 +2187,8 @@ export default function App() {
     // Keep showing everyone, and open the name box so the new person can be named right away.
     setEditingPersonId(person.id);
     setPersonDraft('');
+    setPeopleOpen(true);
+    if (!simpleView) setRecordsTab('models');
   }
 
   /** The phones a bulk action applies to: the ticked ones, or everything shown when none are ticked. */
@@ -3128,7 +3274,7 @@ export default function App() {
         </div>
       </header>
 
-      {settingsOpen && <SettingsPanel modelsToGive={modelGroups.map(group => ({ key: group.key, label: group.label, code: group.code, count: group.ids.length }))} onGive={key => { const group = modelGroups.find(item => item.key === key); if (group) openSplit(group); }} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
 {!simpleView && (<>
@@ -3159,29 +3305,29 @@ export default function App() {
 
 {!simpleView && (<>
         <section className="stats">
-          <div className="stat">
+          <button type="button" className="stat stat-button" aria-label="Show all scanned records" onClick={() => jumpTo('records', 'All')}>
             <span>SCANNED RECORDS</span>
             <strong>{records.length}</strong>
             <small><ImageIcon size={13} /> Saved locally</small>
-          </div>
+          </button>
 
-          <div className="stat">
+          <button type="button" className="stat stat-button" aria-label="Show records with a valid IMEI" onClick={() => jumpTo('records', 'Valid')}>
             <span>VALID IMEI</span>
             <strong className="green">{validCount}</strong>
             <small><CheckCircle2 size={13} /> Luhn checksum passed</small>
-          </div>
+          </button>
 
-          <div className="stat">
+          <button type="button" className="stat stat-button" aria-label="Show records that need review" onClick={() => jumpTo('records', 'Review')}>
             <span>NEEDS REVIEW</span>
             <strong className="amber">{reviewCount}</strong>
             <small><AlertTriangle size={13} /> Check photo or IMEI</small>
-          </div>
+          </button>
 
-          <div className="stat">
+          <button type="button" className="stat stat-button" aria-label="Open the models tab" onClick={() => jumpTo('models')}>
             <span>MODELS</span>
             <strong>{models.filter(([model]) => !!exportModel(model)).length}</strong>
             <small><Smartphone size={13} /> Identified model groups</small>
-          </div>
+          </button>
         </section>
 </>)}
 
@@ -3538,6 +3684,7 @@ export default function App() {
                 <option value="All">All models</option>
                 {modelGroups.map(group => <option key={group.key} value={group.key}>{group.label} ({group.ids.length})</option>)}
                 <option value="Review">Needs review</option>
+                <option value="Valid">Valid IMEI</option>
               </select>
 </>)}
               <label className="search">
@@ -3567,7 +3714,12 @@ export default function App() {
             </div>
           </div>
 
-          {!simpleView && <div className="filters">
+          {!simpleView && <div className="records-tabs" role="tablist" aria-label="Scanned records views">
+            <button role="tab" aria-selected={recordsTab === 'records'} className={recordsTab === 'records' ? 'active' : ''} onClick={() => setRecordsTab('records')}>Records</button>
+            <button role="tab" aria-selected={recordsTab === 'models'} className={recordsTab === 'models' ? 'active' : ''} onClick={() => setRecordsTab('models')}>Give models{giveChanged.length ? <b>{giveChanged.length}</b> : null}</button>
+            <button role="tab" aria-selected={recordsTab === 'share'} className={recordsTab === 'share' ? 'active' : ''} onClick={() => setRecordsTab('share')}>Share</button>
+          </div>}
+          {!simpleView && recordsTab === 'records' && <div className="filters">
             <button
               className={filter === 'All' ? 'active' : ''}
               onClick={() => setFilter('All')}
@@ -3592,41 +3744,21 @@ export default function App() {
             >
               Needs review
             </button>
+            <button
+              className={filter === 'Valid' ? 'active' : ''}
+              onClick={() => setFilter('Valid')}
+            >
+              Valid IMEI <b>{validCount}</b>
+            </button>
 
           </div>}
 
-          {!simpleView && modelGroups.length > 0 && <details className="models-panel" open>
-            <summary>Models <b>{modelGroups.length}</b><span className="models-summary">{records.length} phone{records.length === 1 ? '' : 's'} · {records.filter(row => personGroups.some(person => person.id === row.personId)).length} with people · {records.filter(row => !personGroups.some(person => person.id === row.personId)).length} unassigned</span></summary>
-            <label className="models-filter">Show models of
-              <select aria-label="Show models of a person" value={reviewPerson} onChange={event => setReviewPerson(event.target.value)}>
-                <option value="">Everyone</option>
-                {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
-                <option value={UNASSIGNED_FILTER}>Unassigned</option>
-              </select>
-            </label>
-            <ul className="models-list">
-              {panelGroups.length === 0 && <li><em>That person holds no models yet.</em></li>}
-              {panelGroups.map(group => <li key={group.key}>
-                <button type="button" className="model-name" onClick={() => setFilter(group.key)} aria-label={`Show ${group.label}`}>
-                  <strong>{group.label}</strong>
-                  <small>{group.code ? `${group.code} · ` : ''}{group.ids.length} phone{group.ids.length === 1 ? '' : 's'}</small>
-                </button>
-                <div className="model-holders" aria-label={`Who has ${group.label}`}>
-                  {personGroups.filter(person => group.byPerson[person.id]).map(person => <span key={person.id}>{personName(person)} <b>{group.byPerson[person.id]}</b></span>)}
-                  {(() => { const given = personGroups.reduce((sum, person) => sum + (group.byPerson[person.id] || 0), 0), rest = group.ids.length - given; return rest > 0 ? <span className="holder-unassigned">Unassigned <b>{rest}</b></span> : null; })()}
-                </div>
-                <label className="move-to">Move all to
-                  <select aria-label={`Move all ${group.label} to`} value="" onChange={event => { if (event.target.value) moveRecords(group.ids, ownerOf(event.target.value)); }}>
-                    <option value="">Choose person</option>
-                    {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
-                    <option value="unassigned">Unassigned</option>
-                  </select>
-                </label>
-              </li>)}
-            </ul>
-          </details>}
+          {!simpleView && recordsTab === 'models' && modelsTab}
+          {!simpleView && recordsTab === 'share' && shareTab}
 
+          <div className="records-tab-body" hidden={!simpleView && recordsTab !== 'records'}>
           <div className="people-controls">
+            {simpleView && peoplePanel}
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
 {!simpleView && (<>
@@ -3675,12 +3807,7 @@ export default function App() {
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
             </div>
-            {editingPersonId && (() => { const person = personGroups.find(item => item.id === editingPersonId); return person ? <div className="person-edit-row">
-              <label>Name<input autoFocus value={personDraft} placeholder="Type a name" maxLength={60} onChange={event => setPersonDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { renamePerson(person.id, personDraft.trim()); setEditingPersonId(''); } }} /></label>
-              <button className="primary" onClick={() => { renamePerson(person.id, personDraft.trim()); setEditingPersonId(''); }}>Save name</button>
-              <button className="subtle-btn" onClick={() => setEditingPersonId('')}>Cancel</button>
-            </div> : null; })()}
-            {personFilter === 'All' && personGroups.length > 0 && <p className="people-hint">Tap a person below to rename, move or delete them.</p>}
+            {personFilter === 'All' && personGroups.length > 0 && <p className="people-hint">Tap a person below to see, move or share their phones.</p>}
             <div className="person-filters">
               <button className={personFilter === 'All' ? 'active' : ''} onClick={() => setPersonFilter('All')}>Everyone <b>{records.length}</b></button>
               {personGroups.map(person => (
@@ -3694,7 +3821,7 @@ export default function App() {
               <strong>{personFilter === UNASSIGNED_FILTER ? 'Unassigned' : personNameOf(personFilter)}: {visible.length} IMEI{visible.length === 1 ? '' : 's'}</strong>
               <span>{isPersonView(personFilter) ? 'Delete here moves phones to Everyone as unassigned.' : 'Delete here removes phones permanently, after you confirm.'}</span>
               {isPersonView(personFilter) && <>
-                <button className="subtle-btn" onClick={() => { const person = personGroups.find(item => item.id === personFilter); if (person) { setEditingPersonId(person.id); setPersonDraft(person.name); } }}><Pencil size={14} /> Rename</button>
+                <button className="subtle-btn" onClick={() => { const person = personGroups.find(item => item.id === personFilter); if (person) { setEditingPersonId(person.id); setPersonDraft(person.name); setPeopleOpen(true); if (!simpleView) setRecordsTab('models'); } }}><Pencil size={14} /> Rename</button>
                 <button className="subtle-btn danger" disabled={personGroups.length < 2} title={personGroups.length < 2 ? 'Keep at least one person' : undefined} onClick={() => setDeletePersonId(personFilter)}><Trash2 size={14} /> Delete person</button>
               </>}
               <button className="primary" disabled={!visible.length} onClick={() => openSharing(visible.map(row => row.id))}><Share2 size={14} /> Share {personFilter === UNASSIGNED_FILTER ? 'Unassigned' : personNameOf(personFilter)} ({visible.length})</button>
@@ -3925,6 +4052,7 @@ export default function App() {
               <button className="subtle-btn" disabled={currentPage === pageCount} onClick={() => setRecordPage(currentPage + 1)}>Next</button>
             </nav>
           )}
+          </div>
         </section>
 
         <footer>
@@ -4150,21 +4278,6 @@ export default function App() {
           </ul>
         </>}
       </section></div>}
-      {splitModel && (() => { const total = splitModel.ids.length, given = personGroups.reduce((sum, person) => sum + (splitCounts[person.id] || 0), 0), rest = total - given, over = rest < 0; return <div className="modal-backdrop"><section className="modal split-modal" role="dialog" aria-modal="true" aria-label={`Give ${splitModel.label} to people`}>
-        <div className="modal-head"><h2>Give {splitModel.label}</h2><button className="subtle-btn" onClick={() => setSplitModel(null)}>Close</button></div>
-        <p>{total} phone{total === 1 ? '' : 's'}. Choose how many each person gets. What is left stays Unassigned.</p>
-        <ul className="split-list">
-          {personGroups.map(person => <li key={person.id}>
-            <span>{personName(person)}</span>
-            <button type="button" className="subtle-btn" aria-label={`One less for ${personName(person)}`} disabled={!(splitCounts[person.id] > 0)} onClick={() => setSplitCounts(old => ({ ...old, [person.id]: Math.max(0, (old[person.id] || 0) - 1) }))}>−</button>
-            <input type="number" inputMode="numeric" min={0} max={total} aria-label={`How many for ${personName(person)}`} value={splitCounts[person.id] || 0} onChange={event => setSplitCounts(old => ({ ...old, [person.id]: Math.max(0, Math.min(total, Math.floor(Number(event.target.value) || 0))) }))} />
-            <button type="button" className="subtle-btn" aria-label={`One more for ${personName(person)}`} disabled={rest <= 0} onClick={() => setSplitCounts(old => ({ ...old, [person.id]: (old[person.id] || 0) + 1 }))}>+</button>
-          </li>)}
-          <li className={`split-rest${over ? ' over' : ''}`}><span>Unassigned (the rest)</span><b>{over ? 0 : rest}</b></li>
-        </ul>
-        {over && <p role="alert" className="split-warning">That is {-rest} more than the {total} phone{total === 1 ? '' : 's'} you have. Lower a number.</p>}
-        <div className="share-toolbar"><button className="primary" disabled={over} onClick={applySplit}>Apply</button><button className="subtle-btn" onClick={() => setSplitCounts(Object.fromEntries(personGroups.map(person => [person.id, 0])))}>Clear all</button><button className="subtle-btn" onClick={() => setSplitModel(null)}>Cancel</button></div>
-      </section></div>; })()}
       {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
         <div className="modal-head"><h2>Bulk edit</h2><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Close</button></div>

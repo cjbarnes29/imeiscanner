@@ -291,3 +291,37 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .models-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;color:#b3c4d1;font-size:14px}
 .models-filter select{min-height:44px;padding:6px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;max-width:100%}
 @media(max-width:420px){.review-filters{grid-template-columns:1fr}}
+.split-inline{flex:1 1 100%;display:grid;gap:8px;padding:10px;border:1px solid #4fd1a5;border-radius:12px;background:#0e2a2a}
+.split-inline p{margin:0}
+.give-btn{min-height:44px}
+.people-panel{margin:0 0 10px;padding:10px 12px;border:1px solid #253248;border-radius:12px;background:#0d1727}
+.people-panel>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px;font-weight:700}
+.people-panel>summary b{padding:1px 8px;border-radius:10px;background:#0b1625;color:#9ff0d3;font-size:12px}
+.people-list{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:8px}
+.people-list li{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 8px;border:1px solid #253248;border-radius:10px}
+.people-list .person-name{flex:1 1 140px;display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.people-list .person-name small{color:#b3c4d1}
+.people-list input{flex:1 1 160px;min-width:0;min-height:46px;padding:8px 12px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px}
+.people-list button{min-height:44px}
+.cap-field{display:grid;gap:2px;min-width:0}.cap-field.grow{flex:1 1 140px}.cap-field>small:first-child{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#7f9ab3}
+.settings-intro{padding:8px 12px;border:1px solid #253248;border-radius:10px;background:#0d1727}
+.person-models{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px}
+.person-models span{padding:3px 10px;border:1px solid #35506a;border-radius:14px;background:#162638;font-size:13px}
+.person-models b{margin-left:4px;color:#9ff0d3}
+.person-models em{color:#b3c4d1;font-size:13px}
+.people-unassigned{border-style:dashed!important}
+.models-panel .people-panel{margin:0 0 12px;background:#0b1422}
+button.stat{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%}
+button.stat:hover,button.stat:focus-visible{border-color:#4fd1a5;outline:none}
+.records-tabs{display:flex;gap:6px;margin:6px 0 12px;border-bottom:1px solid #253248;padding-bottom:8px;flex-wrap:wrap}
+.records-tabs button{min-height:46px;padding:0 18px;border:1px solid #35506a;border-radius:23px;background:#162638;color:#e8edf5;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.records-tabs button.active{background:#123b34;border-color:#4fd1a5;color:#9ff0d3}
+.records-tabs button b{padding:0 8px;border-radius:10px;background:#e0b46a;color:#0b1220;font-size:12px}
+.records-tab-body[hidden]{display:none}
+.give-tab,.share-tab{display:grid;gap:12px}
+.give-card{display:grid!important;gap:8px;justify-content:stretch!important}
+.give-head{display:grid;gap:2px}.give-head small{color:#b3c4d1}
+.give-card .split-list li input{width:64px}
+.confirm-bar{position:sticky;bottom:8px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border:1px solid #4fd1a5;border-radius:14px;background:#0e2a2a;box-shadow:0 6px 24px #0008}
+.confirm-bar span{flex:1 1 120px;color:#b3c4d1}.confirm-bar button{min-height:46px}
+.whatsapp-btn{background:#25d366!important;border-color:#25d366!important;color:#04200f!important}

@@ -9,7 +9,7 @@ import ts from 'typescript';
 const dir = await mkdtemp(join(tmpdir(), 'imei-people-'));
 try {
   await writeFile(join(dir, 'people.mjs'), ts.transpileModule(await readFile('src/people.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText);
-  const { formatModelReview, planAllocation, planDeletePerson, nextPersonNumber, planMove, planUnassign, recordsForFilter, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } = await import(pathToFileURL(join(dir, 'people.mjs')).href);
+  const { formatPersonShare, formatModelReview, planAllocation, planDeletePerson, nextPersonNumber, planMove, planUnassign, recordsForFilter, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } = await import(pathToFileURL(join(dir, 'people.mjs')).href);
   const rec = (id, personId, imei) => ({ id, personId, imei });
   const base = () => [rec('a', 'p1', '490154203237518'), rec('b', 'p1', '356938035643809'), rec('c', 'p2', '353879234252633'), rec('d', 'p2', '358240051111110')];
 
@@ -124,6 +124,16 @@ try {
   assert.equal(formatModelReview(models, false), 'Galaxy A37 5G (3)\nCarlou × 2\nRaseen × 1\n\nGalaxy Buds3 FE (1)\nUnassigned × 1', 'one block per model, one line per person; empty models left out');
   assert.equal(formatModelReview(models, true).split('\n').slice(0, 5).join('|'), 'Galaxy A37 5G (3)|Carlou × 2|  351973130210365|  351973130219432|Raseen × 1', 'numbers sit under their person, without numbering');
   assert.equal(formatModelReview([], true), '');
+
+  // The text sent to one person on WhatsApp: name, then each model with its numbers, no numbering.
+  const person = [
+    { name: 'Carlou', items: [{ label: 'Galaxy A37 5G', count: 2, numbers: ['351973130210365', '351973130219432'] }, { label: 'Galaxy S25 Ultra', count: 1, numbers: ['356049669060748'] }] },
+    { name: 'Nobody', items: [] },
+    { name: 'Raseen', items: [{ label: 'Galaxy Buds3 FE', count: 1, numbers: ['S/N R5ABC'] }] },
+  ];
+  assert.equal(formatPersonShare([person[0]]), 'Carlou (3)\nGalaxy A37 5G (2)\n351973130210365\n351973130219432\nGalaxy S25 Ultra (1)\n356049669060748');
+  assert.equal(formatPersonShare(person), 'Carlou (3)\nGalaxy A37 5G (2)\n351973130210365\n351973130219432\nGalaxy S25 Ultra (1)\n356049669060748\n\nRaseen (1)\nGalaxy Buds3 FE (1)\nS/N R5ABC', 'everyone: blocks separated by a blank line, people with nothing left out');
+  assert.equal(formatPersonShare([]), '');
 
   console.log('PASS: moving IMEIs between people (previous owner loses them, no duplicates, All IMEIs moved), delete-under-a-person becomes unassigned under Everyone, unassigned filter.');
 } finally { await rm(dir, { recursive: true, force: true }); }

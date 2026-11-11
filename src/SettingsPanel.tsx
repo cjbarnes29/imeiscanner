@@ -4,8 +4,6 @@ import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
 
 type Props = {
-  modelsToGive: { key: string; label: string; code: string; count: number }[];
-  onGive: (key: string) => void;
   scannedModels: string[];
   catalogEntries: { name: string; modelCode: string }[];
   customModels: CustomModels;
@@ -16,7 +14,7 @@ type Props = {
 };
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ modelsToGive, onGive, scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
+export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
@@ -110,15 +108,7 @@ export function SettingsPanel({ modelsToGive, onGive, scannedModels, catalogEntr
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
-
-    <h3>Give models to people</h3>
-    <p className="settings-help">Choose how many phones of a model each person gets, for example 3 to one person, 4 to another and 2 to a third. Whatever is left stays Unassigned.</p>
-    {modelsToGive.length > 0
-      ? <ul className="settings-list" aria-label="Models to give out">{modelsToGive.map(model => <li key={model.key}>
-          <span><strong>{model.label}</strong> <small>{model.code ? `${model.code} · ` : ''}{model.count} phone{model.count === 1 ? '' : 's'}</small></span>
-          <button className="primary" onClick={() => onGive(model.key)}>Give…</button>
-        </li>)}</ul>
-      : <p className="settings-help"><em>Scan some phones first and their models appear here.</em></p>}
+    <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code.</p>
 
     <h3>Devices in my scans</h3>
     <p className="settings-help">{devices.rows.length ? (missingCount ? <><b>{missingCount}</b> scanned model{missingCount === 1 ? ' is' : 's are'} not in any catalog. Add a name so {missingCount === 1 ? 'it shows' : 'they show'} instead of the code.</> : 'Every scanned model is in a catalog or has your name.') : 'No scanned models yet. Scan some phones and they appear here.'}{devices.noCode > 0 && ` ${devices.noCode} phone${devices.noCode === 1 ? ' has' : 's have'} no model code.`}</p>
@@ -128,8 +118,8 @@ export function SettingsPanel({ modelsToGive, onGive, scannedModels, catalogEntr
     </div>}
     {shownDevices.length > 0 && <ul className="settings-list device-list" aria-label="Scanned devices">
       {shownDevices.map(row => <li key={row.code} className={`device-${row.source}`}>
-        <b>SM-{row.code}</b>
-        <span>{row.name || <em>No name yet</em>} <small>· {row.count} phone{row.count === 1 ? '' : 's'} · {sourceLabel[row.source]}</small></span>
+        <div className="cap-field"><small>Model code</small><b>SM-{row.code}</b></div>
+        <div className="cap-field grow"><small>Name</small><span>{row.name || <em>No name yet</em>}</span><small>{row.count} phone{row.count === 1 ? '' : 's'} · {sourceLabel[row.source]}</small></div>
         {devEditing === row.code
           ? <><input autoFocus aria-label={`Name for SM-${row.code}`} value={devDraft} maxLength={80} placeholder="Name to show" onChange={event => setDevDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveDevice(row.code); if (event.key === 'Escape') setDevEditing(''); }} />
             <button className="primary" onClick={() => saveDevice(row.code)}>Save</button><button className="subtle-btn" onClick={() => setDevEditing('')}>Cancel</button></>
@@ -141,8 +131,8 @@ export function SettingsPanel({ modelsToGive, onGive, scannedModels, catalogEntr
     <h3>My Samsung models</h3>
     <p className="settings-help">Teach the app a model code once and it shows the name instead of the code. Your names come first, then the built-in list ({Object.keys(SAMSUNG_MODELS).length} models), then the downloaded catalog.</p>
     <div className="settings-add">
-      <label>Model code<input value={code} placeholder="SM-R420" maxLength={24} autoCapitalize="characters" onChange={event => setCode(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') add(); }} /></label>
-      <label>Name to show<input value={name} placeholder="Galaxy Buds3 FE" maxLength={80} onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') add(); }} /></label>
+      <label>Model code (on the phone)<input value={code} placeholder="SM-R420" maxLength={24} autoCapitalize="characters" onChange={event => setCode(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') add(); }} /></label>
+      <label>Name (what you want to see)<input value={name} placeholder="Galaxy Buds3 FE" maxLength={80} onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') add(); }} /></label>
       <button className="primary" onClick={add}>{key && customModels[key] ? 'Update' : 'Add model'}</button>
     </div>
     {key && <small className="settings-help">{customModels[key] ? `SM-${key} is already yours: ${customModels[key]}.` : builtIn ? `SM-${key} is built in as ${builtIn}. Adding it uses your name instead.` : `SM-${key} is not in the built-in list.`}</small>}
@@ -151,11 +141,11 @@ export function SettingsPanel({ modelsToGive, onGive, scannedModels, catalogEntr
       {Object.keys(customModels).length > 6 && <input className="settings-search" aria-label="Search my models" placeholder="Search my models" value={search} onChange={event => setSearch(event.target.value)} />}
       <ul className="settings-list">
         {entries.map(([codeKey, label]) => <li key={codeKey}>
-          <b>SM-{codeKey}</b>
+          <div className="cap-field"><small>Model code</small><b>SM-{codeKey}</b></div>
           {editing === codeKey
             ? <><input autoFocus aria-label={`Name for SM-${codeKey}`} value={draft} maxLength={80} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveEdit(codeKey); if (event.key === 'Escape') setEditing(''); }} />
               <button className="primary" onClick={() => saveEdit(codeKey)}>Save</button><button className="subtle-btn" onClick={() => setEditing('')}>Cancel</button></>
-            : <><span>{label}</span>
+            : <><div className="cap-field grow"><small>Name</small><span>{label}</span></div>
               <button className="subtle-btn" onClick={() => { setEditing(codeKey); setDraft(label); }}>Edit</button>
               <button className="subtle-btn danger" aria-label={`Delete SM-${codeKey}`} onClick={() => remove(codeKey)}>Delete</button></>}
         </li>)}

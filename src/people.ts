@@ -150,3 +150,15 @@ export function formatModelReview(models: ReviewModel[], includeNumbers: boolean
     return lines.join('\n');
   }).join('\n\n');
 }
+
+export type ShareSection = { name: string; items: { label: string; count: number; numbers: string[] }[] };
+
+/** What one person is sent: their name, then each model with its IMEI / serial numbers (plain lines, no numbering). */
+export function formatPersonShare(sections: ShareSection[]): string {
+  return sections.filter(section => section.items.length).map(section => {
+    const total = section.items.reduce((sum, item) => sum + item.count, 0);
+    const lines = [`${section.name} (${total})`];
+    for (const item of section.items) { lines.push(`${item.label} (${item.count})`); lines.push(...item.numbers); }
+    return lines.join('\n');
+  }).join('\n\n');
+}
