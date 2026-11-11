@@ -73,7 +73,8 @@ try {
   const withSerial=f.buildSharePackage([{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}],'imei_serial');
   assert.equal(withSerial.entries[0].text,'000ABC123');
   assert.throws(()=>f.buildSharePackage([]),/Select at least one/);
-  assert.throws(()=>f.buildSharePackage(Array(51).fill({})),/up to 50 records/);
+  const many=Array.from({length:120},(_,i)=>({number:i+1,pictureId:'P'+i,model:'',imei:'490154203237518',serial:'',photo:'data:image/png;base64,Q1JPUDJUV08='}));
+  assert.equal(f.buildSharePackage(many,'imei').entries.length,120,'No limit on how many records can be shared');
   assert.throws(()=>f.buildSharePackage([{photo:'blob:temporary',pictureId:'bad'}]),/unavailable/);
   assert.equal(f.recordPhoto(row),row.cropDataUrl);
   assert.equal(f.markDuplicateRecords([row])[0],row, 'Unchanged records retain identity for storage performance');

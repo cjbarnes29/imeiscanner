@@ -1,5 +1,6 @@
 // Your own Samsung model names, kept on this device. They are looked up before the built-in list,
 // so adding a code that is already built in replaces its name, and deleting it brings the built-in name back.
+import { SAMSUNG_MODELS } from './samsung-models';
 export type CustomModels = Record<string, string>;
 export const CUSTOM_MODELS_KEY = 'imei-lens-custom-models';
 export const MAX_CUSTOM_MODELS = 2000;
@@ -61,4 +62,28 @@ export function parseModelFile(text: string): { entries: CustomModels; skipped: 
     }
   }
   return { entries, skipped };
+}
+
+export type DeviceSource = 'mine' | 'built-in' | 'catalog' | 'missing';
+export type DeviceRow = { code: string; count: number; name: string; source: DeviceSource };
+
+/**
+ * The model codes in your scanned phones and where each one is known from: your own list, the built-in list,
+ * the downloaded catalog, or nowhere ("missing"). Missing codes come first. `noCode` counts phones with no model code.
+ */
+export function scannedDevices(models: string[], custom: CustomModels, catalog: { name: string; modelCode: string }[]): { rows: DeviceRow[]; noCode: number } {
+  const counts = new Map<string, number>();
+  let noCode = 0;
+  for (const model of models) {
+    const code = normalizeCode(model);
+    if (code) counts.set(code, (counts.get(code) || 0) + 1); else noCode++;
+  }
+  const catalogNames = new Map<string, string>();
+  for (const entry of catalog) { const code = normalizeCode(entry.modelCode); if (code && !catalogNames.has(code)) catalogNames.set(code, entry.name); }
+  const rows = [...counts].map(([code, count]): DeviceRow => custom[code] ? { code, count, name: custom[code], source: 'mine' }
+    : SAMSUNG_MODELS[code] ? { code, count, name: SAMSUNG_MODELS[code], source: 'built-in' }
+    : catalogNames.has(code) ? { code, count, name: catalogNames.get(code)!, source: 'catalog' }
+    : { code, count, name: '', source: 'missing' });
+  rows.sort((a, b) => Number(b.source === 'missing') - Number(a.source === 'missing') || b.count - a.count || a.code.localeCompare(b.code));
+  return { rows, noCode };
 }

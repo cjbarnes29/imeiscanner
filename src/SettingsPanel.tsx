@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react';
-import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, writeCustomModels, type CustomModels } from './custom-models';
+import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
 import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
 
 type Props = {
+  scannedModels: string[];
+  catalogEntries: { name: string; modelCode: string }[];
   customModels: CustomModels;
   onModelsChange: (models: CustomModels) => void;
   onCatalogChange: () => void;
@@ -12,7 +14,7 @@ type Props = {
 };
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
+export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
@@ -21,6 +23,13 @@ export function SettingsPanel({ customModels, onModelsChange, onCatalogChange, o
   const [message, setMessage] = useState('');
   const [auto, setAuto] = useState(() => localStorage.getItem(CATALOG_AUTO_KEY) !== 'off');
   const fileInput = useRef<HTMLInputElement>(null);
+  const [devFilter, setDevFilter] = useState<'missing' | 'all'>('missing');
+  const [devEditing, setDevEditing] = useState('');
+  const [devDraft, setDevDraft] = useState('');
+  const devices = scannedDevices(scannedModels, customModels, catalogEntries);
+  const missingCount = devices.rows.filter(row => row.source === 'missing').length;
+  const shownDevices = devFilter === 'missing' ? devices.rows.filter(row => row.source === 'missing') : devices.rows;
+  const sourceLabel = { mine: 'My name', 'built-in': 'Built-in', catalog: 'Catalog', missing: 'Not in catalog' } as const;
 
   const key = normalizeCode(code);
   const builtIn = key ? SAMSUNG_MODELS[key] : '';
@@ -53,6 +62,13 @@ export function SettingsPanel({ customModels, onModelsChange, onCatalogChange, o
   function remove(codeKey: string) {
     const { [codeKey]: _removed, ...rest } = customModels;
     save(rest, SAMSUNG_MODELS[codeKey] ? `Deleted. SM-${codeKey} shows the built-in name again.` : `Deleted SM-${codeKey}.`);
+  }
+
+  function saveDevice(codeKey: string) {
+    const label = cleanName(devDraft);
+    if (!label) { setMessage('Type the name you want to see for this model.'); return; }
+    if (!customModels[codeKey] && Object.keys(customModels).length >= MAX_CUSTOM_MODELS) { setMessage(`You can keep up to ${MAX_CUSTOM_MODELS} models.`); return; }
+    if (save({ ...customModels, [codeKey]: label }, `Saved SM-${codeKey}: ${label}.`)) setDevEditing('');
   }
 
   function removeAll() {
@@ -92,6 +108,24 @@ export function SettingsPanel({ customModels, onModelsChange, onCatalogChange, o
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
+
+    <h3>Devices in my scans</h3>
+    <p className="settings-help">{devices.rows.length ? (missingCount ? <><b>{missingCount}</b> scanned model{missingCount === 1 ? ' is' : 's are'} not in any catalog. Add a name so {missingCount === 1 ? 'it shows' : 'they show'} instead of the code.</> : 'Every scanned model is in a catalog or has your name.') : 'No scanned models yet. Scan some phones and they appear here.'}{devices.noCode > 0 && ` ${devices.noCode} phone${devices.noCode === 1 ? ' has' : 's have'} no model code.`}</p>
+    {devices.rows.length > 0 && <div className="settings-tabs" role="group" aria-label="Show devices">
+      <button className={devFilter === 'missing' ? 'active' : ''} aria-pressed={devFilter === 'missing'} onClick={() => setDevFilter('missing')}>Not in catalog ({missingCount})</button>
+      <button className={devFilter === 'all' ? 'active' : ''} aria-pressed={devFilter === 'all'} onClick={() => setDevFilter('all')}>All scanned ({devices.rows.length})</button>
+    </div>}
+    {shownDevices.length > 0 && <ul className="settings-list device-list" aria-label="Scanned devices">
+      {shownDevices.map(row => <li key={row.code} className={`device-${row.source}`}>
+        <b>SM-{row.code}</b>
+        <span>{row.name || <em>No name yet</em>} <small>· {row.count} phone{row.count === 1 ? '' : 's'} · {sourceLabel[row.source]}</small></span>
+        {devEditing === row.code
+          ? <><input autoFocus aria-label={`Name for SM-${row.code}`} value={devDraft} maxLength={80} placeholder="Name to show" onChange={event => setDevDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveDevice(row.code); if (event.key === 'Escape') setDevEditing(''); }} />
+            <button className="primary" onClick={() => saveDevice(row.code)}>Save</button><button className="subtle-btn" onClick={() => setDevEditing('')}>Cancel</button></>
+          : <><button className={row.source === 'missing' ? 'primary' : 'subtle-btn'} onClick={() => { setDevEditing(row.code); setDevDraft(row.name); }}>{row.source === 'missing' ? 'Add' : 'Edit'}</button>
+            {row.source === 'mine' && <button className="subtle-btn danger" aria-label={`Delete my name for SM-${row.code}`} onClick={() => remove(row.code)}>Delete</button>}</>}
+      </li>)}
+    </ul>}
 
     <h3>My Samsung models</h3>
     <p className="settings-help">Teach the app a model code once and it shows the name instead of the code. Your names come first, then the built-in list ({Object.keys(SAMSUNG_MODELS).length} models), then the downloaded catalog.</p>
