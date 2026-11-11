@@ -200,3 +200,12 @@ main{max-width:820px;margin-left:auto;margin-right:auto}
 .row-more-grid input{min-height:48px;padding:8px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px}
 .row-more-grid button{min-height:44px}
 .stats{margin:10px 0 14px}
+
+/* Bulk actions */
+.bulk-bar{margin:10px 0;padding:10px;border:1px solid #4fd1a5;border-radius:12px;background:#0e2a2a}
+.bulk-bar>strong{display:block;margin-bottom:6px;color:#9ff0d3}.bulk-bar>strong span{color:#b3c4d1;font-weight:400;font-size:13px}
+.bulk-bar .action-bar{margin:0}.bulk-bar .action-bar button{flex:1 1 140px}
+.bulk-edit{display:grid;gap:12px;width:min(520px,100%)}
+.bulk-edit label{display:grid;gap:4px;color:#b3c4d1;font-size:14px}
+.bulk-edit input:not([type=checkbox]),.bulk-edit select{min-height:48px;padding:8px 12px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px}
+.bulk-edit .check-row{display:flex;align-items:center;gap:10px}

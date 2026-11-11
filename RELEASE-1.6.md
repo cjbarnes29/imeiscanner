@@ -15,6 +15,9 @@ Changes since 1.5. The web app (GitHub Pages) has all of them; the Android app 1
 - Phone names and series (S26 series, S25 series, Fold series, A37 series, ...) come from the Samsung catalog first, then Samsung model-number rules, then the first 8 IMEI digits of other scanned phones.
 - Nothing was removed: the other features sit under collapsed "More ..." sections (more scan options, more export options, detailed table view, more for this phone) and the summary cards are at the top.
 
+## Bulk actions
+- A labelled Bulk actions row: Bulk share, Send numbers, Bulk edit (model code / person / mark as checked) and Bulk crop, each on the ticked phones or all shown.
+
 ## Speed
 - **Parallel reading:** the crops of a photo are read on two workers at once (when the device has 4+ cores), in the browser and in the laptop scanner. Photos with several devices are 25-35% faster.
 - **Dark labels:** a dark crop is read inverted from the start instead of wasting passes; in the browser a dark-looking photo is also read inverted first.

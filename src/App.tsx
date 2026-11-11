@@ -1544,6 +1544,10 @@ export default function App() {
   // boxes: the areas drawn so far (nothing is read yet). crops: filled only after "Process all".
   const [reviewSplit, setReviewSplit] = useState<{ recordId: string; target: number; boxes: DrawnBox[]; crops: SplitCrop[] } | null>(null);
   const [bulkCropOpen, setBulkCropOpen] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkEditModel, setBulkEditModel] = useState('');
+  const [bulkEditPerson, setBulkEditPerson] = useState('');
+  const [bulkEditChecked, setBulkEditChecked] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState('');
   const [detailedView, setDetailedView] = useState(false);
   const queueInputRef = useRef<HTMLInputElement>(null);
@@ -1750,6 +1754,7 @@ export default function App() {
 
   // Back button / swipe-back closes the top popup instead of leaving the app.
   useBackLayer(!!selected, closePhotoReview, 'review');
+  useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
 
@@ -1894,6 +1899,37 @@ export default function App() {
     // Keep showing everyone, and open the name box so the new person can be named right away.
     setEditingPersonId(person.id);
     setPersonDraft('');
+  }
+
+  /** The phones a bulk action applies to: the ticked ones, or everything shown when none are ticked. */
+  const bulkTargets = () => (selectedRows.length ? selectedRows : visible);
+
+  /** Send all the numbers as one numbered message (share sheet, or copied when sharing is unavailable). */
+  async function sendNumbers() {
+    const rows = bulkTargets();
+    if (!rows.length) return;
+    const text = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${index + 1}. ${[pair.imei1 || (serial ? '' : '—'), pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ')}`; }).join('\n');
+    if (typeof navigator.share === 'function') {
+      try { await navigator.share({ text }); setToast('Numbers sent to the share menu.'); return; }
+      catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
+    }
+    setToast((await copyText(text)) ? `${rows.length} numbers copied. Paste them into your chat.` : 'Could not share or copy the numbers.');
+  }
+
+  /** Apply the Bulk edit form to every target phone. */
+  function applyBulkEdit() {
+    const ids = new Set(bulkTargets().map(row => row.id));
+    if (!ids.size) return;
+    const model = bulkEditModel.trim();
+    if (!model && !bulkEditPerson && !bulkEditChecked) { setToast('Choose something to change first.'); return; }
+    setRecords(old => markDuplicateRecords(old.map(record => !ids.has(record.id) ? record : {
+      ...record,
+      ...(model ? { model } : {}),
+      ...(bulkEditPerson ? { personId: bulkEditPerson } : {}),
+      ...(bulkEditChecked ? { cropNeedsReview: false, serialNeedsReview: false, deviceCount: undefined, deviceImeis: undefined } : {})
+    })));
+    setToast(`Updated ${ids.size} phone${ids.size === 1 ? '' : 's'}.`);
+    setBulkEditOpen(false); setBulkEditModel(''); setBulkEditPerson(''); setBulkEditChecked(false);
   }
 
   function moveSelected(personId: string) {
@@ -3125,7 +3161,15 @@ export default function App() {
             <div className="action-bar">
               <button className="primary" disabled={syncing || !records.length} onClick={exportSimple}>{syncing ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />} Export Excel ({selectedRows.length || records.length})</button>
               <button className="subtle-btn" disabled={!visible.length || bulkBusy} onClick={bulkDownloadPictures}>{bulkBusy ? 'Saving…' : `Download pictures (${selectedRows.length || visible.length})`}</button>
-              <button className="subtle-btn" disabled={!visible.length} onClick={() => openSharing((selectedRows.length ? selectedRows : visible).slice(0, 200).map(row => row.id))}>Share ({Math.min(selectedRows.length || visible.length, 200)})</button>
+            </div>
+            <div className="bulk-bar" role="group" aria-label="Bulk actions">
+              <strong>Bulk actions <span>for {selectedRows.length ? `${selectedRows.length} ticked` : `all ${visible.length} shown`}</span></strong>
+              <div className="action-bar">
+                <button className="subtle-btn" disabled={!visible.length} onClick={() => openSharing(bulkTargets().slice(0, 200).map(row => row.id))}>Bulk share</button>
+                <button className="subtle-btn" disabled={!visible.length} onClick={() => void sendNumbers()}>Send numbers</button>
+                <button className="subtle-btn" disabled={!visible.length} onClick={() => setBulkEditOpen(true)}>Bulk edit</button>
+                <button className="subtle-btn" disabled={!records.length} onClick={() => setBulkCropOpen(true)}>Bulk crop{selectedRows.length ? ` (${selectedRows.length})` : records.some(needsCropping) ? ` (${records.filter(needsCropping).length} need it)` : ''}</button>
+              </div>
             </div>
             <div className="action-bar secondary">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>{allVisibleSelected ? 'Unselect all' : 'Select all'}</button>
@@ -3135,7 +3179,6 @@ export default function App() {
                   {personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}
                 </select>
               </label>
-              {records.some(needsCropping) && <button className="subtle-btn" onClick={() => setBulkCropOpen(true)}>Fix photos ({records.filter(needsCropping).length})</button>}
               <button className="subtle-btn danger" disabled={!selectedRows.length} onClick={deleteSelected}><Trash2 size={14} /> Delete ({selectedRows.length})</button>
             </div>
             {(syncing || downloadStatus) && <p className="export-note" role="status">{syncing ? googleProgress || 'Preparing the export…' : downloadStatus}</p>}
@@ -3690,8 +3733,16 @@ export default function App() {
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
       </section></div>}
+      {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
+        <div className="modal-head"><h2>Bulk edit</h2><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Close</button></div>
+        <p className="copy-hint">Changes {selectedRows.length ? `${selectedRows.length} ticked phone${selectedRows.length === 1 ? '' : 's'}` : `all ${visible.length} phones shown`}. Leave a field empty to keep it as it is.</p>
+        <label>Phone model code<input value={bulkEditModel} placeholder="for example SM-S938B" onChange={event => setBulkEditModel(event.target.value)} /></label>
+        <label>Move to person<select value={bulkEditPerson} onChange={event => setBulkEditPerson(event.target.value)}><option value="">Keep as it is</option>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}</select></label>
+        <label className="check-row"><input type="checkbox" checked={bulkEditChecked} onChange={event => setBulkEditChecked(event.target.checked)} /> Mark as checked (clears the review flags)</label>
+        <div className="share-toolbar"><button className="primary" onClick={applyBulkEdit}>Apply to {selectedRows.length || visible.length}</button><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Cancel</button></div>
+      </section></div>}
       {bulkCropOpen && <BulkCropDialog
-        items={records.filter(needsCropping).map(r => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model }))}
+        items={(selectedRows.length ? selectedRows : records.filter(needsCropping)).map(r => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model }))}
         onClose={() => setBulkCropOpen(false)}
         onApply={results => {
           setRecords(old => { let top = Math.max(2, ...old.map(r => r.number)); return markDuplicateRecords(old.flatMap(r => { const done = results.find(result => result.id === r.id); if (!done) return [r]; const made = splitRecords(r, done.crops, done.source, top + 1); top += made.length - 1; return made; })); });
