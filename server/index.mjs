@@ -255,8 +255,10 @@ async function handle(request, response) {
     const rows = await readJson(recordsPath(id), []);
     if (!rows.some(row => row.imageName === item)) return json(response, 404, { error: 'Photo not found.' });
     const path = join(jobPath(id), 'output', item);
+    // An unhandled stream error (file deleted from disk) would crash the whole server.
+    try { if (!(await stat(path)).isFile()) throw new Error(); } catch { return json(response, 404, { error: 'Photo not found.' }); }
     response.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
-    createReadStream(path).pipe(response);
+    createReadStream(path).on('error', () => response.destroy()).pipe(response);
     return;
   }
   json(response, 404, { error: 'Not found' });

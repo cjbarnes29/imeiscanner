@@ -64,7 +64,10 @@ try {
   assert.equal(await share.entries[0].file.text(),'CROPONE');
   assert.equal(await share.entries[1].file.text(),'CROP2TWO');
   assert.equal(share.entries[0].text,'490154203237518');
-  assert.equal(share.entries[1].text,'','Serial is not shared in IMEI-only mode');
+  assert.equal(share.entries[1].text,'000ABC123','IMEI mode falls back to serial when there is no IMEI');
+  assert.equal(f.shareNumberText({imei:'490154203237518',serial:'RFGYC2L1PLK'},'imei'),'490154203237518','IMEI mode sends only the IMEI');
+  assert.equal(f.shareNumberText({imei:'490154203237518',serial:'RFGYC2L1PLK'},'imei_serial'),'490154203237518\nRFGYC2L1PLK');
+  assert.equal(Object.keys(share.entries[0]).sort().join(),'file,text','Picture and text are separate share payloads');
   const withSerial=f.buildSharePackage([{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}],'imei_serial');
   assert.equal(withSerial.entries[0].text,'000ABC123');
   assert.throws(()=>f.buildSharePackage([]),/Select at least one/);

@@ -1,4 +1,4 @@
-import { labelledBarcodeImeis, type PositionedBarcode } from './barcode-imei';
+import { labelledBarcodeImeis, labelledBarcodeLines, type PositionedBarcode } from './barcode-imei';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
@@ -212,6 +212,13 @@ async function cameraBarcodeText(photo: string, raw: string, lines:OcrLine[] = [
     // labelled payloads supplement OCR; conflicting numbers remain for review.
     return [raw,labelledBarcodeImeis(positioned,lines),...values.filter(value=>extractPreferredImei(value)||extractSerial(value))].join('\n');
   }catch{return raw;}
+}
+
+/** Camera frames: barcodes under "IMEI 1/2" labels give each device a positioned anchor even when OCR misreads the digits. */
+async function frameBarcodeLines(canvas: HTMLCanvasElement, lines: OcrLine[]): Promise<OcrLine[]> {
+  const Detector = (window as any).BarcodeDetector;
+  if (!Detector) return [];
+  try { return labelledBarcodeLines(await new Detector().detect(canvas), lines); } catch { return []; }
 }
 
 function extractPreferredImei(text: string) {
@@ -1602,6 +1609,10 @@ export default function App() {
           const focused=await readSerialPhoto(worker,dataUrl,focusedLines=>{lines=focusedLines;});
           if(focused){raw += '\n'+focused;}
         }
+        if (file.name.startsWith('camera-')) {
+          const barcodeLines = await frameBarcodeLines(color, lines);
+          if (barcodeLines.length) { lines = [...lines, ...barcodeLines]; raw += '\n' + barcodeLines.map(line => line.text).join('\n'); }
+        }
         const mostlyWhite = looksMostlyWhite(color);
         let anchors=deviceAnchors(lines,sourceWidth,sourceHeight);
         const multiText=hasMultipleDeviceText(raw);
@@ -2957,7 +2968,7 @@ export default function App() {
 
       {shareIds.length>0&&<div className="modal-backdrop share-backdrop"><section className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share selected records">
        <div className="modal-head"><h2>Share selected records</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
-       <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
+       <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI (or serial if no IMEI)</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
        <p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>
        {currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}

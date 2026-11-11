@@ -53,10 +53,15 @@ export function deviceAnchors(lines:OcrLine[],width:number,height:number,frame?:
   // S/N beside an absorbed IMEI 2 belongs to the same device as that IMEI 1.
   const absorbed:DeviceAnchor[]=[];
   const sameLine=(x:DeviceAnchor,y:DeviceAnchor)=>!!x.approx&&!!y.approx&&Math.abs(x.box.y0-y.box.y0)<2&&Math.abs(x.box.y1-y.box.y1)<2;
-  for(const kind of [1,2,3])for(const anchor of found.filter(a=>a.kind===kind)){
+  // Read numbers first, so a bare "IMEI 1" label can fold into the barcode or
+  // OCR value beside it instead of becoming a phantom extra device.
+  for(const kind of [1,2,3])for(const anchor of found.filter(a=>a.kind===kind).sort((a,b)=>Number(!a.value)-Number(!b.value))){
     // IMEI 2 and S/N next to IMEI 1 belong to the same device. Repeated S/N
     // tear-off strips with the same value do not make additional products.
-    const grouped=[...selected,...absorbed].some(other=>sameLine(anchor,other)||(other.kind<anchor.kind&&near(anchor,other)));
+    // An IMEI is unique to one device: the same number read twice (OCR text and
+    // its barcode, or box and phone sticker) never makes a second product.
+    const sameImei=(other:DeviceAnchor)=>anchor.kind!==3&&other.kind!==3&&!!anchor.value&&other.value===anchor.value;
+    const grouped=[...selected,...absorbed].some(other=>sameImei(other)||sameLine(anchor,other)||(!anchor.value&&!!other.value&&near(anchor,other))||(other.kind<anchor.kind&&near(anchor,other)));
     if(grouped||selected.some(other=>(other.kind===3&&anchor.kind===3&&other.value===anchor.value)||(!!anchor.value&&other.kind===anchor.kind&&other.value===anchor.value&&component(anchor)>0&&component(anchor)===component(other)))){absorbed.push(anchor);continue;}
     selected.push(anchor);
   }

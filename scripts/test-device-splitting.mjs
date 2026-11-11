@@ -8,7 +8,7 @@ const options={target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022};
 // Transpile every module the grouping code needs into a temp dir, rewriting
 // relative imports, so new imports never silently break this test again.
 const dir=await mkdtemp(join(tmpdir(),'imei-split-'));
-for(const name of ['serial','scan-layout','product-bands','device-labels']){
+for(const name of ['serial','scan-layout','product-bands','device-labels','barcode-imei']){
  const source=(await readFile(`src/${name}.ts`,'utf8')).replace(/from '\.\/([\w-]+)(?:\.ts)?'/g,"from './$1.mjs'");
  await writeFile(join(dir,name+'.mjs'),ts.transpileModule(source,{compilerOptions:options}).outputText);
 }
@@ -46,6 +46,15 @@ try{
  const big=(text,y)=>({text,bbox:{x0:200,y0:y,x1:700,y1:y+60}});
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 2: '+B,420)],1000,1000).length,1,'Close-up IMEI 1/IMEI 2 with barcode gap stays one device');
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 1: '+C,700)],1000,1000).length,2,'Close-up distinct devices still split');
+ // Camera: barcodes under IMEI labels become positioned anchors.
+ const {labelledBarcodeLines}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+ const labelA=line('IMEI 1',200,160),labelC=line('IMEI 1',200,560);
+ const codes=[{rawValue:A,boundingBox:{x:200,y:100,width:240,height:50}},{rawValue:C,boundingBox:{x:200,y:500,width:240,height:50}}];
+ const barcodeLines=labelledBarcodeLines(codes,[labelA,labelC]);
+ assert.equal(barcodeLines.length,2,'Each IMEI label pairs with the barcode above it');
+ assert.equal(deviceAnchors([labelA,labelC,...barcodeLines],800,800).length,2,'Camera: two devices found from barcodes when OCR misses digits');
+ assert.equal(deviceAnchors([line('IMEI 1: '+A,200,160),...labelledBarcodeLines([codes[0]],[line('IMEI 1: '+A,200,160)])],800,800).length,1,'Same IMEI from OCR and barcode is one device');
+ assert.equal(labelledBarcodeLines([{rawValue:'490154203237519',boundingBox:codes[0].boundingBox}],[labelA]).length,0,'Invalid barcode ignored');
  // Serial extraction
  const {extractSerial,serialReading,unindexedImeis}=await import(pathToFileURL(join(dir,'serial.mjs')).href);
  for(const label of ['S/N: ','S/N ','SN: ','Serial No: ','Serial No. ','Serial Number: ','SERIAL: '])assert.equal(extractSerial(label+'RFGYC2L1PLK'),'RFGYC2L1PLK',label);

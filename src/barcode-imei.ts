@@ -1,8 +1,9 @@
 import type {OcrLine} from './scan-layout';
 export type PositionedBarcode={rawValue:string;boundingBox?:{x:number;y:number;width:number;height:number}};
 function valid(value:string){if(!/^\d{15}$/.test(value))return false;let sum=0;for(let i=0;i<15;i++){let n=Number(value[14-i]);if(i%2){n*=2;if(n>9)n-=9;}sum+=n;}return sum%10===0;}
-export function labelledBarcodeImeis(codes:PositionedBarcode[],lines:OcrLine[]) {
-  const matches:{type:string;code:number}[]=[];
+/** Pair each "IMEI 1/2" OCR label with the one valid barcode printed directly above it. */
+export function labelledBarcodeLines(codes:PositionedBarcode[],lines:OcrLine[]):OcrLine[] {
+  const matches:{type:string;code:number;label:OcrLine['bbox']}[]=[];
   for(const line of lines){
     const labels=[...line.text.matchAll(/\bIM[E3][I1!|L]\s*(0?[12])\b/gi)];
     if(labels.length!==1)continue;
@@ -12,7 +13,13 @@ export function labelledBarcodeImeis(codes:PositionedBarcode[],lines:OcrLine[]) 
       const gap=b.y0-(r.y+r.height),center=(b.x0+b.x1)/2;
       return gap>=-h&&gap<=Math.max(h*3,r.height*.6)&&center>=r.x-r.width*.15&&center<=r.x+r.width*1.15;
     });
-    if(nearby.length===1)matches.push({type:String(Number(labels[0][1])),code:nearby[0].index});
+    if(nearby.length===1)matches.push({type:String(Number(labels[0][1])),code:nearby[0].index,label:b});
   }
-  return matches.filter(m=>matches.filter(other=>other.code===m.code).length===1).map(m=>`IMEI ${m.type}: ${codes[m.code].rawValue}`).join('\n');
+  return matches.filter(m=>matches.filter(other=>other.code===m.code).length===1).map(m=>{
+    const r=codes[m.code].boundingBox!;
+    return {text:`IMEI ${m.type}: ${codes[m.code].rawValue}`,bbox:{x0:Math.min(r.x,m.label.x0),y0:Math.min(r.y,m.label.y0),x1:Math.max(r.x+r.width,m.label.x1),y1:Math.max(r.y+r.height,m.label.y1)}};
+  });
+}
+export function labelledBarcodeImeis(codes:PositionedBarcode[],lines:OcrLine[]) {
+  return labelledBarcodeLines(codes,lines).map(line=>line.text).join('\n');
 }

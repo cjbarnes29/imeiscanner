@@ -88,7 +88,7 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
   }
   return <div className="modal-backdrop"><div className={`modal camera-modal placement-${placement}`} role="dialog" aria-modal="true" aria-label="Camera scanner">
     <div className="modal-head"><h2>Scan with camera</h2><button className="subtle-btn" onClick={close}>Close</button></div>
-    <p>Capture → Take another → Scan all. Keep one complete device label in each photo. Up to 50 photos per batch. If the preview is blurry or unavailable, try Phone camera.</p>
+    <p>Capture → Take another → Scan all. Several devices can share one photo: keep every label fully in frame with a visible gap between boxes. Up to 50 photos per batch. If the preview is blurry or unavailable, try Phone camera.</p>
     <input ref={phoneCamera} type="file" accept="image/*" capture="environment" hidden onChange={event=>{const file=event.target.files?.[0];if(file){const renamed=new File([file],`camera-${crypto.randomUUID()}.${file.name.split('.').pop()||'jpg'}`,{type:file.type});setPhotos(old=>[...old,renamed]);setBarcodeStatus('Phone camera photo added. Tap Scan all when ready.');}event.target.value='';}}/>
     <div className="camera-setup"><button className="subtle-btn" disabled={capturing||photos.length>=50} onClick={()=>phoneCamera.current?.click()}>Phone camera</button><label>Button position <select aria-label="Camera button position" value={placement} onChange={e=>setPlacement(e.target.value)}><option value="center">Bottom center</option><option value="left">Left hand</option><option value="right">Right hand</option></select></label></div>
     {error && <p role="alert">{error}</p>}
