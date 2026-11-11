@@ -8,15 +8,9 @@ Changes since 1.5. The web app (GitHub Pages) has all of them; the Android app 1
 - **Barcode confirmation** in every browser: exact IMEI and serial values replace OCR misreads; IMEI readings that disagree by 1-2 digits go to review.
 - **Photo orientation.** Upside-down, sideways and mirrored photos are detected and read automatically: when nothing label-like is read, the scanner tries each orientation on a smaller copy and scans the best one. Tested on all four on a real two-box photo (the server scanner reads every number; the browser scanner reads both devices, IMEI 1 and serials). Costs about 6 to 8 extra seconds only for photos where nothing was read.
 
-## Simple interface
-- One short screen: **Scan phones** (Take photos / Choose photos, scanning starts by itself) and **Phones** (grouped by series, with the phone name, IMEI, IMEI 2 and serial and a Copy button each).
-- People: rename any person (pencil), add a person, and move phones between people from each row, from **Move selected to**, or from the photo review window.
-- One **Export Excel** button (ticked phones, or all), plus Download pictures, Share, Delete and Fix photos.
-- Phone names and series (S26 series, S25 series, Fold series, A37 series, ...) come from the Samsung catalog first, then Samsung model-number rules, then the first 8 IMEI digits of other scanned phones.
-- Nothing was removed: the other features sit under collapsed "More ..." sections (more scan options, more export options, detailed table view, more for this phone) and the summary cards are at the top.
-
-## Bulk actions
-- A labelled Bulk actions row: Bulk share, Send numbers, Bulk edit (model code / person / mark as checked) and Bulk crop, each on the ticked phones or all shown.
+## Screen
+- The full screen is as before (Upload photos, Export inventory and Scanned records, all visible, with the summary cards and quick navigation).
+- Added: a Simple view that groups phones by series with phone name, IMEI, IMEI 2 and serial; a Rename button for each person; Move selected to; and the bulk tools Send numbers, Bulk edit and an always-available Bulk crop next to Share and Download all pictures.
 
 ## Speed
 - **Parallel reading:** the crops of a photo are read on two workers at once (when the device has 4+ cores), in the browser and in the laptop scanner. Photos with several devices are 25-35% faster.

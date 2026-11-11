@@ -10,21 +10,18 @@ Install the Android APK from the [latest Android release](https://github.com/cjb
 
 Android may pause and retry queued work when it restricts background activity, and force-stopping the app in phone settings prevents work until the app is opened again. Android 15 also limits `mediaProcessing` foreground services to six hours in a 24-hour period. This APK is a debug-signed preview; later APKs may require uninstalling it before installation, which erases its local records. Export important records first. A phone test is still needed to validate scanning on your device.
 
-## The simple interface
-The app is one short screen with two sections.
-1. **Scan phones**: **Take photos** (camera) or **Choose photos**. Scanning starts by itself and works the same on a phone and on a computer. There is no separate upload queue, scan-speed menu or background-scan panel.
-2. **Phones**: every scanned phone, grouped under its series (for example *S26 series*, *S25 series*, *Fold series*), each showing the phone name, IMEI, IMEI 2 and serial with a Copy button for each, instead of a model code.
-   - **People:** *Everyone* plus one button per person. The pencil renames a person; **+ Person** adds one and opens its name box. Move phones in three ways: the person menu on each row, **Move selected to** in the toolbar (tick phones first), or the Person menu in the photo review window.
-   - **Bulk actions** (their own labelled row; they apply to the ticked phones, or to everything shown when none are ticked): **Bulk share** (pictures 10 at a time, then all numbers as one message), **Send numbers** (one numbered message with IMEI, IMEI 2 and serial, straight to the share menu or copied), **Bulk edit** (set the model code, move to a person, mark as checked for many phones at once) and **Bulk crop** (draw or auto-detect boxes on many photos, then process them together).
-   - **One-tap actions:** **Export Excel** (the ticked phones, or all), **Download pictures**, **Share**, **Delete**, and **Fix photos** (bulk crop) when some photos need it.
-   - Phone names come from the Samsung catalog first, then from Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits.
+## The screen
+The screen has three steps, all visible, as in earlier versions:
+1. **Upload photos** (Step 01): Scan with camera, the drop zone and photo queue, the scan-speed menu, **Extract IMEI**, laptop / background scanning, the Android background scan, and the Samsung product catalog.
+2. **Export inventory** (Step 02): Excel, Word, Google Sheets or CSV, what to include, which records, and the choose-records list. The default is Excel with IMEI 1, IMEI 2, Serial, the picture and a Download picture link.
+3. **Scanned records** (Step 03): model filter chips, the search box, the people controls, and the records in the **detailed table** (the default) or the **Simple view**.
 
-Everything else is still available, collapsed so the main screen stays simple:
-- **More scan options** (under Scan phones): scan speed (Fast / Standard / Detailed), the photo queue with drop zone, laptop and background scanning, the Android background scan, and the Samsung catalog.
-- **More export options** (under the action buttons): Excel, Word, Google Sheets or CSV, what to include, which records, and the choose-records list.
-- **Detailed table view**: the full table with model code, picture ID and validation columns, plus model filter chips.
-- **More for this phone** (on every phone): edit IMEI, serial and model code in place, copy the model code or the whole record, download the photo, share the photo and number, and edit or crop the photo.
-- Summary cards at the top: scanned records, valid IMEI, needs review, models.
+Summary cards (scanned records, valid IMEI, needs review, models) and quick navigation sit at the top.
+
+Added on top of that:
+- **Simple view** lists the phones grouped under their series (for example *S26 series*, *S25 series*, *Fold series*) with the phone name, IMEI, IMEI 2 and serial and a Copy button for each, instead of a model code. Phone names come from the Samsung catalog first, then Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits. Every phone also has a **More for this phone** section (edit IMEI, serial and model code, copy, download, share, edit or crop the photo).
+- **People:** a **Rename** button for each person, plus the original name box and **Add person**. Move phones with the person menu on a row, **Move selected to** in the toolbar, or the Person menu in the photo review window.
+- **Bulk tools** (they apply to the ticked phones, or to all shown when none are ticked): **Share selected / Share all** (pictures 10 at a time, then all numbers as one message), **Download all pictures**, **Send numbers** (one numbered message with IMEI, IMEI 2 and serial), **Bulk edit** (model code, person, mark as checked) and **Bulk crop**.
 
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
@@ -95,7 +92,6 @@ Real label photos contain IMEIs and this repository is public, so they are never
 The app uses mobile-friendly controls, though browser support for photo formats and folder selection varies. The first recognition data download requires an internet connection.
 
 ## Keep scanning after closing the browser (Windows laptop)
-> **Note:** laptop and background scanning is under *More scan options* on the main screen.
 
 1. Keep the laptop plugged in, connected, and configured to stay awake when you close the lid. A sleeping or shut-down laptop cannot scan.
 2. Run `npm ci` and `npm run build` in this folder.
