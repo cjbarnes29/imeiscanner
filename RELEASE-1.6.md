@@ -8,10 +8,17 @@ Changes since 1.5. The web app (GitHub Pages) has all of them; the Android app 1
 - **Barcode confirmation** in every browser: exact IMEI and serial values replace OCR misreads; IMEI readings that disagree by 1-2 digits go to review.
 - **Photo orientation.** Upside-down, sideways and mirrored photos are detected and read automatically: when nothing label-like is read, the scanner tries each orientation on a smaller copy and scans the best one. Tested on all four on a real two-box photo (the server scanner reads every number; the browser scanner reads both devices, IMEI 1 and serials). Costs about 6 to 8 extra seconds only for photos where nothing was read.
 
+## Simple interface
+- One short screen: **Scan phones** (Take photos / Choose photos, scanning starts by itself) and **Phones** (grouped by series, with the phone name, IMEI, IMEI 2 and serial and a Copy button each).
+- People: rename any person (pencil), add a person, and move phones between people from each row, from **Move selected to**, or from the photo review window.
+- One **Export Excel** button (ticked phones, or all), plus Download pictures, Share, Delete and Fix photos.
+- Phone names and series (S26 series, S25 series, Fold series, A37 series, ...) come from the Samsung catalog first, then Samsung model-number rules, then the first 8 IMEI digits of other scanned phones.
+- Removed from the screen: Export inventory panel and format menus, detailed table view, catalog panel, scan-speed menu, laptop/Android background-scan panels, and the second upload section.
+
 ## Speed
 - **Parallel reading:** the crops of a photo are read on two workers at once (when the device has 4+ cores), in the browser and in the laptop scanner. Photos with several devices are 25-35% faster.
 - **Dark labels:** a dark crop is read inverted from the start instead of wasting passes; in the browser a dark-looking photo is also read inverted first.
-- **Engine bundled:** the text-reading engine, the language data (smaller, same accuracy on every test photo) and the fonts are served by the app itself instead of jsDelivr and Google Fonts: the first scan no longer downloads them (6.4 s to 4.3 s) and the app works offline once opened. They are copied into the build by .
+- **Engine bundled:** the text-reading engine, the language data (smaller, same accuracy on every test photo) and the fonts are served by the app itself instead of jsDelivr and Google Fonts: the first scan no longer downloads them (6.4 s to 4.3 s) and the app works offline once opened. They are copied into the build by `scripts/copy-ocr-assets.mjs`.
 - **Storage:** the original photo is kept at up to 3200 px as a high-quality JPEG instead of the raw 3-5 MB phone file; about half the storage per photo (4.85 MB to 2.3 MB for a two-box photo).
 - **Orientation check** probes at a smaller size and stops earlier.
 - **Fixed:** Detailed mode could add a blank phantom record on dark photos; an unreadable label only counts as its own device when a separate box is visible for it.

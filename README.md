@@ -10,6 +10,16 @@ Install the Android APK from the [latest Android release](https://github.com/cjb
 
 Android may pause and retry queued work when it restricts background activity, and force-stopping the app in phone settings prevents work until the app is opened again. Android 15 also limits `mediaProcessing` foreground services to six hours in a 24-hour period. This APK is a debug-signed preview; later APKs may require uninstalling it before installation, which erases its local records. Export important records first. A phone test is still needed to validate scanning on your device.
 
+## The simple interface
+The app is one short screen with two sections.
+1. **Scan phones**: **Take photos** (camera) or **Choose photos**. Scanning starts by itself and works the same on a phone and on a computer. There is no separate upload queue, scan-speed menu or background-scan panel.
+2. **Phones**: every scanned phone, grouped under its series (for example *S26 series*, *S25 series*, *Fold series*), each showing the phone name, IMEI, IMEI 2 and serial with a Copy button for each, instead of a model code.
+   - **People:** *Everyone* plus one button per person. The pencil renames a person; **+ Person** adds one and opens its name box. Move phones in three ways: the person menu on each row, **Move selected to** in the toolbar (tick phones first), or the Person menu in the photo review window.
+   - **One-tap actions:** **Export Excel** (the ticked phones, or all), **Download pictures**, **Share**, **Delete**, and **Fix photos** (bulk crop) when some photos need it.
+   - Phone names come from the Samsung catalog first, then from Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits.
+
+Options that were removed from the screen to keep it simple: the Export inventory panel with its format and filter menus (Word, CSV and Google Sheets exports), the detailed table view, the Samsung catalog panel, the scan-speed menu (Standard is always used), and the laptop / Android background-scan panels. The code for some of these is still in the repository.
+
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
 - IMEI extraction prioritizes a readable `IMEI 1`, then a readable `IMEI 2` from the same picture. Ambiguous or unreadable numbers are left for review. Records store **IMEI 1, IMEI 2 and serial number**; all three are editable in the review window.
@@ -79,6 +89,8 @@ Real label photos contain IMEIs and this repository is public, so they are never
 The app uses mobile-friendly controls, though browser support for photo formats and folder selection varies. The first recognition data download requires an internet connection.
 
 ## Keep scanning after closing the browser (Windows laptop)
+> **Note:** the screen no longer has a panel for laptop or cloud scanning (see *The simple interface*). The scanner service below still runs and its photo-reading code is kept up to date, but nothing in the current screen sends photos to it.
+
 1. Keep the laptop plugged in, connected, and configured to stay awake when you close the lid. A sleeping or shut-down laptop cannot scan.
 2. Run `npm ci` and `npm run build` in this folder.
 3. Run `& .\scripts\install-laptop-scanner.ps1` in PowerShell. This starts a Windows sign-in task that runs the scanner independently of the browser.

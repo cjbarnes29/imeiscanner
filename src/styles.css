@@ -127,3 +127,60 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .bulk-summary{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .bulk-summary li{display:grid;grid-template-columns:64px 1fr auto;gap:10px;align-items:center;padding:8px;border:1px solid #2b4157;border-radius:10px;background:#0d1828}
 .bulk-summary img{width:64px;height:64px;object-fit:cover;border-radius:6px}.bulk-summary small{display:block;color:#b3c4d1}
+
+/* ===== Simple interface ===== */
+.simple-scan h2,.simple-records h2{margin:0 0 8px}
+.simple-hint{color:#b3c4d1;margin:0 0 12px;line-height:1.5}
+.simple-scan-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:420px){.simple-scan-buttons{grid-template-columns:1fr}}
+.primary.big{min-height:64px;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px}
+.primary.big.alt{background:#1b3a55;border:1px solid #4fd1a5;color:#9ff0d3}
+.simple-scan .progress{margin-top:14px}
+.people-bar{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px}
+.people-bar>button,.person-chip>button:first-child{min-height:44px;padding:0 14px;border:1px solid #35506a;border-radius:22px;background:#162638;color:#e8edf5;font:inherit;cursor:pointer}
+.people-bar>button.active,.person-chip.active>button:first-child{background:#123b34;border-color:#4fd1a5;color:#9ff0d3}
+.person-chip{display:inline-flex;align-items:center}
+.person-chip>button:first-child{border-top-right-radius:0;border-bottom-right-radius:0;border-right:0}
+.person-chip .chip-edit{min-width:44px;min-height:44px;border:1px solid #35506a;border-radius:0 22px 22px 0;background:#162638;color:#b3c4d1;cursor:pointer;display:grid;place-items:center}
+.person-chip.active .chip-edit{border-color:#4fd1a5}
+.add-person{border-style:dashed!important;color:#9ff0d3!important}
+.person-edit-row{display:flex;flex-wrap:wrap;gap:8px;align-items:end;padding:10px;margin-bottom:10px;border:1px solid #4fd1a5;border-radius:12px;background:#0e2a2a}
+.person-edit-row label{flex:1 1 200px;display:grid;gap:4px}
+.person-edit-row input{min-height:48px;padding:8px 12px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px}
+.new-scans-to{display:flex;align-items:center;gap:8px;margin:0 0 10px;color:#b3c4d1}
+.simple-toolbar{display:grid;grid-template-columns:1fr auto;gap:8px;margin:8px 0}
+@media(max-width:520px){.simple-toolbar{grid-template-columns:1fr}}
+.action-bar{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.action-bar button,.action-bar select{min-height:48px}
+.action-bar.secondary .move-to{display:flex;align-items:center;gap:6px;color:#b3c4d1;font-size:14px}
+.action-bar select{padding:6px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;max-width:100%}
+.export-note{color:#9ff0d3;margin:4px 0 10px}
+.series-group{margin:14px 0}
+.series-group h3{margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#162638;color:#9ff0d3;font-size:15px;letter-spacing:.3px;display:flex;justify-content:space-between}
+.series-group h3 span{color:#b3c4d1}
+.simple-record{display:grid;grid-template-columns:32px 72px 1fr;gap:10px;align-items:start;padding:10px;margin-bottom:8px;border:1px solid #2b4157;border-radius:12px;background:#0d1828}
+.simple-record .simple-record-photo{width:72px;height:72px;padding:0;border:0;background:none;border-radius:8px;overflow:hidden}
+.simple-record .simple-record-photo img{width:72px;height:72px;object-fit:cover}
+.simple-record-info{display:grid;gap:6px;min-width:0}
+.phone-name{font-size:17px}
+.value-row{display:flex;align-items:center;gap:8px;min-width:0}
+.value-row span{flex:0 0 52px;color:#8ea6b8;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+.value-row b{flex:1 1 auto;min-width:0;font-weight:600;font-size:16px;letter-spacing:.3px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.value-row button{min-height:40px;padding:0 12px}
+.check-flag{justify-self:start;min-height:40px;padding:0 12px;border:1px solid #ffd166;border-radius:8px;background:#2a2308;color:#ffd166;font:inherit;cursor:pointer}
+.simple-record .simple-record-actions{grid-column:1/-1;display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.simple-record .simple-record-actions select{flex:1 1 auto;min-width:0;min-height:44px;padding:6px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px}
+.simple-record .simple-record-actions button{min-height:44px;min-width:44px}
+main{padding-top:12px}
+/* Row layout: photo + phone name on top, every number across the full card width below. */
+.simple-record{display:grid;grid-template-columns:32px 64px minmax(0,1fr);gap:8px 10px;align-items:center}
+.simple-record .simple-record-photo,.simple-record .simple-record-photo img{width:64px;height:64px}
+.simple-record-info{display:contents}
+.simple-record .phone-name{grid-column:3;align-self:center;white-space:normal;font-size:17px;line-height:1.25}
+.simple-record .value-row,.simple-record .check-flag{grid-column:1/-1}
+.simple-record .value-row span{overflow:visible;font-size:12px}
+.simple-record .value-row b{white-space:nowrap;font-size:17px;overflow:visible}
+#review-person{min-height:48px;padding:8px 12px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;width:100%}
+/* Keep the simple page a comfortable reading width on large screens. */
+main{max-width:820px;margin-left:auto;margin-right:auto}
+.selection-check{accent-color:#4fd1a5}

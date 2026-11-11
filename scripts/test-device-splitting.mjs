@@ -8,7 +8,7 @@ const options={target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022};
 // Transpile every module the grouping code needs into a temp dir, rewriting
 // relative imports, so new imports never silently break this test again.
 const dir=await mkdtemp(join(tmpdir(),'imei-split-'));
-for(const name of ['serial','scan-layout','product-bands','device-labels','barcode-imei']){
+for(const name of ['serial','scan-layout','product-bands','device-labels','barcode-imei','phone-names']){
  const source=(await readFile(`src/${name}.ts`,'utf8')).replace(/from '\.\/([\w-]+)(?:\.ts)?'/g,"from './$1.mjs'");
  await writeFile(join(dir,name+'.mjs'),ts.transpileModule(source,{compilerOptions:options}).outputText);
 }
@@ -103,6 +103,28 @@ try{
    const found=deviceAnchors(stray,1000,2200,pale);
    assert.ok(found.length>=2,'Readable devices are found');
    assert.equal(planDeviceCrops(found,stray,1000,2200,pale).length,2,'Unreadable stray label adds no third crop');
+ }
+ // Phone names for the simple list: name + series instead of a model code.
+ {
+   const {phoneInfo}=await import(pathToFileURL(join(dir,'phone-names.mjs')).href);
+   const catalog=[{name:'Galaxy Z Fold8 256GB (Unlocked)',modelCode:'SM-F971UZGAXAA'},{name:'Galaxy S26 Ultra 512GB (Unlocked)',modelCode:'SM-S948UZVEXAA'},{name:'Galaxy S26 FE 128 GB | 8 GB Pistachio',modelCode:'SM-S741BLGDEUB'}];
+   const eq=(model,name,series)=>assert.deepEqual(phoneInfo(model,catalog),{name,series},model);
+   eq('SM-S938B','Galaxy S25 Ultra','S25 series');
+   eq('SM-S931B','Galaxy S25','S25 series');
+   eq('SM-S936B','Galaxy S25+','S25 series');
+   eq('SM-S948B/DS','Galaxy S26 Ultra','S26 series');
+   eq('SM-S942B','Galaxy S26','S26 series');
+   eq('SM-S741B','Galaxy S26 FE','S26 series');
+   eq('SM-F971B','Galaxy Z Fold8','Fold series');
+   eq('SM-F956B','Galaxy Z Fold6','Fold series');
+   eq('SM-F766B','Galaxy Z Flip7','Flip series');
+   eq('SM-A077F/DS','Galaxy A07','A07 series');
+   eq('SM-A376B','Galaxy A37','A37 series');
+   eq('SM-A165F','Galaxy A16','A16 series');
+   eq('Samsung Galaxy S25 Ultra','Galaxy S25 Ultra','S25 series');
+   eq('Apple iPhone 17 Pro','Apple iPhone 17 Pro','iPhone 17 series');
+   eq('Unknown unit — review','Unknown phone','Unknown phones');
+   eq('','Unknown phone','Unknown phones');
  }
  // Serial from the S/N barcode, confirmed by misread OCR (real case: OCR read RE3L555D0).
  assert.equal(resolveSerialFromBarcodes(['350000192221535','R83L555D0QQ','8806099448974'],'S/N - RE3L555D0!'),'S/N (barcode): R83L555D0QQ','Serial barcode fixes 8/B and cut-off OCR');

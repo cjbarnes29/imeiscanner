@@ -35,3 +35,25 @@ export function SamsungCatalog() {
 export function catalogModel(text:string):string | undefined {
   try { const catalog = JSON.parse(localStorage.getItem('samsung-catalog') || 'null') as Catalog | null; const corrections = JSON.parse(localStorage.getItem('samsung-catalog-corrections') || '{}'); const codes = new Set(text.toUpperCase().match(/\b(?:SM|GT|SCH|SGH|EP|EF|ET|EO)-[A-Z0-9]+\b/g) || []); const matches = (catalog?.products || []).filter(p=>codes.has(p.modelCode) || [...codes].some(code => /^(?:SM-[A-Z][0-9]{3}[A-Z0-9]?|(?:EP|EF|ET|EO)-[A-Z0-9]{4,})$/.test(code) && p.modelCode.startsWith(code))); const names = [...new Set(matches.map(p=>corrections[p.id] || p.name))]; return names.length===1 ? names[0] : undefined; } catch { return undefined; }
 }
+
+/** Saved catalog entries (name + model code) for phone names; empty until the catalog is loaded. */
+export function readCatalogEntries(): { name: string; modelCode: string }[] {
+  try {
+    const catalog = JSON.parse(localStorage.getItem('samsung-catalog') || 'null') as Catalog | null;
+    const corrections = JSON.parse(localStorage.getItem('samsung-catalog-corrections') || '{}') as Record<string, string>;
+    return (catalog?.products || []).map(product => ({ name: corrections[product.id] || product.name, modelCode: product.modelCode }));
+  } catch { return []; }
+}
+
+/** Fetch the bundled/published catalog into local storage (works offline afterwards). */
+export async function loadSamsungCatalog(): Promise<void> {
+  const bundled = `${import.meta.env.BASE_URL}samsung-catalog.json`;
+  const url = location.hostname === 'appassets.androidplatform.net' ? 'https://cjbarnes29.github.io/imeiscanner/samsung-catalog.json' : bundled;
+  let response: Response;
+  try { response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(20000) }); }
+  catch (error) { if (url === bundled) throw error; response = await fetch(bundled); }
+  if (!response.ok) throw new Error('No catalog available.');
+  const value = await response.json();
+  if (!Array.isArray(value.products)) throw new Error('Invalid catalog.');
+  localStorage.setItem('samsung-catalog', JSON.stringify(value));
+}
