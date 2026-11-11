@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoPackage', 'dataUrlBlob'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -18,6 +18,8 @@ helpers += layout.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.te
 helpers += await readFile('src/serial.ts','utf8');
 helpers += await readFile('src/share-package.ts','utf8');
 helpers += await readFile('src/barcode-imei.ts','utf8');
+// Browser-only image decoding is stubbed; the package logic under test is unchanged.
+helpers += '\nasync function workbookImage(r){return {dataUrl:recordPhoto(r),width:120,height:90};}\n';
 const catalogAst=ts.createSourceFile('SamsungCatalog.tsx',await readFile('src/SamsungCatalog.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 helpers += catalogAst.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='catalogModel').getText(catalogAst);
 helpers += `\nexport { ${names.join(',')} };`;
@@ -94,5 +96,19 @@ try {
   assert.equal(f.extractPreferredImei('IMEI: 490154203237519'),'','Un-indexed IMEI must pass Luhn');
   assert.equal(f.extractPreferredImei('IMEI 1: 490154203237518\nIMEI: 356938035643809'),'490154203237518','Indexed IMEI wins over un-indexed');
   assert.equal(f.recordSerial({raw:'SN: RFGYC2L1PLK'}),'RFGYC2L1PLK');
+  {
+    const JSZip=(await import('jszip')).default;
+    const pkg=await JSZip.loadAsync(await (await f.createImeiPhotoPackage([{...row,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{...serialOnly,cropDataUrl:'data:image/jpeg;base64,Q1JPUDJUV08='}])).arrayBuffer());
+    const book=new ExcelJS.Workbook();await book.xlsx.load(await pkg.file('imei-pictures.xlsx').async('nodebuffer'));
+    assert.equal(book.worksheets.length,1,'One sheet only');
+    const ws=book.getWorksheet('IMEIs');
+    assert.deepEqual([1,2,3,4].map(c=>ws.getRow(1).getCell(c).value),['IMEI','Picture','Download',null],'Only IMEI, picture and download columns');
+    assert.equal(ws.getCell('A2').value,first);assert.equal(ws.getCell('A3').value,'S/N RFGYC2L1PLK');
+    const link=ws.getCell('C2').value;assert.equal(link.text,'Download picture');assert.ok(!link.hyperlink.includes('#'),'No # in file links');
+    assert.ok(pkg.file(link.hyperlink),'Link points at a picture inside the ZIP');
+    assert.ok(pkg.file(ws.getCell('C3').value.hyperlink),'Serial-only row has its picture too');
+    assert.equal(ws.getImages().length,2,'Each row shows its picture');
+    assert.ok(pkg.file('READ ME FIRST.txt'));
+  }
   console.log('PASS: camera/upload IMEI 1 then IMEI 2 priority, positioned barcode matching, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
 } finally { await unlink(runtime); }

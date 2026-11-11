@@ -853,6 +853,58 @@ async function createInventoryWorkbook(
   });
 }
 
+/**
+ * Minimal Excel export: one sheet with IMEI, the picture, and a "Download picture"
+ * link. Excel cannot hand out an embedded picture as a file, so the pictures ship
+ * beside the workbook in a ZIP and each link opens its own copy.
+ */
+async function createImeiPhotoPackage(rows: RecordItem[]) {
+  const ExcelJS = await import('exceljs');
+  const Workbook = ExcelJS.Workbook || ExcelJS.default?.Workbook;
+  if (!Workbook) throw new Error('The Excel exporter could not load. Please reload the app and retry.');
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  const workbook = new Workbook();
+  workbook.creator = 'IMEI Lens';
+  const sheet = workbook.addWorksheet('IMEIs');
+  sheet.columns = [
+    { header: 'IMEI', key: 'imei', width: 22 },
+    { header: 'Picture', key: 'picture', width: 38 },
+    { header: 'Download', key: 'download', width: 20 }
+  ];
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF183B43' } };
+  const used = new Set<string>();
+  for (const [index, record] of rows.entries()) {
+    // No '#', spaces or slashes: Excel treats '#' in a link as a jump inside the workbook.
+    const label = (record.imei || recordSerial(record) || 'no-imei').replace(/[^A-Za-z0-9_-]/g, '_');
+    let name = `${index + 1}_${label}.jpg`;
+    for (let n = 2; used.has(name); n++) name = `${index + 1}_${label}_${n}.jpg`;
+    used.add(name);
+    const path = `pictures/${name}`;
+    zip.file(path, dataUrlBlob(recordPhoto(record)));
+    const row = sheet.addRow({ imei: record.imei || (recordSerial(record) ? `S/N ${recordSerial(record)}` : 'Not detected'), picture: '', download: '' });
+    row.height = 150;
+    row.alignment = { vertical: 'middle', wrapText: true };
+    row.getCell(3).value = { text: 'Download picture', hyperlink: path, tooltip: `Open or save ${name}` };
+    row.getCell(3).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
+    const image = await workbookImage(record);
+    const id = workbook.addImage({ base64: image.dataUrl, extension: 'jpeg' });
+    const cellWidth = 270, cellHeight = 200;
+    const scale = Math.min((cellWidth - 16) / image.width, (cellHeight - 16) / image.height);
+    const width = Math.max(1, Math.round(image.width * scale)), height = Math.max(1, Math.round(image.height * scale));
+    sheet.addImage(id, {
+      tl: { col: 1 + (cellWidth - width) / (2 * cellWidth), row: row.number - 1 + (cellHeight - height) / (2 * cellHeight) },
+      ext: { width, height }, editAs: 'oneCell',
+      hyperlinks: { hyperlink: path, tooltip: `Open or save ${name}` }
+    });
+  }
+  zip.file('imei-pictures.xlsx', await workbook.xlsx.writeBuffer());
+  zip.file('READ ME FIRST.txt', 'Extract this ZIP first (Windows: right-click > Extract All; phone: tap the ZIP > Extract).\nThen open imei-pictures.xlsx and click "Download picture" (or the picture) on any row to open that picture as a file you can save or share.\nThe pictures folder must stay next to the Excel file for the links to work.\n');
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/zip' });
+}
+
 async function uploadPhotoToDrive(record: RecordItem, token: string, folderId: string) {
   const photo = dataUrlBlob(recordPhoto(record));
   const boundary = `imei-photo-${newId()}`;
@@ -1074,8 +1126,10 @@ export default function App() {
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [exportSearch, setExportSearch] = useState('');
   const [exportPreviewLimit, setExportPreviewLimit] = useState(30);
-  const [reportLayout, setReportLayout] = useState<'simple' | 'person_photo'>('simple');
+  const [reportLayout, setReportLayout] = useState<'imei_photo' | 'simple' | 'person_photo'>('imei_photo');
   const includePhotos = reportLayout === 'person_photo';
+  // Word, CSV and Sheets have no picture-download package; they use the IMEI-only layout.
+  const legacyLayout = reportLayout === 'imei_photo' ? 'simple' : reportLayout;
   const compactExport = false;
   const [exportFormat, setExportFormat] = useState<'excel' | 'word' | 'sheets' | 'csv'>('excel');
 
@@ -1939,21 +1993,28 @@ export default function App() {
         }
       }
 
-      if (exportFormat === 'excel') {
+      if (exportFormat === 'excel' && reportLayout === 'imei_photo') {
+        setGoogleProgress('Building Excel with pictures…');
+        const file = await createImeiPhotoPackage(rows);
+        await downloadBlob(file, selectedOnly ? 'imei-pictures-selected.zip' : 'imei-pictures.zip');
+        const done = `Downloaded a ZIP with Excel and ${rows.length} picture(s). Extract it, open imei-pictures.xlsx, then click Download picture on any row.`;
+        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the export.' : done);
+        setToast(androidBridge ? 'Choose where to save the ZIP file.' : `Excel + ${rows.length} picture(s) downloaded as ZIP.`);
+      } else if (exportFormat === 'excel') {
         setGoogleProgress('Building the Excel workbook…');
-        const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
+        const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, legacyLayout);
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.xlsx' : 'imei-scanner-export.xlsx');
         setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Excel export.' : `Excel downloaded with ${rows.length} record(s)${includePhotos ? ' and embedded photos' : ''}.`);
         setToast(androidBridge ? 'Choose where to save the Excel file.' : `Excel downloaded with ${rows.length} record(s)${includePhotos ? ' and embedded photos' : ''}.`);
       } else if (exportFormat === 'word') {
         setGoogleProgress('Building the Word document…');
-        const file = await createWordReport(rows, includePhotos, photoLinks, personGroups, reportLayout);
+        const file = await createWordReport(rows, includePhotos, photoLinks, personGroups, legacyLayout);
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.docx' : 'imei-scanner-export.docx');
         setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Word export.' : `Word document downloaded with ${rows.length} record(s).`);
         setToast(androidBridge ? 'Choose where to save the Word file.' : `Word document downloaded with ${rows.length} record(s).`);
       } else if (exportFormat === 'csv') {
         const file = new Blob(
-          [recordsCsv(rows, photoLinks, personGroups, compactExport, reportLayout)],
+          [recordsCsv(rows, photoLinks, personGroups, compactExport, legacyLayout)],
           { type: 'text/csv;charset=utf-8' }
         );
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.csv' : 'imei-scanner-export.csv');
@@ -1962,7 +2023,7 @@ export default function App() {
       } else {
         if (!token) throw new Error('Google authorization is required for Sheets export.');
         setGoogleProgress('Building the model and person tabs…');
-        const workbook = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
+        const workbook = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, legacyLayout);
         const boundary = `imei-lens-${newId()}`;
         const metadata = JSON.stringify({
           name: `IMEI Scanner - ${new Date().toISOString().slice(0, 10)}`,
@@ -2033,13 +2094,13 @@ export default function App() {
       let report: Blob;
       if (exportFormat === 'word') {
         reportName = 'imei-records.docx';
-        report = await createWordReport(rows, true, links, personGroups, reportLayout);
+        report = await createWordReport(rows, true, links, personGroups, legacyLayout);
       } else if (exportFormat === 'csv') {
         reportName = 'imei-records.csv';
-        report = new Blob([recordsCsv(rows, links, personGroups, false, reportLayout)], { type: 'text/csv;charset=utf-8' });
+        report = new Blob([recordsCsv(rows, links, personGroups, false, legacyLayout)], { type: 'text/csv;charset=utf-8' });
       } else {
         reportName = 'imei-records.xlsx';
-        report = await createInventoryWorkbook(rows, links, true, personGroups, '', false, reportLayout);
+        report = await createInventoryWorkbook(rows, links, true, personGroups, '', false, legacyLayout);
       }
 
       if (folder) {
@@ -2096,7 +2157,7 @@ export default function App() {
     }
     if (exportFormat === 'sheets') {
       setSyncing(true);
-      void createInventoryWorkbook(rows, new Map(), includePhotos, personGroups, '', compactExport, reportLayout)
+      void createInventoryWorkbook(rows, new Map(), includePhotos, personGroups, '', compactExport, legacyLayout)
         .then(async file => {
           await downloadBlob(file, 'imei-records-for-google-sheets.xlsx');
           setDownloadStatus(androidBridge ? 'Choose a folder and tap Save. Then import the Excel file into Google Sheets.' : 'Excel file downloaded. In Google Sheets, choose File → Import → Upload.');
@@ -2412,10 +2473,16 @@ export default function App() {
             <label className="export-format-picker">
               <span>Information to include</span>
               <select value={reportLayout} onChange={e => { setReportLayout(e.target.value as typeof reportLayout); setDownloadStatus(''); }}>
+                <option value="imei_photo">IMEI + picture with download button (Excel)</option>
                 <option value="simple">IMEI and model only</option>
                 <option value="person_photo">IMEI, model, person and photos</option>
               </select>
             </label>
+            {reportLayout === 'imei_photo' && (
+              <div className="download-status">{exportFormat === 'excel'
+                ? 'Downloads a ZIP: an Excel sheet with only IMEI, picture and a Download picture button, plus the picture files. Extract the ZIP first, then open the Excel file.'
+                : 'Pictures with download buttons are available in Excel only. This format exports IMEIs only.'}</div>
+            )}
             {reportLayout === 'person_photo' && (
               <>
                 <div className="download-status">{exportFormat === 'excel'
