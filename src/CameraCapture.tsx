@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useBackLayer } from './back-layer';
 
 function CameraThumbnail({file}: {file:File}) {
   const [url,setUrl]=useState('');
@@ -37,7 +38,9 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
     if(!batch.length||submitted.current)return;
     submitted.current=true;onCapture(batch);onClose();
   }
-  function close() {stopBurst.current=true;if((photos.length||photo)&&!window.confirm('Discard these unscanned camera photos? Choose Cancel to keep taking photos or scan them.'))return;onClose();}
+  function close() {stopBurst.current=true;if((photos.length||photo)&&!window.confirm('Discard these unscanned camera photos? Choose Cancel to keep taking photos or scan them.'))return false;onClose();return true;}
+  // Back closes the camera (with the same discard question); cancelling keeps it open and re-arms Back.
+  useBackLayer(true, () => { if (!close()) history.pushState({ imeiLayer: 'camera' }, ''); }, 'camera');
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;stopBurst.current=true;};},[]);
   useEffect(() => {
     let cancelled = false;

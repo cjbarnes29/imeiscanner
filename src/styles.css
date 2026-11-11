@@ -109,3 +109,9 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .copy-list li img{grid-area:img}.copy-list li .copy-num{grid-area:num;text-align:left;font-size:18px}.copy-list li .copy-save{grid-area:dl}.copy-list li .copy-values{grid-area:vals}
 .copy-values button{font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:normal;white-space:nowrap}
 .bulk-download-btn{display:flex;align-items:center;justify-content:center;gap:8px}
+
+/* Navigation: popup headers stay visible while the content scrolls, so Close is always reachable. */
+.modal>.modal-head{position:sticky;top:-16px;z-index:5;margin:-16px -16px 8px;padding:12px 16px;background:#111e2e;border-bottom:1px solid #2b4157}
+.modal>.modal-head .subtle-btn,.modal>.modal-head button{min-height:44px;min-width:44px}
+/* Floating shortcut back to the top of a long list. */
+.back-to-top{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:max(76px,calc(env(safe-area-inset-bottom) + 64px));z-index:7;min-height:48px;min-width:56px;padding:0 14px;border:1px solid #4fd1a5;border-radius:24px;background:#123b34;color:#9ff0d3;font:inherit;font-weight:700;box-shadow:0 6px 20px #0007;cursor:pointer}

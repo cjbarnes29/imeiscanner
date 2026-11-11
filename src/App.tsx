@@ -1,5 +1,6 @@
 import { barcodeImei, imeiReadingsDisagree, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
+import { useBackLayer } from './back-layer';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
@@ -1230,6 +1231,8 @@ export default function App() {
   const guidedCropWorker = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
   const cropRequestedId = useRef<string | null>(null);
   const [toast, setToast] = useState('');
+  const [showTop, setShowTop] = useState(false);
+  useEffect(() => { const onScroll = () => setShowTop(window.scrollY > 700); onScroll(); window.addEventListener('scroll', onScroll, { passive: true }); return () => window.removeEventListener('scroll', onScroll); }, []);
   const [storageWarning, setStorageWarning] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1412,6 +1415,11 @@ export default function App() {
     closeCropEditor();
     setSelected(null);
   }
+
+  // Back button / swipe-back closes the top popup instead of leaving the app.
+  useBackLayer(!!selected, closePhotoReview, 'review');
+  useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
+  useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
 
   useEffect(() => {
     if (!cropEditorOpen || !selected || manualCrop.width < 1 || manualCrop.height < 1 || manualCrop.width >= 100 && manualCrop.height >= 100) {
@@ -3303,6 +3311,7 @@ export default function App() {
           </div>
         </> : <p>This picture is saved in the browser that scanned it. Open the Excel link on that phone in the same browser (Chrome) where you scanned, or use the picture file saved next to the Excel file.</p>}
       </section></div>}
+      {showTop && !selected && shareIds.length === 0 && !cameraOpen && <button type="button" className="back-to-top" aria-label="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>↑ Top</button>}
       {toast && (
         <div className="toast">
           <AlertTriangle size={16} />
