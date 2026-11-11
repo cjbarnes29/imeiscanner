@@ -108,3 +108,4 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .copy-list li{grid-template-columns:52px 1fr auto;grid-template-areas:"img num dl" "vals vals vals"}
 .copy-list li img{grid-area:img}.copy-list li .copy-num{grid-area:num;text-align:left;font-size:18px}.copy-list li .copy-save{grid-area:dl}.copy-list li .copy-values{grid-area:vals}
 .copy-values button{font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:normal;white-space:nowrap}
+.bulk-download-btn{display:flex;align-items:center;justify-content:center;gap:8px}

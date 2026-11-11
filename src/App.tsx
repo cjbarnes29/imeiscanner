@@ -1233,6 +1233,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [storageWarning, setStorageWarning] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [googleProgress, setGoogleProgress] = useState('');
   const [downloadStatus, setDownloadStatus] = useState('');
   const [photoDownloads, setPhotoDownloads] = useState<RecordItem[]>([]);
@@ -2268,6 +2269,39 @@ export default function App() {
     }
   }
 
+  /**
+   * Bulk picture download: every selected record (or every visible one when none
+   * is ticked) saved as numbered files <n>_<IMEI>.jpg in one folder, plus numbers.txt
+   * with the same numbering. No ZIP. Call straight from a tap: the browser folder
+   * picker must open before any await.
+   */
+  function bulkDownloadPictures() {
+    const rows = (selectedRows.length ? selectedRows : visible).slice(0, 500);
+    if (!rows.length || bulkBusy) return;
+    const picker = !androidBridge?.beginFolder ? (window as any).showDirectoryPicker : undefined;
+    let folderChoice: Promise<any> | undefined;
+    try { folderChoice = typeof picker === 'function' ? picker.call(window, { mode: 'readwrite', id: 'imei-pictures' }) : undefined; } catch { folderChoice = undefined; }
+    setBulkBusy(true);
+    void (async () => {
+      try {
+        const label = (row: RecordItem) => (row.imei || recordSerial(row) || 'IMEI_NOT_FOUND').replace(/[^A-Za-z0-9_-]/g, '_');
+        const files: ExportFile[] = rows.map((row, index) => {
+          const blob = dataUrlBlob(recordPhoto(row));
+          const extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+          return { name: `${index + 1}_${label(row)}.${extension}`, blob };
+        });
+        const list = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${index + 1}. ${[pair.imei1 && `IMEI 1 ${pair.imei1}`, pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ') || 'No number detected'}`; }).join('\r\n');
+        files.push({ name: 'numbers.txt', blob: new Blob([list + '\r\n'], { type: 'text/plain;charset=utf-8' }) });
+        const folderName = exportFolderName();
+        const where = await saveFilesToFolder(files, folderName, folderChoice);
+        setToast(where === 'android' ? 'Choose a folder to save into.' : where === 'picked' ? `Saved ${rows.length} pictures in folder "${folderName}".` : `Downloading ${rows.length} pictures into your Downloads folder. Allow multiple downloads if asked.`);
+        setDownloadStatus(where === 'android' ? `Choose where to create the folder "${folderName}" with ${rows.length} numbered pictures and numbers.txt.` : where === 'picked' ? `Saved folder "${folderName}": ${rows.length} numbered pictures plus numbers.txt.` : `${rows.length} numbered pictures and numbers.txt downloaded into Downloads. Files are named 1_IMEI.jpg, 2_IMEI.jpg and so on.`);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : 'Could not download the pictures.');
+      } finally { setBulkBusy(false); }
+    })();
+  }
+
   function exportChosen() {
     const rows = exportRows;
     if (!rows.length) {
@@ -2863,6 +2897,7 @@ export default function App() {
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
               <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{openSharing(selectedRows.map(row=>row.id));}}>Share selected ({selectedRows.length})</button>
+              <button className="primary share-all-btn bulk-download-btn" disabled={!visible.length || bulkBusy} onClick={bulkDownloadPictures}><Download size={16} /> {bulkBusy ? 'Saving pictures…' : `Download all pictures (${Math.min(selectedRows.length || visible.length, 500)})`}</button>
               <button className="primary share-all-btn" disabled={!visible.length} onClick={()=>openSharing(visible.slice(0,200).map(row=>row.id))}>Share all ({Math.min(visible.length,200)}) — pictures + numbers</button>
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
