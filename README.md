@@ -18,7 +18,12 @@ The app is one short screen with two sections.
    - **One-tap actions:** **Export Excel** (the ticked phones, or all), **Download pictures**, **Share**, **Delete**, and **Fix photos** (bulk crop) when some photos need it.
    - Phone names come from the Samsung catalog first, then from Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits.
 
-Options that were removed from the screen to keep it simple: the Export inventory panel with its format and filter menus (Word, CSV and Google Sheets exports), the detailed table view, the Samsung catalog panel, the scan-speed menu (Standard is always used), and the laptop / Android background-scan panels. The code for some of these is still in the repository.
+Everything else is still available, collapsed so the main screen stays simple:
+- **More scan options** (under Scan phones): scan speed (Fast / Standard / Detailed), the photo queue with drop zone, laptop and background scanning, the Android background scan, and the Samsung catalog.
+- **More export options** (under the action buttons): Excel, Word, Google Sheets or CSV, what to include, which records, and the choose-records list.
+- **Detailed table view**: the full table with model code, picture ID and validation columns, plus model filter chips.
+- **More for this phone** (on every phone): edit IMEI, serial and model code in place, copy the model code or the whole record, download the photo, share the photo and number, and edit or crop the photo.
+- Summary cards at the top: scanned records, valid IMEI, needs review, models.
 
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
@@ -89,7 +94,7 @@ Real label photos contain IMEIs and this repository is public, so they are never
 The app uses mobile-friendly controls, though browser support for photo formats and folder selection varies. The first recognition data download requires an internet connection.
 
 ## Keep scanning after closing the browser (Windows laptop)
-> **Note:** the screen no longer has a panel for laptop or cloud scanning (see *The simple interface*). The scanner service below still runs and its photo-reading code is kept up to date, but nothing in the current screen sends photos to it.
+> **Note:** laptop and background scanning is under *More scan options* on the main screen.
 
 1. Keep the laptop plugged in, connected, and configured to stay awake when you close the lid. A sleeping or shut-down laptop cannot scan.
 2. Run `npm ci` and `npm run build` in this folder.
