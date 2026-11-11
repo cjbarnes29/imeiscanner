@@ -19,6 +19,7 @@ import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
 import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
 import { SamsungCatalog, catalogModel } from './SamsungCatalog';
+import { CameraCapture } from './CameraCapture';
 
 type RecordItem = {
   id: string;
@@ -1968,12 +1969,11 @@ export default function App() {
     setBulkEditOpen(false); setBulkEditModel(''); setBulkEditPerson(''); setBulkEditChecked(false);
   }
 
-  const nativeCameraRef = useRef<HTMLInputElement>(null);
   const simpleChooseRef = useRef<HTMLInputElement>(null);
-  /** Open the device's native camera app (photos are named camera-* so scanning treats them as camera shots). */
+  /** Open the in-app camera (it also offers the phone's own camera app as "Phone camera"). */
   function openNativeCamera() {
     if (busy || !inventoryLoaded) return;
-    nativeCameraRef.current?.click();
+    setCameraOpen(true);
   }
 
   /** Select value "unassigned" means no person (an empty string cannot be a select option next to the placeholder). */
@@ -2976,20 +2976,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* The device's own camera app: `capture` makes a phone open its native camera directly. On a computer it opens the file chooser. */}
-      <input
-        ref={nativeCameraRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        aria-label="Take a photo with the device camera"
-        onChange={event => {
-          const taken = Array.from(event.target.files || []).filter(file => file.type.startsWith('image/')).map(file => new File([file], `camera-${newId()}.${(file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'}`, { type: file.type || 'image/jpeg' }));
-          event.target.value = '';
-          if (taken.length) void scan(taken);
-        }}
-      />
+      {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
 {!simpleView && (<>
         <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button><button disabled={busy || !inventoryLoaded} onClick={openNativeCamera}>📷 Camera</button></nav>
