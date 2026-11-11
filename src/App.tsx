@@ -666,6 +666,191 @@ async function refineCropText(worker: Awaited<ReturnType<typeof createWorker>>, 
   return raw;
 }
 
+/** Records that may hold several devices or nothing readable: candidates for bulk cropping. */
+const needsCropping = (record: RecordItem) => !!record.cropNeedsReview || (!record.imei && !recordSerial(record));
+type DrawnBox = { x: number; y: number; width: number; height: number };
+type SplitCrop = { cropDataUrl: string; imei: string; model: string; raw: string };
+type BulkItem = { id: string; name: string; source: string; deviceCount?: number; model: string };
+const FULL_BOX: DrawnBox = { x: 0, y: 0, width: 100, height: 100 };
+
+/** True when a new box covers most of an existing one (the same label drawn twice). */
+function overlapsBox(boxes: DrawnBox[], box: DrawnBox) {
+  const overlap = (a: DrawnBox, b: DrawnBox) => { const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x), h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y); return w > 0 && h > 0 ? (w * h) / Math.min(a.width * a.height, b.width * b.height) : 0; };
+  return boxes.findIndex(existing => overlap(existing, box) > 0.6);
+}
+
+/**
+ * Auto option: find how many devices a photo holds and where their labels sit,
+ * using the same label grouping as scanning. Boxes are in % of the photo.
+ * devices counts what was seen even when boxes could not be placed.
+ */
+async function autoDetectBoxes(worker: Awaited<ReturnType<typeof createWorker>>, source: string): Promise<{ boxes: DrawnBox[]; devices: number }> {
+  const file = new File([dataUrlBlob(source)], 'auto.jpg', { type: 'image/jpeg' });
+  const { color, enhanced } = await createScanImages(file, 2400);
+  await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
+  let lines = scaleOcrLines(ocrLines((await worker.recognize(enhanced)).data), enhanced, color);
+  const W = color.width, H = color.height;
+  lines = [...lines, ...labelledBarcodeLines(await frameBarcodes(color), lines)];
+  const frame = color.getContext('2d')?.getImageData(0, 0, W, H);
+  const anchors = deviceAnchors(lines, W, H, frame);
+  const regions = anchors.length >= 2 ? planDeviceCrops(anchors, lines, W, H, frame) : [];
+  const boxes = regions.map(region => ({ x: region.x / W * 100, y: region.y / H * 100, width: region.width / W * 100, height: region.height / H * 100 }));
+  return { boxes, devices: anchors.length };
+}
+
+/** Cut every drawn box and read each one (barcodes + OCR + second reads). */
+async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | null, source: string, boxes: DrawnBox[], modelFor: (raw: string) => string, onProgress?: (index: number) => void): Promise<SplitCrop[]> {
+  const photos = await createCroppedPhotos(source, boxes.map((box, index) => ({ imei: `box-${index}`, ...box })), 100, 100);
+  const crops: SplitCrop[] = [];
+  for (let index = 0; index < boxes.length; index++) {
+    const cropDataUrl = photos.get(`box-${index}`)!;
+    let raw = '', imei = '';
+    onProgress?.(index + 1);
+    try {
+      if (worker) {
+        let lines: OcrLine[] = [];
+        ({ raw, imei, lines } = await readCropImei(worker, cropDataUrl));
+        raw = await cameraBarcodeText(cropDataUrl, raw, lines);
+        raw = await refineCropText(worker, cropDataUrl, raw, lines);
+        imei = cameraImei(raw);
+      }
+    } catch (error) { console.warn('Crop kept without automatic text reading', error); }
+    crops.push({ cropDataUrl, imei, model: modelFor(raw), raw });
+  }
+  return crops;
+}
+
+/** Records that replace `original` after it was split into crops. The first keeps its number. */
+function splitRecords(original: RecordItem, crops: SplitCrop[], source: string, firstNumber: number): RecordItem[] {
+  const sourcePictureId = original.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
+  return crops.map((crop, index) => {
+    const serial = serialReading(crop.raw);
+    return {
+      ...original, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
+      sourcePictureId, number: index === 0 ? original.number : firstNumber + index - 1,
+      dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl,
+      ...serial, imei: crop.imei, imei2: recordImeiPair({ imei: crop.imei, raw: crop.raw } as RecordItem).imei2,
+      model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
+      cropNeedsReview: !crop.imei && !serial.serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
+      duplicate: false, createdAt: new Date().toISOString(), deviceCount: undefined, deviceImeis: undefined
+    } as RecordItem;
+  });
+}
+
+/** Photo with numbered boxes already drawn and one live box to drag. */
+function BoxPad({ src, done, cur, setCur, locked }: { src: string; done: DrawnBox[]; cur: DrawnBox; setCur: (box: DrawnBox) => void; locked: boolean }) {
+  const start = useRef<{ x: number; y: number; edge?: string; initial?: DrawnBox } | null>(null);
+  const point = (event: ReactPointerEvent<HTMLDivElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)), y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)) }; };
+  const draw = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!start.current || locked) return;
+    const p = point(event), s = start.current;
+    if (s.edge && s.initial) {
+      const right = s.initial.x + s.initial.width, bottom = s.initial.y + s.initial.height;
+      const left = s.edge.includes('w') ? Math.min(p.x, right - 1) : s.initial.x, top = s.edge.includes('n') ? Math.min(p.y, bottom - 1) : s.initial.y;
+      const newRight = s.edge.includes('e') ? Math.max(p.x, left + 1) : right, newBottom = s.edge.includes('s') ? Math.max(p.y, top + 1) : bottom;
+      setCur({ x: left, y: top, width: newRight - left, height: newBottom - top });
+      return;
+    }
+    setCur({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), width: Math.abs(p.x - s.x), height: Math.abs(p.y - s.y) });
+  };
+  return <div className="crop-viewport"><div className="crop-editor" style={{ maxWidth: '100%' }}
+    onPointerDown={event => { if (locked) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const p = point(event); start.current = { ...p, edge: (event.target as HTMLElement).dataset.edge, initial: { ...cur } }; if (!start.current.edge) draw(event); }}
+    onPointerMove={draw} onPointerUp={event => { draw(event); start.current = null; }} onPointerCancel={() => { start.current = null; }}>
+    <img src={src} alt="Photo: drag a box around each label" draggable={false} style={{ maxHeight: '44dvh', maxWidth: '100%' }} />
+    {done.map((box, index) => <div key={index} className="crop-box-done" style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.width}%`, height: `${box.height}%` }}><span>{index + 1}</span></div>)}
+    {!locked && <div className="crop-selection" style={{ left: `${cur.x}%`, top: `${cur.y}%`, width: `${cur.width}%`, height: `${cur.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
+  </div></div>;
+}
+
+/**
+ * Bulk cropping, in two stages: first go photo by photo drawing boxes (nothing is
+ * read), then process every photo at once and apply the results.
+ */
+function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClose: () => void; onApply: (results: { id: string; source: string; crops: SplitCrop[] }[]) => void }) {
+  const [index, setIndex] = useState(0);
+  const [plans, setPlans] = useState<Record<string, DrawnBox[]>>({});
+  const [count, setCount] = useState(items[0]?.deviceCount || 2);
+  const [boxes, setBoxes] = useState<DrawnBox[]>([]);
+  const [cur, setCur] = useState<DrawnBox>(FULL_BOX);
+  const [phase, setPhase] = useState<'draw' | 'summary'>('draw');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+  const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
+  useBackLayer(true, () => { if (!busy) onClose(); }, 'bulk-crop');
+  useEffect(() => () => { void workerRef.current?.terminate(); workerRef.current = null; }, []);
+  const item = items[index];
+  const planned = items.filter(entry => plans[entry.id]?.length);
+  const plannedBoxes = planned.reduce((sum, entry) => sum + plans[entry.id].length, 0);
+  const worker = async () => workerRef.current ||= await createWorker('eng');
+  function open(next: number) {
+    const target = items[next], plan = plans[target.id] || [];
+    setIndex(next); setBoxes(plan); setCount(plan.length || target.deviceCount || 2); setCur(FULL_BOX); setPhase('draw'); setMessage('');
+  }
+  function remember(list: DrawnBox[]) { setPlans(old => { const copy = { ...old }; if (list.length) copy[item.id] = list; else delete copy[item.id]; return copy; }); }
+  function next(list: DrawnBox[]) { remember(list); if (index < items.length - 1) open(index + 1); else setPhase('summary'); }
+  function addBox() {
+    if (boxes.length >= count) return;
+    if (cur.width <= 0 || cur.height <= 0 || cur.x + cur.width > 100.001 || cur.y + cur.height > 100.001) { setMessage('Draw a box inside the photo first.'); return; }
+    if (cur.width >= 99.99 && cur.height >= 99.99) { setMessage('Draw a box around one label first.'); return; }
+    const clash = overlapsBox(boxes, cur);
+    if (clash >= 0) { setMessage(`This box covers the same area as box ${clash + 1}. Draw it around a different label.`); return; }
+    setBoxes([...boxes, cur]); setCur(FULL_BOX); setMessage('');
+  }
+  async function auto() {
+    setBusy('Detecting labels…'); setMessage('');
+    try {
+      const found = await autoDetectBoxes(await worker(), item.source);
+      if (found.boxes.length >= 2) { setCount(found.boxes.length); setBoxes(found.boxes); setCur(FULL_BOX); setMessage(`Found ${found.boxes.length} labels. Check the numbered boxes, use Undo to redraw one, or go on.`); }
+      else if (found.devices >= 2) { setCount(found.devices); setMessage(`Found ${found.devices} labels but could not place the boxes. Draw them yourself.`); }
+      else setMessage('Found only one label. If you see more, enter the number and draw the boxes.');
+    } catch (error) { console.error(error); setMessage('Auto-detect did not work on this photo. Draw the boxes yourself.'); }
+    finally { setBusy(''); }
+  }
+  async function processAll() {
+    if (!planned.length || busy) return;
+    const results: { id: string; source: string; crops: SplitCrop[] }[] = [];
+    try {
+      const w = await worker().catch(() => null);
+      for (const [position, entry] of planned.entries()) {
+        const crops = await readBoxCrops(w, entry.source, plans[entry.id], raw => exportModel(entry.model) || identifyModel(raw, entry.name),
+          box => setBusy(`Photo ${position + 1} of ${planned.length} · reading box ${box} of ${plans[entry.id].length}…`));
+        results.push({ id: entry.id, source: entry.source, crops });
+      }
+      onApply(results);
+    } catch (error) { console.error(error); setMessage('Could not process every photo. Nothing was changed.'); setBusy(''); }
+  }
+  const complete = boxes.length === count;
+  return <div className="modal-backdrop bulk-backdrop"><section className="modal bulk-modal" role="dialog" aria-modal="true" aria-label="Bulk cropping">
+    <div className="modal-head"><h2>Bulk crop</h2><button className="subtle-btn" disabled={!!busy} onClick={onClose}>Close</button></div>
+    {phase === 'draw' && item && <>
+      <p className="bulk-step"><strong>Photo {index + 1} of {items.length}</strong> · {item.name}</p>
+      <p className="copy-hint">Step 1: draw the boxes for every photo. Nothing is read until you tap Process all at the end.</p>
+      <div className="review-split-start">
+        <label>Labels in this photo <input type="number" inputMode="numeric" min={1} max={20} value={count} disabled={!!busy} onChange={event => { const value = Math.max(1, Math.min(20, Number(event.target.value) || 1)); setCount(value); setBoxes(old => old.slice(0, value)); }} /></label>
+        <button className="subtle-btn" disabled={!!busy} onClick={() => void auto()}>{busy || 'Auto-detect'}</button>
+      </div>
+      <BoxPad src={item.source} done={boxes} cur={cur} setCur={setCur} locked={complete || !!busy} />
+      {message && <p role="status" className="bulk-message">{message}</p>}
+      <div className="share-toolbar bulk-actions">
+        {!complete ? <button className="primary" disabled={!!busy} onClick={addBox}>Add box {boxes.length + 1} of {count}</button>
+          : <button className="primary" disabled={!!busy} onClick={() => next(boxes)}>{index < items.length - 1 ? 'Save · next photo' : 'Save · review all'}</button>}
+        {boxes.length > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { setCur(boxes[boxes.length - 1]); setBoxes(boxes.slice(0, -1)); }}>Undo box {boxes.length}</button>}
+        <button className="subtle-btn" disabled={!!busy} onClick={() => next([])}>Skip this photo</button>
+        {index > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { remember(complete ? boxes : plans[item.id] || []); open(index - 1); }}>← Previous photo</button>}
+      </div>
+    </>}
+    {phase === 'summary' && <>
+      <p className="copy-hint">Step 2: check the plan, then process everything together.</p>
+      <ol className="bulk-summary">{items.map((entry, position) => <li key={entry.id}><img src={entry.source} alt="" /><div><strong>{entry.name}</strong><small>{plans[entry.id]?.length ? `${plans[entry.id].length} box${plans[entry.id].length === 1 ? '' : 'es'} drawn` : 'Skipped — stays as it is'}</small></div><button className="subtle-btn" disabled={!!busy} onClick={() => open(position)}>Edit</button></li>)}</ol>
+      {message && <p role="status" className="bulk-message">{message}</p>}
+      <div className="share-toolbar bulk-actions">
+        <button className="primary" disabled={!planned.length || !!busy} onClick={() => void processAll()}>{busy || `Process all (${planned.length} photo${planned.length === 1 ? '' : 's'}, ${plannedBoxes} boxes)`}</button>
+        <button className="subtle-btn" disabled={!!busy} onClick={() => open(items.length - 1)}>← Back</button>
+      </div>
+    </>}
+  </section></div>;
+}
+
 function csvCell(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
 }
@@ -1272,9 +1457,9 @@ export default function App() {
   const [adjustingCrop, setAdjustingCrop] = useState(false);
   const [rotatingPhoto, setRotatingPhoto] = useState(false);
   const [reviewCountInput, setReviewCountInput] = useState(2);
-  type DrawnBox = { x: number; y: number; width: number; height: number };
   // boxes: the areas drawn so far (nothing is read yet). crops: filled only after "Process all".
-  const [reviewSplit, setReviewSplit] = useState<{ recordId: string; target: number; boxes: DrawnBox[]; crops: Array<{ cropDataUrl: string; imei: string; model: string; raw: string }> } | null>(null);
+  const [reviewSplit, setReviewSplit] = useState<{ recordId: string; target: number; boxes: DrawnBox[]; crops: SplitCrop[] } | null>(null);
+  const [bulkCropOpen, setBulkCropOpen] = useState(false);
   const [splitProgress, setSplitProgress] = useState('');
   const guidedCropWorker = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
   const cropRequestedId = useRef<string | null>(null);
@@ -2064,8 +2249,7 @@ export default function App() {
     const { x, y, width, height } = manualCrop;
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100.001 || y + height > 100.001) { setToast('Draw a box inside the photo first.'); return; }
     if (width >= 99.99 && height >= 99.99) { setToast('Draw a box around one label first.'); return; }
-    const overlap = (a: DrawnBox, b: DrawnBox) => { const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x), h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y); return w > 0 && h > 0 ? (w * h) / Math.min(a.width * a.height, b.width * b.height) : 0; };
-    const clash = reviewSplit.boxes.findIndex(box => overlap(box, { x, y, width, height }) > 0.6);
+    const clash = overlapsBox(reviewSplit.boxes, { x, y, width, height });
     if (clash >= 0) { setToast(`This box covers the same area as box ${clash + 1}. Draw it around a different label.`); return; }
     const boxes = [...reviewSplit.boxes, { x, y, width, height }];
     setReviewSplit({ ...reviewSplit, boxes });
@@ -2084,27 +2268,11 @@ export default function App() {
   async function processDrawnBoxes() {
     if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length !== reviewSplit.target) return;
     setAdjustingCrop(true);
-    const crops: typeof reviewSplit.crops = [];
     try {
       const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
-      setSplitProgress('Cutting pictures…');
-      const photos = await createCroppedPhotos(source, reviewSplit.boxes.map((box, index) => ({ imei: `box-${index}`, ...box })), 100, 100);
+      setSplitProgress('Preparing…');
       if (!guidedCropWorker.current) { try { guidedCropWorker.current = await createWorker('eng'); } catch (error) { console.warn('Text reading unavailable', error); } }
-      for (let index = 0; index < reviewSplit.boxes.length; index++) {
-        const cropDataUrl = photos.get(`box-${index}`)!;
-        let raw = '', imei = '';
-        setSplitProgress(`Reading box ${index + 1} of ${reviewSplit.boxes.length}…`);
-        try {
-          if (guidedCropWorker.current) {
-            let barcodeLines: OcrLine[] = [];
-            ({ raw, imei, lines: barcodeLines } = await readCropImei(guidedCropWorker.current, cropDataUrl));
-            raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines);
-            raw = await refineCropText(guidedCropWorker.current, cropDataUrl, raw, barcodeLines);
-            imei = cameraImei(raw);
-          }
-        } catch (error) { console.warn('Crop kept without automatic text reading', error); }
-        crops.push({ cropDataUrl, imei, model: manualModel.trim() || selected.model, raw });
-      }
+      const crops = await readBoxCrops(guidedCropWorker.current, source, reviewSplit.boxes, () => manualModel.trim() || selected.model, box => setSplitProgress(`Reading box ${box} of ${reviewSplit.boxes.length}…`));
       setReviewSplit({ ...reviewSplit, crops });
       setToast('All boxes read. Check each IMEI and model, then save.');
     } catch (error) {
@@ -2115,6 +2283,23 @@ export default function App() {
       setSplitProgress('');
       setAdjustingCrop(false);
     }
+  }
+
+  /** Auto option: let the scanner count the labels in this photo and draw the boxes. */
+  async function autoDetectInReview() {
+    if (!selected || adjustingCrop) return;
+    setAdjustingCrop(true); setSplitProgress('Detecting labels…');
+    try {
+      if (!guidedCropWorker.current) guidedCropWorker.current = await createWorker('eng');
+      const found = await autoDetectBoxes(guidedCropWorker.current, reviewSource || selected.originalDataUrl || selected.dataUrl);
+      if (found.boxes.length >= 2) {
+        setReviewCountInput(found.boxes.length);
+        setReviewSplit({ recordId: selected.id, target: found.boxes.length, boxes: found.boxes, crops: [] });
+        setToast(`Found ${found.boxes.length} labels. Check the numbered boxes (Undo redraws the last), then tap Process all.`);
+      } else if (found.devices >= 2) { setReviewCountInput(found.devices); setToast(`Found ${found.devices} labels but could not place the boxes. Draw them yourself.`); }
+      else setToast('Found only one label. If you see more, enter the number and draw the boxes.');
+    } catch (error) { console.error(error); setToast('Auto-detect did not work on this photo. Draw the boxes yourself.'); }
+    finally { if (guidedCropWorker.current) { await guidedCropWorker.current.terminate(); guidedCropWorker.current = null; } setSplitProgress(''); setAdjustingCrop(false); }
   }
 
   /** Answer to "1 device or N?": keep one record and use the first readable IMEI 1. */
@@ -2133,16 +2318,8 @@ export default function App() {
       return;
     }
     const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
-    const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
     const nextNumber = Math.max(2, ...records.map(r => r.number)) + 1;
-    const replacements: RecordItem[] = reviewSplit.crops.map((crop, index) => ({
-      ...selected, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
-      sourcePictureId, number: index === 0 ? selected.number : nextNumber + index - 1,
-      dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl,
-      ...serialReading(crop.raw), imei: crop.imei, model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
-      cropNeedsReview: !crop.imei && !serialReading(crop.raw).serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
-      duplicate: false, createdAt: new Date().toISOString(), deviceCount: undefined, deviceImeis: undefined
-    }));
+    const replacements = splitRecords(selected, reviewSplit.crops, source, nextNumber);
     setRecords(old => markDuplicateRecords(old.flatMap(r => r.id === selected.id ? replacements : [r])));
     setSelectedIds(old => old.filter(id => id !== selected.id));
     setReviewSplit(null);
@@ -2977,6 +3154,7 @@ export default function App() {
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
               <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{openSharing(selectedRows.map(row=>row.id));}}>Share selected ({selectedRows.length})</button>
+              <button className="subtle-btn share-all-btn" disabled={!records.some(needsCropping)} onClick={() => setBulkCropOpen(true)}>Bulk crop ({records.filter(needsCropping).length} need cropping)</button>
               <button className="primary share-all-btn bulk-download-btn" disabled={!visible.length || bulkBusy} onClick={bulkDownloadPictures}><Download size={16} /> {bulkBusy ? 'Saving pictures…' : `Download all pictures (${Math.min(selectedRows.length || visible.length, 500)})`}</button>
               <button className="primary share-all-btn" disabled={!visible.length} onClick={()=>openSharing(visible.slice(0,200).map(row=>row.id))}>Share all ({Math.min(visible.length,200)}) — pictures + numbers</button>
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
@@ -3309,7 +3487,9 @@ export default function App() {
                   if (!Number.isInteger(reviewCountInput) || reviewCountInput < 1 || reviewCountInput > 20) { setToast('Enter a number from 1 to 20.'); return; }
                   setReviewSplit({ recordId: selected.id, target: reviewCountInput, boxes: [], crops: [] });
                   setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
-                }}>Start cropping</button></div>
+                }}>Start cropping</button>
+                <button className="subtle-btn" disabled={adjustingCrop} onClick={() => void autoDetectInReview()}>{adjustingCrop && splitProgress ? splitProgress : 'Auto-detect'}</button></div>
+              <p className="copy-hint">Not sure how many? Tap Auto-detect: the scanner counts the labels and draws the boxes for you to check.</p>
             </div>}
             <details id="crop-editor-panel" className="crop-workspace" open={cropEditorOpen}>
               <summary onClick={event => { if (cropEditorOpen) event.preventDefault(); else setCropEditorOpen(true); }}>Adjust crop</summary>
@@ -3372,6 +3552,14 @@ export default function App() {
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
       </section></div>}
+      {bulkCropOpen && <BulkCropDialog
+        items={records.filter(needsCropping).map(r => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model }))}
+        onClose={() => setBulkCropOpen(false)}
+        onApply={results => {
+          setRecords(old => { let top = Math.max(2, ...old.map(r => r.number)); return markDuplicateRecords(old.flatMap(r => { const done = results.find(result => result.id === r.id); if (!done) return [r]; const made = splitRecords(r, done.crops, done.source, top + 1); top += made.length - 1; return made; })); });
+          setBulkCropOpen(false);
+          setToast(`${results.reduce((sum, result) => sum + result.crops.length, 0)} cropped records saved from ${results.length} photo${results.length === 1 ? '' : 's'}.`);
+        }} />}
       {linkedPicture !== null && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) closeLinkedPicture(); }}><section className="modal linked-picture" role="dialog" aria-modal="true" aria-label="Picture from Excel link">
         <div className="modal-head"><h2>{linkedPicture ? 'Picture' : 'Picture not found'}</h2><button className="subtle-btn" onClick={closeLinkedPicture}>Close</button></div>
         {linkedPicture ? <>

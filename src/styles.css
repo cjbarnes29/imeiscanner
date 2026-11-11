@@ -119,3 +119,12 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 /* Guided crop: boxes already drawn stay on the photo, numbered, until all are read together. */
 .crop-box-done{position:absolute;border:3px solid #ffd166;background:#ffd16622;border-radius:4px;pointer-events:none}
 .crop-box-done span{position:absolute;left:4px;top:4px;min-width:26px;height:26px;padding:0 6px;display:grid;place-items:center;border-radius:13px;background:#ffd166;color:#241a00;font-weight:800;font-size:14px}
+
+/* Bulk cropping */
+.bulk-modal{width:min(720px,100%)}
+.bulk-step{margin:4px 0}.bulk-message{color:#ffd166;margin:6px 0}
+.bulk-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.bulk-actions button{min-height:48px}
+.bulk-modal .review-split-start{display:flex;gap:8px;align-items:end;margin:8px 0}.bulk-modal .review-split-start label{display:grid;gap:4px}
+.bulk-summary{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.bulk-summary li{display:grid;grid-template-columns:64px 1fr auto;gap:10px;align-items:center;padding:8px;border:1px solid #2b4157;border-radius:10px;background:#0d1828}
+.bulk-summary img{width:64px;height:64px;object-fit:cover;border-radius:6px}.bulk-summary small{display:block;color:#b3c4d1}
