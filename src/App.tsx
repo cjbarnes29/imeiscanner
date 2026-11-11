@@ -13,13 +13,15 @@ import {
   UploadCloud, ScanLine, Download, Search, Trash2,
   CheckCircle2, AlertTriangle, Copy, Smartphone, Image as ImageIcon,
   X, LoaderCircle, ExternalLink, RefreshCw, Eye,
-  CloudUpload, Camera, Pencil, Share2
+  CloudUpload, Camera, Pencil, Share2, Settings
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
 import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
 import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
+import { SettingsPanel } from './SettingsPanel';
+import { readCustomModels, type CustomModels } from './custom-models';
 
 type RecordItem = {
   id: string;
@@ -80,6 +82,9 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 const digits = (s: string) => s.replace(/\D/g, '');
 
+const IMAGE_NAME = /\.(jpe?g|png|webp|heic|heif|avif|bmp|gif|tiff?)$/i;
+/** Phones sometimes hand over photos with a blank type, so the file name counts too. */
+const isImageFile = (file: File) => file.type.startsWith('image/') || ((!file.type || file.type === 'application/octet-stream') && IMAGE_NAME.test(file.name));
 function newId() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -1563,15 +1568,18 @@ export default function App() {
   const [personDraft, setPersonDraft] = useState('');
   // Samsung catalog (bundled, refreshed in the background): turns model codes into phone names.
   const [catalogEntries, setCatalogEntries] = useState<CatalogEntry[]>(() => readCatalogEntries());
+  const [customModels, setCustomModels] = useState<CustomModels>(readCustomModels);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useBackLayer(settingsOpen, () => setSettingsOpen(false), 'settings');
   useEffect(() => { void loadSamsungCatalog().then(() => setCatalogEntries(readCatalogEntries())).catch(() => {}); }, []);
   // A phone whose model code was not readable borrows the name of another scanned phone with the
   // same first 8 IMEI digits (that part identifies the model).
   const knownByTac = useMemo(() => {
     const known = new Map<string, ReturnType<typeof phoneInfo>>();
-    for (const record of records) { const info = phoneInfo(record.model, catalogEntries), tac = (record.imei || '').slice(0, 8); if (tac.length === 8 && info.series !== 'Unknown phones' && !known.has(tac)) known.set(tac, info); }
+    for (const record of records) { const info = phoneInfo(record.model, catalogEntries, customModels), tac = (record.imei || '').slice(0, 8); if (tac.length === 8 && info.series !== 'Unknown phones' && !known.has(tac)) known.set(tac, info); }
     return known;
-  }, [records, catalogEntries]);
-  const infoOf = (record: RecordItem) => { const own = phoneInfo(record.model, catalogEntries); return own.series !== 'Unknown phones' ? own : knownByTac.get((record.imei || '').slice(0, 8)) || own; };
+  }, [records, catalogEntries, customModels]);
+  const infoOf = (record: RecordItem) => { const own = phoneInfo(record.model, catalogEntries, customModels); return own.series !== 'Unknown phones' ? own : knownByTac.get((record.imei || '').slice(0, 8)) || own; };
   const [splitProgress, setSplitProgress] = useState('');
   const guidedCropWorker = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
   const cropRequestedId = useRef<string | null>(null);
@@ -2080,9 +2088,7 @@ export default function App() {
   function addFiles(list: FileList | null) {
     if (!list) return;
 
-    const accepted = Array.from(list).filter(f =>
-      f.type.startsWith('image/')
-    );
+    const accepted = Array.from(list).filter(isImageFile);
 
     setFiles(old => [...old, ...accepted]);
 
@@ -2246,6 +2252,7 @@ export default function App() {
       let addedCount = 0;
       let needsReviewCount = 0;
       let failedFiles = 0;
+      let lastFailure = '';
       let skippedImeis = 0;
       let skippedSerials = 0;
       const seenSerials = new Set<string>();
@@ -2437,6 +2444,7 @@ export default function App() {
           for (const imei of fileImeis) seenImeis.delete(imei);
           for (const serial of fileSerials) seenSerials.delete(serial);
           failedFiles++;
+          lastFailure = error instanceof Error ? error.message : String(error);
         }
         setCompletedFiles(i + 1);
         processedFiles = i + 1;
@@ -2458,7 +2466,7 @@ export default function App() {
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${skippedSerials ? ` Removed ${skippedSerials} repeated serial row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`${failedFiles ? `${failedFiles} photo(s) could not be read${lastFailure ? ` (${lastFailure.slice(0, 120)})` : ''}. ` : ''}${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${skippedSerials ? ` Removed ${skippedSerials} repeated serial row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       if(capturedFiles)setFiles(old=>[...old,...capturedFiles]);
@@ -3016,12 +3024,14 @@ export default function App() {
             <button aria-pressed={simpleView} onClick={() => setSimpleView(true)}>Simple</button>
             <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
           </div>
+          <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
           <span className="local-pill">
             <span /> {storageWarning ? 'Some records not saved' : 'Stored on this device'}
           </span>
         </div>
       </header>
 
+      {settingsOpen && <SettingsPanel customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
 {!simpleView && (<>
@@ -3210,7 +3220,7 @@ export default function App() {
             {simpleView && <div className="simple-scan-buttons">
               <button type="button" className="primary big" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}><Camera size={22} /> Take photo</button>
               <button type="button" className="primary big alt" disabled={busy || !inventoryLoaded} onClick={() => simpleChooseRef.current?.click()}><UploadCloud size={22} /> Choose photos</button>
-              <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const picked = Array.from(event.target.files || []).filter(file => file.type.startsWith('image/')); event.target.value = ''; if (picked.length) void scan(picked); }} />
+              <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const chosen = Array.from(event.target.files || []), picked = chosen.filter(isImageFile); event.target.value = ''; if (chosen.length && picked.length < chosen.length) setToast(picked.length ? `${chosen.length - picked.length} file(s) were not photos and were skipped.` : 'Those files are not photos. Choose JPG, PNG, WEBP or HEIC pictures.'); if (picked.length) void scan(picked); }} />
             </div>}
             {(busy || laptopUploading) && <button type="button" className="subtle-btn stop-upload-button" disabled={stoppingScan} onClick={stopCurrentUpload}>
               <X size={16} /> {laptopUploading ? 'Stop uploading' : stoppingScan ? 'Stopping after this photo…' : 'Stop scanning'}
@@ -3842,7 +3852,7 @@ export default function App() {
             {!cropEditorOpen && <div className="manual-imei-entry">
               <label className="review-model" htmlFor="manual-model">Device model</label>
               <input id="manual-model" value={manualModel} onChange={event => setManualModel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); document.getElementById('manual-imei')?.focus(); } }} />
-              {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries).name}</small>}
+              {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries, customModels).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries, customModels).name}</small>}
               <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
               <label htmlFor="manual-imei">IMEI 1</label>
               <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />

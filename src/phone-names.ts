@@ -57,11 +57,11 @@ export function modelCode4(text: string): string {
   return (text.toUpperCase().match(/\bSM\s*-?\s*([A-Z]\d{3})/)?.[1]) || '';
 }
 
-export function phoneInfo(model: string, catalog: CatalogEntry[] = []): PhoneInfo {
+export function phoneInfo(model: string, catalog: CatalogEntry[] = [], custom: Record<string, string> = {}): PhoneInfo {
   const text = (model || '').trim();
   const code = modelCode4(text);
   if (code) {
-    const listed = SAMSUNG_MODELS[code];
+    const listed = custom[code] || SAMSUNG_MODELS[code];
     const entry = listed ? undefined : catalog.find(item => item.modelCode.toUpperCase().replace(/^SM-?/, '').startsWith(code));
     const name = listed || (entry ? cleanPhoneName(entry.name) : nameFromCode(code));
     if (name) return { name, series: seriesOfName(name) };

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+export const CATALOG_AUTO_KEY = 'imei-lens-catalog-auto';
+const autoDownloadOff = () => { try { return localStorage.getItem(CATALOG_AUTO_KEY) === 'off'; } catch { return false; } };
 type Product = { id:string; name:string; modelCode:string; region:string; sourceUrl:string; lastChecked:string; imageUrl?:string; specifications?:{name:string;value:string}[]; releaseDate?:string; compatibility?:string };
 type Catalog = { updatedAt:string; products:Product[]; coverage:{ complete:boolean; pagesChecked:number } };
 export function SamsungCatalog() {
@@ -22,7 +24,7 @@ export function SamsungCatalog() {
     finally { setBusy(false); }
   }
   const matches = (catalog?.products || []).filter(p => `${corrections[p.id] || p.name} ${p.modelCode} ${p.region}`.toLowerCase().includes(query.toLowerCase()));
-  useEffect(() => { void update(); }, []);
+  useEffect(() => { if (!autoDownloadOff()) void update(); }, []);
   return <details className="panel catalog-panel"><summary>Samsung product catalog</summary><p>Verified Samsung product pages only. Coverage is incomplete; missing specifications and compatibility are left unknown. Daily checks run on GitHub even with the app closed. Manual checks require your GitHub account.</p><button className="subtle-btn" disabled={busy} onClick={update}>{busy ? 'Updating…' : 'Update saved catalog'}</button> <a href="https://github.com/cjbarnes29/imeiscanner/actions/workflows/catalog.yml" target="_blank" rel="noreferrer">Run Samsung update now / view job status</a><p role="status">{status}</p><p>{catalog ? `${catalog.products.length} verified variants · Last update ${catalog.updatedAt}` : 'No catalog saved yet.'}</p><input aria-label="Search Samsung catalog" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Product name or model code" />{matches.slice(0,30).map(p=><details key={p.id}><summary>{corrections[p.id] || p.name} · {p.modelCode} · {p.region}</summary>
     {p.imageUrl && <img loading="lazy" src={p.imageUrl} alt={p.name} style={{width:160,height:120,objectFit:'contain'}} />}
     <p><a href={p.sourceUrl} target="_blank" rel="noreferrer">Official Samsung source</a> · Checked {p.lastChecked}</p>
@@ -47,6 +49,7 @@ export function readCatalogEntries(): { name: string; modelCode: string }[] {
 
 /** Fetch the bundled/published catalog into local storage (works offline afterwards). */
 export async function loadSamsungCatalog(): Promise<void> {
+  if (autoDownloadOff()) return;
   const bundled = `${import.meta.env.BASE_URL}samsung-catalog.json`;
   const url = location.hostname === 'appassets.androidplatform.net' ? 'https://cjbarnes29.github.io/imeiscanner/samsung-catalog.json' : bundled;
   let response: Response;
