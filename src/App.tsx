@@ -861,6 +861,18 @@ async function createInventoryWorkbook(
 type ExportFile = { name: string; blob: Blob };
 
 /**
+ * IMEI 1 and IMEI 2 for export. Only one IMEI is stored per record, so IMEI 2
+ * comes from the record's scanned text (one Luhn-valid labelled value only).
+ * When the stored IMEI is itself that IMEI 2 (no IMEI 1 was readable), it is
+ * reported as IMEI 2 and IMEI 1 stays blank rather than mislabelled.
+ */
+function recordImeiPair(record: RecordItem) {
+  const seconds = [...new Set([...(record.raw || '').matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid))];
+  const imei2 = seconds.length === 1 ? seconds[0] : '';
+  return { imei1: record.imei === imei2 ? '' : record.imei, imei2 };
+}
+
+/**
  * Minimal Excel export: one sheet with IMEI, the picture, and a "Download picture"
  * link. Excel cannot hand out an embedded picture as a file, so the picture files
  * are saved in the same folder as the workbook and each link opens its own copy.
@@ -874,7 +886,9 @@ async function createImeiPhotoFiles(rows: RecordItem[]): Promise<ExportFile[]> {
   workbook.creator = 'IMEI Lens';
   const sheet = workbook.addWorksheet('IMEIs');
   sheet.columns = [
-    { header: 'IMEI', key: 'imei', width: 22 },
+    { header: 'IMEI 1', key: 'imei1', width: 20 },
+    { header: 'IMEI 2', key: 'imei2', width: 20 },
+    { header: 'Serial', key: 'serial', width: 18 },
     { header: 'Picture', key: 'picture', width: 38 },
     { header: 'Download', key: 'download', width: 20 }
   ];
@@ -890,18 +904,20 @@ async function createImeiPhotoFiles(rows: RecordItem[]): Promise<ExportFile[]> {
     for (let n = 2; used.has(name); n++) name = `${index + 1}_${label}_${n}.jpg`;
     used.add(name);
     pictures.push({ name, blob: dataUrlBlob(recordPhoto(record)) });
-    const row = sheet.addRow({ imei: record.imei || (recordSerial(record) ? `S/N ${recordSerial(record)}` : 'Not detected'), picture: '', download: '' });
+    // Blank cells when a number was not detected.
+    const { imei1, imei2 } = recordImeiPair(record);
+    const row = sheet.addRow({ imei1, imei2, serial: recordSerial(record) || '', picture: '', download: '' });
     row.height = 150;
     row.alignment = { vertical: 'middle', wrapText: true };
-    row.getCell(3).value = { text: 'Download picture', hyperlink: name, tooltip: `Open or save ${name}` };
-    row.getCell(3).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
+    row.getCell(5).value = { text: 'Download picture', hyperlink: name, tooltip: `Open or save ${name}` };
+    row.getCell(5).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
     const image = await workbookImage(record);
     const id = workbook.addImage({ base64: image.dataUrl, extension: 'jpeg' });
     const cellWidth = 270, cellHeight = 200;
     const scale = Math.min((cellWidth - 16) / image.width, (cellHeight - 16) / image.height);
     const width = Math.max(1, Math.round(image.width * scale)), height = Math.max(1, Math.round(image.height * scale));
     sheet.addImage(id, {
-      tl: { col: 1 + (cellWidth - width) / (2 * cellWidth), row: row.number - 1 + (cellHeight - height) / (2 * cellHeight) },
+      tl: { col: 3 + (cellWidth - width) / (2 * cellWidth), row: row.number - 1 + (cellHeight - height) / (2 * cellHeight) },
       ext: { width, height }, editAs: 'oneCell',
       hyperlinks: { hyperlink: name, tooltip: `Open or save ${name}` }
     });

@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -97,18 +97,21 @@ try {
   assert.equal(f.extractPreferredImei('IMEI 1: 490154203237518\nIMEI: 356938035643809'),'490154203237518','Indexed IMEI wins over un-indexed');
   assert.equal(f.recordSerial({raw:'SN: RFGYC2L1PLK'}),'RFGYC2L1PLK');
   {
-    const files=await f.createImeiPhotoFiles([{...row,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{...serialOnly,cropDataUrl:'data:image/jpeg;base64,Q1JPUDJUV08='}]);
+    assert.deepEqual(f.recordImeiPair({imei:second,raw:`IMEI 2: ${second}`}),{imei1:'',imei2:second},'Stored IMEI 2 is not shown as IMEI 1');
+    assert.deepEqual(f.recordImeiPair({imei:first,raw:`IMEI 2: 356938035643808`}),{imei1:first,imei2:''},'Invalid IMEI 2 is left blank');
+    const files=await f.createImeiPhotoFiles([{...row,serial:'R58M20ABCDE',raw:`IMEI 1: ${first}\nIMEI 2: ${second}`,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{...serialOnly,cropDataUrl:'data:image/jpeg;base64,Q1JPUDJUV08='}]);
     assert.equal(files[0].name,'imei-pictures.xlsx');assert.equal(files.length,3,'Workbook plus one picture per row, no ZIP');
     assert.ok(files.every(file=>!file.name.includes('/')),'All files sit in one folder');
     const named=name=>files.find(file=>file.name===name);
     const book=new ExcelJS.Workbook();await book.xlsx.load(await files[0].blob.arrayBuffer());
     assert.equal(book.worksheets.length,1,'One sheet only');
     const ws=book.getWorksheet('IMEIs');
-    assert.deepEqual([1,2,3,4].map(c=>ws.getRow(1).getCell(c).value),['IMEI','Picture','Download',null],'Only IMEI, picture and download columns');
-    assert.equal(ws.getCell('A2').value,first);assert.equal(ws.getCell('A3').value,'S/N RFGYC2L1PLK');
-    const link=ws.getCell('C2').value;assert.equal(link.text,'Download picture');assert.ok(!link.hyperlink.includes('#'),'No # in file links');
+    assert.deepEqual([1,2,3,4,5,6].map(c=>ws.getRow(1).getCell(c).value),['IMEI 1','IMEI 2','Serial','Picture','Download',null],'IMEI 1, IMEI 2, serial, picture and download only');
+    assert.deepEqual(['A2','B2','C2'].map(c=>ws.getCell(c).value),[first,second,'R58M20ABCDE'],'Both IMEIs and the serial');
+    assert.deepEqual(['A3','B3','C3'].map(c=>ws.getCell(c).value??''),['','','RFGYC2L1PLK'],'Serial-only unit: blank IMEIs, serial filled');
+    const link=ws.getCell('E2').value;assert.equal(link.text,'Download picture');assert.ok(!link.hyperlink.includes('#'),'No # in file links');
     assert.equal(await named(link.hyperlink).blob.text(),'CROPONE','Link points at that row\'s picture file next to the workbook');
-    assert.ok(named(ws.getCell('C3').value.hyperlink),'Serial-only row has its picture too');
+    assert.ok(named(ws.getCell('E3').value.hyperlink),'Serial-only row has its picture too');
     assert.equal(ws.getImages().length,2,'Each row shows its picture');
   }
   console.log('PASS: camera/upload IMEI 1 then IMEI 2 priority, positioned barcode matching, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
