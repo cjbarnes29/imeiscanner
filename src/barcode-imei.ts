@@ -156,3 +156,15 @@ export function pickImei2(imei:string,text:string):string{
   const readings=[...new Set([...text.matchAll(/\bIM[E3][I1!|L]\s*0?2\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(m=>m[1].replace(/\D/g,'')).filter(valid))].filter(value=>value!==imei&&sameBlock(value));
   return readings.length===1?readings[0]:'';
 }
+
+/**
+ * How label-like a text is: IMEI/serial/model words and long numbers. 0 means
+ * nothing readable. Used to tell whether a photo was read upright.
+ */
+export function labelTextScore(text:string):number{
+  const t=text.toUpperCase();
+  const count=(pattern:RegExp)=>(t.match(pattern)||[]).length;
+  return count(/\bIM[E3][I1!|L]/g)+count(/\bS\s*[\/|I]\s*N\b|\bSERIAL\b/g)+count(/\bMODEL\b|\bSM\s*-\s*[A-Z]\d{3}/g)+2*count(/(?<!\d)(?:\d[ -]?){14}\d(?![ -]?\d)/g);
+}
+/** Other ways a photo may have been taken: upside down, sideways either way, mirrored (front camera). */
+export const ORIENTATIONS:{angle:number;flop?:boolean}[]=[{angle:180},{angle:90},{angle:270},{angle:0,flop:true}];

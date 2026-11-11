@@ -3,7 +3,7 @@ import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from 
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
-import { barcodeImei, imeiReadingsDisagree, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, pickImei2 } from '../src/barcode-imei.ts';
+import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, pickImei2 } from '../src/barcode-imei.ts';
 
 import { readBarcodes } from 'zxing-wasm/reader';
 
@@ -120,7 +120,7 @@ function scaledLines(lines, from, to) {
 export async function createScanner() {
   const worker = await createWorker('eng');
   return {
-    async scan(input, filename, mode = 'standard') {
+    async scan(input, filename, mode = 'standard', orientationTried = false) {
       const max = mode === 'fast' ? 1600 : mode === 'detailed' ? 3000 : 2400;
       const color = await sharp(input).rotate().resize({ width: max, height: max, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
       const info = await sharp(color).metadata();
@@ -128,6 +128,22 @@ export async function createScanner() {
       const enhanced = await sharp(color).grayscale().linear(1.45, -40).jpeg({ quality: 88 }).toBuffer();
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
       const first = (await worker.recognize(enhanced)).data;
+      // Nothing label-like read: the photo may be upside down, sideways or mirrored. Read a
+      // smaller copy each way, and if one clearly reads as a label, scan that copy instead.
+      if (!orientationTried && mode !== 'fast' && labelTextScore(first.text || '') === 0) {
+        let best = { score: 0, turn: null };
+        for (const turn of ORIENTATIONS) {
+          let probe = sharp(color).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true });
+          probe = turn.flop ? probe.flop() : probe.rotate(turn.angle);
+          const score = labelTextScore((await worker.recognize(await probe.grayscale().linear(1.45, -40).jpeg({ quality: 88 }).toBuffer())).data.text || '');
+          if (score > best.score) best = { score, turn };
+          if (score >= 6) break;
+        }
+        if (best.turn && best.score >= 2) {
+          const upright = best.turn.flop ? sharp(color).flop() : sharp(color).rotate(best.turn.angle);
+          return this.scan(await upright.jpeg({ quality: 90 }).toBuffer(), filename, mode, true);
+        }
+      }
       let raw = first.text || '';
       let imeis = labelledNumbers(raw, 1);
       let lines = scaledLines(ocrLines(first), colorSize, colorSize);

@@ -87,6 +87,14 @@ try{
    assert.equal(pickImei2('350000130856616','Model : SM-A376B/DS\nIMEI 2: 350000181926755'),'','Samsung IMEI 2 with a different serial block is dropped');
    assert.equal(pickImei2('490154203237518','IMEI 2: 356938035643809'),'356938035643809','Non-Samsung labels keep a single valid IMEI 2');
  }
+ // Orientation check: upright label text scores, upside-down or unreadable text does not.
+ {
+   const {labelTextScore,ORIENTATIONS}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+   assert.ok(labelTextScore('Model : SM-A376B/DS\nS/N : R58M20ABCDE\nIMEI 1: 490154203237518\nIMEI 2: 356938035643809')>=6,'Upright label text scores high');
+   assert.equal(labelTextScore('qwoqx 0 vnnm ; unrelated words 12345'),0,'Garbage scores zero');
+   assert.equal(labelTextScore('9 SIA lWI ;N/S :1 lWI'),0,'Upside-down text scores zero');
+   assert.equal(ORIENTATIONS.length,4,'Upside down, both sideways turns and mirrored');
+ }
  // Serial from the S/N barcode, confirmed by misread OCR (real case: OCR read RE3L555D0).
  assert.equal(resolveSerialFromBarcodes(['350000192221535','R83L555D0QQ','8806099448974'],'S/N - RE3L555D0!'),'S/N (barcode): R83L555D0QQ','Serial barcode fixes 8/B and cut-off OCR');
  assert.equal(resolveSerialFromBarcodes(['R83L555D0QQ'],'nothing like it'),'','Serial barcode needs OCR evidence');

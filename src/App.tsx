@@ -1,4 +1,4 @@
-import { barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
+import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
@@ -849,6 +849,19 @@ function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClos
       </div>
     </>}
   </section></div>;
+}
+
+/** A copy of the photo turned (or mirrored) so label text reads upright. */
+async function turnFile(file: File, turn: { angle: number; flop?: boolean }): Promise<File> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const sideways = turn.angle % 180 !== 0;
+  const canvas = document.createElement('canvas');
+  canvas.width = sideways ? bitmap.height : bitmap.width; canvas.height = sideways ? bitmap.width : bitmap.height;
+  const context = canvas.getContext('2d')!;
+  context.translate(canvas.width / 2, canvas.height / 2); context.rotate(turn.angle * Math.PI / 180); if (turn.flop) context.scale(-1, 1);
+  context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2); bitmap.close();
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error('Could not turn the photo')), 'image/jpeg', 0.95));
+  return new File([blob], file.name, { type: 'image/jpeg' });
 }
 
 function csvCell(value: string) {
@@ -1982,7 +1995,7 @@ export default function App() {
 
       for (let i = 0; i < scanFiles.length; i++) {
         if (stopScanRequested.current) break;
-        const file = scanFiles[i];
+        let file = scanFiles[i];
         const beforeCount = newRows.length;
         const fileImeis = new Set<string>();
         const fileSerials = new Set<string>();
@@ -1992,14 +2005,34 @@ export default function App() {
         );
         try {
 
-        const { color, enhanced: ocrImage } = await createScanImages(file, scanMode === 'fast' ? 1600 : scanMode === 'detailed' ? 3000 : 2400);
-        const dataUrl = color.toDataURL('image/jpeg', 0.9);
+        const scanSize = scanMode === 'fast' ? 1600 : scanMode === 'detailed' ? 3000 : 2400;
+        let { color, enhanced: ocrImage } = await createScanImages(file, scanSize);
+        let dataUrl = color.toDataURL('image/jpeg', 0.9);
         await worker.setParameters({
           tessedit_pageseg_mode: PSM.SPARSE_TEXT,
           user_defined_dpi: '300'
         });
 
-        const enhancedResult = await worker.recognize(ocrImage);
+        let enhancedResult = await worker.recognize(ocrImage);
+        // Nothing label-like read: the photo may be upside down, sideways or mirrored. Read a
+        // smaller copy each way and, if one clearly reads as a label, scan that copy instead.
+        if (scanMode !== 'fast' && labelTextScore(enhancedResult.data.text || '') === 0) {
+          setProgress(`Checking photo orientation: ${file.name}`);
+          let best: { score: number; file?: File } = { score: 0 };
+          for (const turn of ORIENTATIONS) {
+            const turned = await turnFile(file, turn);
+            const probe = await createScanImages(turned, 1600);
+            const score = labelTextScore((await worker.recognize(probe.enhanced)).data.text || '');
+            if (score > best.score) best = { score, file: turned };
+            if (score >= 6) break;
+          }
+          if (best.file && best.score >= 2) {
+            file = best.file;
+            ({ color, enhanced: ocrImage } = await createScanImages(file, scanSize));
+            dataUrl = color.toDataURL('image/jpeg', 0.9);
+            enhancedResult = await worker.recognize(ocrImage);
+          }
+        }
         let raw = enhancedResult.data.text || '';
         let imeis = extractImei1s(raw);
         let lines = scaleOcrLines(ocrLines(enhancedResult.data), ocrImage, color);

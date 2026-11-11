@@ -1,5 +1,7 @@
 # IMEI Lens — Photo Scanner
 
+What changed in each version: [RELEASE-1.6.md](RELEASE-1.6.md), [RELEASE-1.5.md](RELEASE-1.5.md), [RELEASE-1.4.md](RELEASE-1.4.md).
+
 An inventory scanner for phone-label photos. Regular OCR runs in the browser. Optional laptop background scanning keeps processing after the browser closes, provided the laptop stays powered on and awake.
 
 ## Free Android app for scanning after closing the screen
@@ -26,6 +28,7 @@ Android may pause and retry queued work when it restricts background activity, a
 - **Download picture links on phones.** Excel for Android and iOS cannot open links to files on the phone (Chrome shows an error). When exported from the website, each link is `https://<site>/#picture=<id>`; opening it shows that picture from this browser's saved records with **Download picture** and **Share picture** buttons. It works on the phone and browser that scanned the photos. The Android app and desktop Excel use the local picture file beside the workbook instead. Excel desktop also offers **Save as Picture** on the embedded image.
 - Person groups with editable names, per-record assignment, and person tabs in Excel/Google Sheets.
 - Photo exports can save the report, photo gallery HTML, and record photos to a folder when the browser supports folder selection. Other browsers provide separate downloads for the report, the self-contained HTML gallery, and each photo. Split records use the cropped picture.
+- **Photo orientation.** A photo taken upside down, sideways or mirrored is read automatically: when nothing label-like is read, the scanner tries each orientation on a smaller copy and scans the best one (about 6 to 8 extra seconds, only for photos where nothing was read). The review window still has **Rotate** buttons for manual fixes.
 - **Counting devices first.** A device has one IMEI 1, one IMEI 2 and one serial, so each different readable IMEI 1 (or serial) is a device; repeats of the same number on tear-off strips, small misreads and numbers that fail the checksum never add devices. Labels are matched to devices along the direction the boxes are stacked. Stacked white boxes with no visible seam are cut halfway between one device's labels and the next. A box that is visible but unreadable still gets its own record for review.
 - **IMEI 2 and serial second reads.** When IMEI 2 is missing, the area right of each IMEI 1 line is re-read enlarged; Samsung prints the same six serial digits (positions 9-14) in IMEI 1 and IMEI 2, so a reading is accepted when it matches that block, corrected when only that block was misread, and left blank otherwise. When the serial is missing, the top-left of the label (where Samsung prints S/N) is re-read on its own.
 - **Test data.** Tests use made-up IMEIs and serials only. Real label photos stay in the git-ignored `test-photos/` folder.
