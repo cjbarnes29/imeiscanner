@@ -3,7 +3,7 @@ import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from 
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
-import { labelledBarcodeLines, resolveImeisFromBarcodes } from '../src/barcode-imei.ts';
+import { barcodeImei, imeiReadingsDisagree, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes } from '../src/barcode-imei.ts';
 import { readBarcodes } from 'zxing-wasm/reader';
 
 /** All Code 128 barcodes in the frame with their boxes, for pairing with IMEI labels. */
@@ -18,9 +18,29 @@ async function frameBarcodes(frame) {
 }
 
 /** Barcode values inside one device crop, upscaled so small Code 128 bars decode. */
+/** Barcodes on the whole photo at several sizes, boxes in the photo's own pixels. */
+async function photoBarcodes(photo, size) {
+  const found = new Map();
+  for (const longest of [0, 1200, 1600, 2000]) {
+    const scale = longest ? longest / Math.max(size.width, size.height) : 1;
+    const { data, info } = await sharp(photo).resize({ width: Math.round(size.width * scale), height: Math.round(size.height * scale) }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    for (const code of await frameBarcodes({ data, width: info.width, height: info.height })) {
+      if (found.has(code.rawValue)) continue;
+      const b = code.boundingBox;
+      found.set(code.rawValue, { rawValue: code.rawValue, boundingBox: { x: b.x / scale, y: b.y / scale, width: b.width / scale, height: b.height / scale } });
+    }
+  }
+  return [...found.values()];
+}
+
 async function cropBarcodeValues(photo) {
-  const { data, info } = await sharp(photo).resize({ width: 2400, height: 2400, fit: 'inside' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return (await frameBarcodes({ data, width: info.width, height: info.height })).map(code => code.rawValue);
+  // Small bars decode at some sizes and not others: read at two sizes and combine.
+  const values = new Set();
+  for (const size of [1600, 2600]) {
+    const { data, info } = await sharp(photo).resize({ width: size, height: size, fit: 'inside' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    for (const code of await frameBarcodes({ data, width: info.width, height: info.height })) values.add(code.rawValue);
+  }
+  return [...values];
 }
 
 const digits = value => value.replace(/\D/g, '');
@@ -39,12 +59,15 @@ function luhnValid(value) {
 }
 
 function preferredImei(text, firstOnly = false) {
+  // A barcode-confirmed number is exact; it beats any OCR reading.
+  if (barcodeImei(text, 1)) return barcodeImei(text, 1);
   const first = labelledNumbers(text, 1).filter(luhnValid);
   if (first.length === 1) return first[0];
   // A bare "IMEI: …" (Apple/Pixel style, or OCR dropped the 1) ranks above IMEI 2.
   const plain = unindexedImeis(text).filter(luhnValid);
   if (plain.length === 1) return plain[0];
   if (firstOnly) return '';
+  if (barcodeImei(text, 2)) return barcodeImei(text, 2);
   const second = labelledNumbers(text, 2).filter(luhnValid);
   return second.length === 1 ? second[0] : '';
 }
@@ -119,7 +142,10 @@ export async function createScanner() {
       const {data:frameData,info:frameInfo}=await sharp(color).ensureAlpha().raw().toBuffer({resolveWithObject:true});
       const frame={data:frameData,width:frameInfo.width,height:frameInfo.height};
       // Same as the browser camera path: barcodes under IMEI labels anchor each device.
-      const barcodeLines=labelledBarcodeLines(await frameBarcodes(frame),lines);
+      const fullPhotoCodes=await photoBarcodes(color,colorSize);
+      // Small S/N bars often decode on the whole photo but not in a crop.
+      const codesInside=region=>fullPhotoCodes.filter(code=>{if(!region)return true;const b=code.boundingBox,cx=b.x+b.width/2,cy=b.y+b.height/2;return cx>=region.x&&cx<=region.x+region.width&&cy>=region.y&&cy<=region.y+region.height;}).map(code=>code.rawValue);
+      const barcodeLines=labelledBarcodeLines(fullPhotoCodes,lines);
       if(barcodeLines.length){lines=[...lines,...barcodeLines];raw+='\n'+barcodeLines.map(line=>line.text).join('\n');imeis=labelledNumbers(raw,1);}
       const anchors=deviceAnchors(lines,colorSize.width,colorSize.height,frame);
       const regions=planDeviceCrops(anchors,lines,colorSize.width,colorSize.height,frame);
@@ -130,7 +156,7 @@ export async function createScanner() {
       for (const region of selections) {
         const photo = region ? await sharp(color).extract({ left: Math.max(0, Math.floor(region.x)), top: Math.max(0, Math.floor(region.y)), width: Math.min(colorSize.width - Math.floor(region.x), Math.ceil(region.width)), height: Math.min(colorSize.height - Math.floor(region.y), Math.ceil(region.height)) }).jpeg({ quality: 85 }).toBuffer() : color;
         let cropRaw = region ? (await worker.recognize(photo)).data.text || '' : raw;
-        if (region) { const cropCodes = await cropBarcodeValues(photo); const fromBarcodes = resolveImeisFromBarcodes(cropCodes, cropRaw); if (fromBarcodes) cropRaw = `${fromBarcodes}\n${cropRaw}`; }
+        { const cropCodes = [...new Set([...await cropBarcodeValues(photo), ...codesInside(region)])]; const fromBarcodes = [resolveImeisFromBarcodes(cropCodes, cropRaw), resolveSerialFromBarcodes(cropCodes, cropRaw)].filter(Boolean).join('\n'); if (fromBarcodes) cropRaw = `${fromBarcodes}\n${cropRaw}`; }
         let imei = splitFailed ? '' : preferredImei(cropRaw);
         if (region && !labelledNumbers(cropRaw,1).some(luhnValid) && mode !== 'fast') {
           const improved = await sharp(photo).resize({width:2600,height:2600,fit:'inside'}).grayscale().normalise().sharpen().jpeg({quality:96}).toBuffer();
@@ -156,7 +182,8 @@ export async function createScanner() {
           imei,
           ...serialReading(cropRaw),
           status: imei ? 'Valid' : 'Review',
-          cropNeedsReview: splitFailed || !!region?.needsReview,
+          cropNeedsReview: splitFailed || !!region?.needsReview || imeiReadingsDisagree(cropRaw, imei),
+          imei2: (() => { const second = barcodeImei(cropRaw, 2) || [...new Set(labelledNumbers(cropRaw, 2).filter(luhnValid))].join(); return /^\d{15}$/.test(second) ? second : ''; })(),
           ...(splitFailed ? (() => { const found = labelledNumbers(raw, 1).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
           raw: cropRaw,
           createdAt: new Date().toISOString(),

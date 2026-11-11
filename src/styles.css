@@ -68,3 +68,22 @@ body{min-width:0}
 
 .camera-setup{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0}.camera-setup label{font-size:12px;display:flex;gap:6px;align-items:center}.camera-setup select{min-height:40px;background:#162638;color:white;border:1px solid #30465d;border-radius:7px}.camera-setup button{min-height:44px}.camera-modal.placement-left .review-fixed-actions .camera-shutter{flex:0 0 112px;order:-1}.camera-modal.placement-right .review-fixed-actions .camera-shutter{flex:0 0 112px;order:4}.camera-modal .camera-options{max-height:100px;overflow:auto}.camera-modal .camera-batch{max-height:70px}.camera-modal .camera-batch img{height:52px;width:52px}.camera-modal .review-photo-stage{min-height:48px}
 .camera-modal.placement-right .review-fixed-actions{justify-content:flex-end}.camera-modal.placement-left .review-fixed-actions{justify-content:flex-start}
+
+/* --- UI/UX audit fixes (phone-first) --- */
+/* Top bar is 60px on phones; the quick-nav sat at 70px and left a strip where page text showed through. */
+@media(max-width:600px){.quick-navigation{top:60px}}
+/* Jumping to a section must not hide its heading under the two sticky bars. */
+section,details,[id]{scroll-margin-top:150px}
+/* Touch targets: at least 44px tall for everything you tap or type into. */
+.search input,.inline-edit,td[data-label] input,td[data-label] select,.result-actions select,.laptop-scan>summary{min-height:44px}
+.laptop-scan>summary{display:flex;align-items:center;cursor:pointer}
+/* Serial field matched the browser's default white box; make it look like the other inputs. */
+td[data-label="Serial number"] input,.record-mobile-fields input{width:100%;min-height:44px;padding:8px 10px;border:1px solid #35506a;border-radius:8px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;letter-spacing:.3px}
+td[data-label] input:focus,.search input:focus{outline:2px solid #62e6bc;outline-offset:1px}
+/* 16px inputs stop iPhone Safari zooming the page on focus. */
+input,select,textarea{font-size:max(16px,1em)}
+/* Checkboxes were 16-22px; give them a finger-sized hit area. */
+input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
+.selection-check{margin:10px}
+/* Toasts sit above the phone's home bar and never cover the last button. */
+.toast{bottom:max(16px,env(safe-area-inset-bottom));max-width:calc(100vw - 32px)}

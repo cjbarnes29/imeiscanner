@@ -41,11 +41,46 @@ export function resolveImeisFromBarcodes(values:string[],text:string):string {
     const fragments=[...text.matchAll(new RegExp(String.raw`\bIM[E3][I1!|L]\s*${index}\s*[:;#.,-]?\s*([\d][\d\s-]{5,22})`,'gi'))].map(m=>m[1].replace(/\D/g,''));
     if(!fragments.length)continue;
     const scored=codes.map(code=>({code,score:Math.max(...fragments.map(f=>commonRun(f,code)))})).sort((a,b)=>b.score-a.score);
-    if(scored[0].score>=8&&(scored.length<2||scored[1].score<scored[0].score)&&!out.some(line=>line.endsWith(scored[0].code)))out.push(`IMEI ${type}: ${scored[0].code}`);
+    if(scored[0].score>=8&&(scored.length<2||scored[1].score<scored[0].score)&&!out.some(line=>line.endsWith(scored[0].code)))out.push(`IMEI ${type} (barcode): ${scored[0].code}`);
   }
   // One distinct barcode in the crop and OCR saw 6+ of its digits: it is this
   // device's number even if the label was unreadable. Emitted un-indexed so a
   // clearly labelled IMEI 1 still wins.
   if(!out.length&&codes.length===1&&commonRun(text.replace(/\D/g,' ').split(/\s+/).join('|'),codes[0])>=6)out.push(`IMEI: ${codes[0]}`);
   return out.join('\n');
+}
+
+// OCR look-alikes, folded together only for comparing OCR text with barcodes.
+const fold=(value:string)=>value.toUpperCase().replace(/O/g,'0').replace(/[IL|]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2').replace(/G/g,'6');
+/**
+ * Serial from a Code 128 S/N barcode, confirmed by the OCR text. Samsung
+ * serials are letters+digits (e.g. R83L810D0MW); OCR often swaps 8/B, 0/O.
+ * Returns "S/N (barcode): VALUE" so serial parsing can prefer it, or ''.
+ */
+export function resolveSerialFromBarcodes(values:string[],text:string):string {
+  const codes=[...new Set(values.filter(value=>/^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{8,14}$/.test(value)))];
+  if(!codes.length)return '';
+  const fragments=[...text.toUpperCase().matchAll(/\b(?:S\s*[/|I1]\s*N|SN|SERIAL(?:\s*(?:NUMBER|NO|NUM))?\.?)\s*[:#.\-;,]?\s*([A-Z0-9]{4,16})/g)].map(m=>fold(m[1]));
+  const evidence=fragments.length?fragments:[fold(text.replace(/[^A-Za-z0-9]+/g,'|'))];
+  const scored=codes.map(code=>({code,score:Math.max(...evidence.map(f=>commonRun(f,fold(code))))})).sort((a,b)=>b.score-a.score);
+  const need=fragments.length?5:7;
+  return scored[0].score>=need&&(scored.length<2||scored[1].score<scored[0].score)?`S/N (barcode): ${scored[0].code}`:'';
+}
+
+/** The barcode-confirmed IMEI 1 or 2 written by resolveImeisFromBarcodes, if exactly one. */
+export function barcodeImei(text:string,type:1|2):string {
+  const values=[...new Set([...text.matchAll(new RegExp(String.raw`IMEI ${type} \(barcode\): (\d{15})`,'g'))].map(m=>m[1]))];
+  return values.length===1?values[0]:'';
+}
+
+/**
+ * Guard against OCR misreads that still pass Luhn. Samsung labels print each
+ * IMEI several times; if another 15-digit reading differs from the chosen one
+ * in only 1-2 digits, OCR disagreed with itself and a person should check.
+ * Barcode-confirmed numbers are exact and never flagged.
+ */
+export function imeiReadingsDisagree(text:string,chosen:string):boolean {
+  if(!/^\d{15}$/.test(chosen)||barcodeImei(text,1)===chosen||barcodeImei(text,2)===chosen)return false;
+  const readings=[...text.matchAll(/(?<!\d)((?:\d[ -]?){14}\d)(?![ -]?\d)/g)].map(m=>m[1].replace(/\D/g,'')).filter(v=>v.length===15&&v!==chosen);
+  return readings.some(v=>{let d=0;for(let i=0;i<15;i++)if(v[i]!==chosen[i])d++;return d<=2;});
 }

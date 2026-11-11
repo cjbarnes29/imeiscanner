@@ -1,4 +1,5 @@
-import { labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, type PositionedBarcode } from './barcode-imei';
+import { barcodeImei, imeiReadingsDisagree, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
+import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
@@ -30,6 +31,8 @@ type RecordItem = {
   cropNeedsReview?: boolean;
   model: string;
   imei: string;
+  /** Second IMEI on dual-SIM labels. Undefined on records saved before this field existed. */
+  imei2?: string;
   serial?: string;
   serialNeedsReview?: boolean;
   /** Set when the scanner suspects several devices but could not split them safely. */
@@ -209,27 +212,31 @@ function cameraImei(text: string) {
   return extractPreferredImei(text);
 }
 
-async function cameraBarcodeText(photo: string, raw: string, lines:OcrLine[] = []) {
+/**
+ * Add barcode-confirmed numbers to one device's OCR text. Used for every photo
+ * (camera and upload) in every browser. A bare barcode cannot say IMEI 1 versus
+ * IMEI 2, so it only counts when the label's OCR text points at it.
+ */
+async function cameraBarcodeText(photo: string, raw: string, lines:OcrLine[] = [], fromFullPhoto: string[] = []) {
   try {
-    const image=new Image();image.src=photo;await image.decode();
-    let values:string[]=[];let positioned:PositionedBarcode[]=[];
-    const Detector=(window as any).BarcodeDetector;
-    if(Detector){try{positioned=await new Detector().detect(image);values=positioned.map(code=>code.rawValue);}catch{}}
-    if(!values.length){const {BrowserMultiFormatReader}=await import('@zxing/browser');try{const result=await new BrowserMultiFormatReader().decodeFromImageElement(image);values=[result.getText()];}catch{}}
-    // A bare barcode cannot tell us IMEI 1 versus IMEI 2. Only explicitly
-    // labelled payloads supplement OCR; conflicting numbers remain for review.
-    return [raw,labelledBarcodeImeis(positioned,lines),resolveImeisFromBarcodes(values,raw),...values.filter(value=>extractPreferredImei(value)||extractSerial(value))].join('\n');
-  }catch{return raw;}
+    const positioned: PositionedBarcode[] = await readDataUrlBarcodes(photo);
+    // Barcodes found on the whole photo inside this device's area count too:
+    // small S/N bars often decode at full size but not in the cropped picture.
+    const values = [...new Set([...positioned.map(code => code.rawValue), ...fromFullPhoto])];
+    return [resolveImeisFromBarcodes(values, raw), resolveSerialFromBarcodes(values, raw), raw, labelledBarcodeImeis(positioned, lines)].filter(Boolean).join('\n');
+  } catch { return raw; }
 }
 
 /** Camera frames: barcodes under "IMEI 1/2" labels give each device a positioned anchor even when OCR misreads the digits. */
-async function frameBarcodeLines(canvas: HTMLCanvasElement, lines: OcrLine[]): Promise<OcrLine[]> {
-  const Detector = (window as any).BarcodeDetector;
-  if (!Detector) return [];
-  try { return labelledBarcodeLines(await new Detector().detect(canvas), lines); } catch { return []; }
+async function frameBarcodes(canvas: HTMLCanvasElement): Promise<PositionedBarcode[]> {
+  // Small S/N bars only decode at some sizes on compressed photos: sweep several.
+  try { return await readImageBarcodes(canvas, canvas.width, canvas.height, [0, 1200, 1400, 1600, 2000, 2600]); } catch { return []; }
 }
 
 function extractPreferredImei(text: string) {
+  // A barcode-confirmed number is exact; it beats any OCR reading.
+  const fromBarcode = barcodeImei(text, 1);
+  if (fromBarcode) return fromBarcode;
   const first = extractImei1s(text).filter(luhnValid);
   if (first.length === 1) return first[0];
   if (first.length > 1) return '';
@@ -237,6 +244,8 @@ function extractPreferredImei(text: string) {
   const plain = unindexedImeis(text).filter(luhnValid);
   if (plain.length === 1) return plain[0];
   if (plain.length > 1) return '';
+  const secondFromBarcode = barcodeImei(text, 2);
+  if (secondFromBarcode) return secondFromBarcode;
   const second = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid);
   const unique = [...new Set(second)];
   return unique.length === 1 ? unique[0] : '';
@@ -874,8 +883,12 @@ type ReportLayout = 'imei_photo' | 'simple' | 'person_photo';
  * reported as IMEI 2 and IMEI 1 stays blank rather than mislabelled.
  */
 function recordImeiPair(record: RecordItem) {
-  const seconds = [...new Set([...(record.raw || '').matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid))];
-  const imei2 = seconds.length === 1 ? seconds[0] : '';
+  // Stored (scanned or edited) IMEI 2 wins; older records derive it from their OCR text.
+  let imei2 = record.imei2;
+  if (imei2 === undefined) {
+    const seconds = [...new Set([...(record.raw || '').matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid))];
+    imei2 = barcodeImei(record.raw || '', 2) || (seconds.length === 1 ? seconds[0] : '');
+  }
   return { imei1: record.imei === imei2 ? '' : record.imei, imei2 };
 }
 
@@ -1184,6 +1197,7 @@ export default function App() {
   const [reviewIds, setReviewIds] = useState<string[]>([]);
   const [manualImei, setManualImei] = useState('');
   const [manualSerial, setManualSerial] = useState('');
+  const [manualImei2, setManualImei2] = useState('');
   const [manualModel, setManualModel] = useState('');
   const [manualCrop, setManualCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
   const [reviewSource, setReviewSource] = useState('');
@@ -1326,6 +1340,7 @@ export default function App() {
     setReviewSplit(null);
     setManualImei(selected?.imei || '');
     setManualSerial(selected ? recordSerial(selected) : '');
+    setManualImei2(selected ? recordImeiPair(selected).imei2 : '');
     setManualModel(selected ? exportModel(selected.model) : '');
     setReviewSource(selected?.originalDataUrl || selected?.dataUrl || '');
     setCropEditorOpen(cropRequestedId.current === selected?.id);
@@ -1747,11 +1762,14 @@ export default function App() {
           const focused=await readSerialPhoto(worker,dataUrl,focusedLines=>{lines=focusedLines;});
           if(focused){raw += '\n'+focused;}
         }
-        if (file.name.startsWith('camera-')) {
-          const barcodeLines = await frameBarcodeLines(color, lines);
+        let fullPhotoCodes: PositionedBarcode[] = [];
+        {
+          fullPhotoCodes = await frameBarcodes(color);
+          const barcodeLines = labelledBarcodeLines(fullPhotoCodes, lines);
           if (barcodeLines.length) { lines = [...lines, ...barcodeLines]; raw += '\n' + barcodeLines.map(line => line.text).join('\n'); }
         }
         const mostlyWhite = looksMostlyWhite(color);
+        const codesInside = (region?: { x: number; y: number; width: number; height: number }) => fullPhotoCodes.filter(code => { const b = code.boundingBox; if (!b) return false; if (!region) return true; const cx = b.x + b.width / 2, cy = b.y + b.height / 2; return cx >= region.x && cx <= region.x + region.width && cy >= region.y && cy <= region.y + region.height; }).map(code => code.rawValue);
         let anchors=deviceAnchors(lines,sourceWidth,sourceHeight);
         const multiText=hasMultipleDeviceText(raw);
         const frame=color.getContext('2d')?.getImageData(0,0,sourceWidth,sourceHeight);
@@ -1767,7 +1785,7 @@ export default function App() {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
         const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw), lines };
-        let cropRaw = file.name.startsWith('camera-') ? await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines) : cropResult.raw;
+        let cropRaw = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
         if (!cropNeedsReview && !extractPreferredImei(cropRaw) && !extractSerial(cropRaw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl || dataUrl); if (serialRaw) cropRaw = serialRaw; }
         const imei = cropNeedsReview ? '' : extractPreferredImei(cropRaw);
         if (/^\d{15}$/.test(imei)) {
@@ -1796,7 +1814,9 @@ export default function App() {
           name: file.name,
           dataUrl,
           cropDataUrl,
-          cropNeedsReview: cropNeedsReview || !!region?.needsReview,
+          // Flag OCR that disagrees with itself about this IMEI, even if Luhn passes.
+          cropNeedsReview: cropNeedsReview || !!region?.needsReview || imeiReadingsDisagree(cropRaw, imei),
+          imei2: recordImeiPair({ imei, raw: cropRaw } as RecordItem).imei2,
           ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
           model,
           ...serialReading(cropRaw),
@@ -1876,10 +1896,11 @@ export default function App() {
   function saveReviewFields(advance = false) {
     if (!selected || adjustingCrop || rotatingPhoto || reviewSplit) return;
     if (manualImei && !/^\d{15}$/.test(manualImei)) { setToast('Enter all 15 IMEI digits or leave it empty.'); return; }
+    if (manualImei2 && !/^\d{15}$/.test(manualImei2)) { setToast('Enter all 15 IMEI 2 digits or leave it empty.'); return; }
     const imeiChanged = manualImei !== selected.imei;
     const latestBatch = records.filter(r => r.uploadBatchId).reduce<RecordItem | undefined>((current, row) => !current || row.createdAt > current.createdAt ? row : current, undefined)?.uploadBatchId;
     const duplicate = !!manualImei && !!latestBatch && selected.uploadBatchId === latestBatch && records.some(r => r.id !== selected.id && r.uploadBatchId === latestBatch && r.imei === manualImei);
-    const patch: Partial<RecordItem> = { serial: manualSerial.trim(), serialNeedsReview: false, model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
+    const patch: Partial<RecordItem> = { imei2: manualImei2, serial: manualSerial.trim(), serialNeedsReview: false, model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
     updateRow(selected.id, patch);
     if (advance && reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1) {
       setSelected(reviewRecords[reviewIndex + 1]);
@@ -1908,7 +1929,7 @@ export default function App() {
       try {
         worker = await createWorker('eng');
         ({ raw, imei, lines:barcodeLines } = await readCropImei(worker, cropDataUrl));
-        if (selected.name.startsWith('camera-')) { raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw); }
+        raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw);
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, ...serialReading(raw), cropNeedsReview: !imei && !serialReading(raw).serial, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
       if (addAnother) {
@@ -1976,7 +1997,7 @@ export default function App() {
       try {
         if (!guidedCropWorker.current) guidedCropWorker.current = await createWorker('eng');
         ({ raw, imei, lines:barcodeLines } = await readCropImei(guidedCropWorker.current, cropDataUrl));
-        if (selected.name.startsWith('camera-')) { raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw); }
+        raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw);
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
       const crops = [...reviewSplit.crops, { cropDataUrl, imei, model: manualModel.trim() || selected.model, raw }];
       setReviewSplit({ ...reviewSplit, crops });
@@ -2515,7 +2536,7 @@ export default function App() {
             )}
 
             {!androidBridge && <details className="laptop-scan" open={useBackgroundByDefault}>
-              <summary>Keep scanning after closing the browser</summary>
+              <summary>{hostedScanner ? 'Keep scanning after closing the browser' : 'Advanced: scan on your laptop (needs the laptop scanner app)'}</summary>
               <p>{hostedScanner ? 'Wait for Upload finished; then you may minimize or close the phone app. The online scanner continues until completion or you press Stop. Reopen this address to see the results.' : 'On a phone, use the laptop address below while both devices are on the same private Wi-Fi. Wait for Upload finished; then you may minimize or close the phone app. Your laptop keeps scanning until completion or you press Stop. Reopen this same address on the phone to see the results.'}</p>
               {phoneAddresses.length > 0 && <div className="phone-addresses">Phone address on this Wi-Fi: {phoneAddresses.map(address => <span key={address}><a href={address}>{address}</a><button type="button" className="subtle-btn" onClick={() => void copyText(address).then(copied => setLaptopMessage(copied ? 'Phone address copied. Open it on your phone using the same Wi-Fi.' : 'Could not copy the phone address.'))}>Copy</button></span>)}</div>}
               {!hostedScanner && <label>Laptop scanner address
@@ -2576,8 +2597,8 @@ export default function App() {
             {reportLayout === 'imei_photo' && (
               <div className="download-status">{exportFormat === 'excel'
                 ? (androidBridge?.beginFolder || typeof (window as any).showDirectoryPicker === 'function'
-                  ? 'Choose a folder: a new folder is created inside it with the Excel file (IMEI, picture, Download picture button) and every picture. No ZIP.'
-                  : 'The Excel file (IMEI, picture, Download picture button) and every picture download into your Downloads folder together. Allow multiple downloads if the browser asks. No ZIP.')
+                  ? 'Choose a folder: a new folder is created inside it with the Excel file (IMEI 1, IMEI 2, Serial, picture, Download picture button) and every picture. No ZIP.'
+                  : 'The Excel file (IMEI 1, IMEI 2, Serial, picture, Download picture button) and every picture download into your Downloads folder together. Allow multiple downloads if the browser asks. No ZIP.')
                 : exportFormat === 'word' ? 'Word: IMEI 1, IMEI 2, Serial and the picture. Download picture buttons are Excel only.' : 'IMEI 1, IMEI 2 and Serial only. Pictures with download buttons are Excel only.'}</div>
             )}
             {reportLayout === 'person_photo' && (
@@ -2918,6 +2939,7 @@ export default function App() {
                       <td data-label="Model">
                         <input
                           className="inline-edit model-edit"
+                          aria-label={`Model for record ${r.number}`}
                           value={r.model}
                           onChange={e =>
                             updateRow(r.id, { model: e.target.value })
@@ -2928,6 +2950,7 @@ export default function App() {
                       <td data-label="IMEI">
                         <input
                           className="inline-edit imei-edit"
+                          aria-label={`IMEI 1 for record ${r.number}`}
                           value={r.imei}
                           placeholder="Not detected"
                           maxLength={15}
@@ -3071,8 +3094,10 @@ export default function App() {
               <label className="review-model" htmlFor="manual-model">Device model</label>
               <input id="manual-model" value={manualModel} onChange={event => setManualModel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); document.getElementById('manual-imei')?.focus(); } }} />
               <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
-              <label htmlFor="manual-imei">IMEI</label>
+              <label htmlFor="manual-imei">IMEI 1</label>
               <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
+              <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
+              <input id="manual-imei2" inputMode="numeric" maxLength={15} value={manualImei2} onChange={event => setManualImei2(digits(event.target.value).slice(0, 15))} />
               <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
               <small>Enter moves to the next field, then saves and opens the next record. Use arrow keys to navigate when not typing.</small>
               {(manualModel !== exportModel(selected.model) || manualImei !== selected.imei) && <small>Save changes before moving to another record.</small>}

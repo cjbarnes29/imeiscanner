@@ -28,18 +28,20 @@ try {
     const rows = await scanner.scan(join(folder, name), name, 'standard');
     const imeis = rows.map(row => row.imei).filter(Boolean).sort();
     const serials = rows.map(row => row.serial).filter(Boolean).sort();
+    const imei2s = rows.map(row => row.imei2).filter(Boolean).sort();
     const review = rows.filter(row => row.cropNeedsReview || !row.imei && !row.serial).length;
-    actual[name] = { devices: rows.length, imeis, serials };
+    actual[name] = { devices: rows.length, imeis, imei2s, serials };
     const want = expected[name];
     const problems = [];
     if (want) {
       if (want.devices !== undefined && want.devices !== rows.length) problems.push(`devices ${rows.length}, expected ${want.devices}`);
       for (const imei of want.imeis || []) if (!imeis.includes(imei)) problems.push(`missing IMEI ${imei}`);
       for (const serial of want.serials || []) if (!serials.includes(serial)) problems.push(`missing serial ${serial}`);
+      for (const imei2 of want.imei2s || []) if (!imei2s.includes(imei2)) problems.push(`missing IMEI 2 ${imei2}`);
     }
     if (problems.length) failures++;
     console.log(`${problems.length ? 'FAIL' : want ? 'PASS' : 'INFO'}  ${name}  ${rows.length} record(s), ${review} need review, ${((Date.now() - started) / 1000).toFixed(1)}s`);
-    console.log(`      IMEIs: ${imeis.join(', ') || '—'}   Serials: ${serials.join(', ') || '—'}`);
+    console.log(`      IMEI 1: ${imeis.join(', ') || '—'}   IMEI 2: ${imei2s.join(', ') || '—'}   Serials: ${serials.join(', ') || '—'}`);
     for (const problem of problems) console.log(`      ✗ ${problem}`);
   }
 } finally { await scanner.close(); }

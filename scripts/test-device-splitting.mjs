@@ -47,10 +47,21 @@ try{
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 2: '+B,420)],1000,1000).length,1,'Close-up IMEI 1/IMEI 2 with barcode gap stays one device');
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 1: '+C,700)],1000,1000).length,2,'Close-up distinct devices still split');
  // Camera: barcodes under IMEI labels become positioned anchors.
- const {labelledBarcodeLines,resolveImeisFromBarcodes}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+ const {labelledBarcodeLines,resolveImeisFromBarcodes,resolveSerialFromBarcodes,imeiReadingsDisagree,barcodeImei}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+ // Serial from the S/N barcode, confirmed by misread OCR (real case: OCR read RE3L810D0).
+ assert.equal(resolveSerialFromBarcodes(['351124072221537','R83L810D0MW','8806099448974'],'S/N - RE3L810D0!'),'S/N (barcode): R83L810D0MW','Serial barcode fixes 8/B and cut-off OCR');
+ assert.equal(resolveSerialFromBarcodes(['R83L810D0MW'],'nothing like it'),'','Serial barcode needs OCR evidence');
+ assert.equal(resolveSerialFromBarcodes(['351124072221537'],'S/N: 3511240'),'','Digit-only barcodes are not serials');
+ const {extractSerial:serialOf}=await import(pathToFileURL(join(dir,'serial.mjs')).href);
+ assert.equal(serialOf('S/N (barcode): R83L810D0MW\nS/N - RE3L810D0'),'R83L810D0MW','Barcode serial outranks OCR serial');
+ // Misread guard (real case: OCR gave Luhn-valid 351980071560831 for 351980971560931).
+ assert.equal(imeiReadingsDisagree('IMEI 1 : 351980071560831\n361980071560931 IMEI 2 356302431560999','351980071560831'),true,'Two OCR readings 2 digits apart need review');
+ assert.equal(imeiReadingsDisagree('IMEI 1: 351973130210365\nIMEI 2: 351973130219432\nIMEI 1: 351973130210365','351973130210365'),false,'IMEI 2 of the same device is not a misread');
+ assert.equal(imeiReadingsDisagree('IMEI 1 (barcode): 351980971560931\n351980071560831','351980971560931'),false,'Barcode-confirmed numbers are never flagged');
+ assert.equal(barcodeImei('IMEI 1 (barcode): 351124072221537\nIMEI 1: 351124072221538',1),'351124072221537');
  // Real OCR from a 4-box camera photo: digits misread, barcodes exact.
- assert.equal(resolveImeisFromBarcodes(['351124072221537','351570782221532'],'IMEI 1 : 35112407222I537  IMEI 2 : 3515707822215'),'IMEI 1: 351124072221537\nIMEI 2: 351570782221532','Label picks the barcode sharing its digits');
- assert.equal(resolveImeisFromBarcodes(['351124072221537'],'IMEI: 351124072221537 IMEI 2 : 351570782221532'),'IMEI 1: 351124072221537','OCR dropped the 1 in IMEI 1');
+ assert.equal(resolveImeisFromBarcodes(['351124072221537','351570782221532'],'IMEI 1 : 35112407222I537  IMEI 2 : 3515707822215'),'IMEI 1 (barcode): 351124072221537\nIMEI 2 (barcode): 351570782221532','Label picks the barcode sharing its digits');
+ assert.equal(resolveImeisFromBarcodes(['351124072221537'],'IMEI: 351124072221537 IMEI 2 : 351570782221532'),'IMEI 1 (barcode): 351124072221537','OCR dropped the 1 in IMEI 1');
  assert.equal(resolveImeisFromBarcodes(['357126893713943'],'Gas IMENR:3! 712689: 2:35793'),'IMEI: 357126893713943','Single barcode with partial digits is un-indexed');
  assert.equal(resolveImeisFromBarcodes(['357126893713943'],'no digits here'),'','No OCR evidence, no number');
  assert.equal(resolveImeisFromBarcodes(['8806099448912'],'IMEI 1 : 8806099448912'),'','EAN product barcodes are not IMEIs');

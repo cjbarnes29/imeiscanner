@@ -4,7 +4,12 @@
 export const SERIAL_LABEL = String.raw`(?:S\s*[/|I]\s*N|SN(?=[\s:#.-])|SERIAL(?:\s*(?:NUMBER|NO|NUM))?\.?|SER\.?\s*NO\.?)`;
 const SERIAL_VALUE = String.raw`\s*[:#.-]?\s*((?=[A-Z0-9]*\d)[A-Z0-9]{5,25})\b`;
 const SERIAL_NOISE = /^(MODEL|IMEI|SERIAL|NUMBER)$/;
-const serialValues = (text: string) => [...text.toUpperCase().matchAll(new RegExp(String.raw`\b${SERIAL_LABEL}${SERIAL_VALUE}`, 'g'))].map(m => m[1]).filter(v => !SERIAL_NOISE.test(v));
+const serialValues = (text: string) => {
+  // A serial read from its barcode is exact; it outranks OCR guesses of the same label.
+  const barcode = [...new Set([...text.toUpperCase().matchAll(/S\/N \(BARCODE\):\s*([A-Z0-9]{5,25})/g)].map(m => m[1]))];
+  if (barcode.length) return barcode;
+  return [...text.toUpperCase().matchAll(new RegExp(String.raw`\b${SERIAL_LABEL}${SERIAL_VALUE}`, 'g'))].map(m => m[1]).filter(v => !SERIAL_NOISE.test(v));
+};
 
 /** Digits after a bare "IMEI:" label (no 1/2), e.g. Apple/Pixel style labels. Caller applies Luhn. */
 export function unindexedImeis(text: string): string[] {
