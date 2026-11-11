@@ -681,13 +681,10 @@ function recordsCsv(
   return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
 }
 
+/** Picture file name: record number first, then the IMEI (or serial), e.g. 3_351973130210365.jpg. */
 function photoFilename(r: RecordItem) {
-  const ext = (r.cropDataUrl ? 'jpg' : r.name.split('.').pop() || 'jpg')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '') || 'jpg';
-  const original = safeFileName(r.name.replace(/\.[^.]+$/, ''));
-
-  return `#${r.number}_${safeFileName(r.imei || 'IMEI_NOT_FOUND')}_${original}.${ext}`;
+  const ext = (r.cropDataUrl ? 'jpg' : r.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  return `${r.number}_${(r.imei || recordSerial(r) || 'IMEI_NOT_FOUND').replace(/[^A-Za-z0-9_-]/g, '_')}.${ext}`;
 }
 
 async function workbookImage(r: RecordItem, maxSize = 1200) {
@@ -1180,6 +1177,9 @@ export default function App() {
   const [shareStep,setShareStep]=useState<'picture'|'text'>('picture');
   // Several records share in batches (many pictures per message) unless switched to one-by-one.
   const [shareOneByOne,setShareOneByOne]=useState(false);
+  const [copiedKeys,setCopiedKeys]=useState<string[]>([]);
+  /** Copy one value and tick it, so you can work down the list one record at a time. */
+  function copyValue(key:string,value:string){void copyText(value).then(ok=>{if(ok)setCopiedKeys(old=>old.includes(key)?old:[...old,key]);setShareStatus(ok?`Copied ${value}`:'Copy failed. Select and copy the value manually.');});}
   const [sharing,setSharing]=useState(false);
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
@@ -3242,6 +3242,14 @@ export default function App() {
         <strong>Step 2 · Numbers (one message)</strong>
         <textarea aria-label="All numbers to share" readOnly value={bulkShareText}/>
         <div className="share-toolbar"><button className="primary" disabled={sharing||!bulkShareText} onClick={()=>nativeShareBulk('text')}>Share all numbers</button><button className="subtle-btn" onClick={()=>void copyText(bulkShareText).then(ok=>setShareStatus(ok?'Numbers copied. Paste them as a new message.':'Copy failed. Select and copy the text above.'))}>Copy numbers</button></div>
+        <strong>Or copy one by one</strong>
+        <p className="copy-hint">Tap a number to copy it. It gets a tick so you know where you are. Picture files are named with the same number: {shareRows.slice(0,2).map((row,index)=>`${index+1}_${(row.imei||recordSerial(row)||'picture').replace(/[^A-Za-z0-9_-]/g,'_')}.jpg`).join(', ')}…</p>
+        <ol className="copy-list">{shareRows.map((row,index)=>{const pair=recordImeiPair(row),serial=recordSerial(row);return <li key={row.id}><img src={recordPhoto(row)} alt={`Picture ${index+1}`}/><span className="copy-num">{index+1}</span><div className="copy-values">
+          {pair.imei1&&<button type="button" className={copiedKeys.includes(row.id+'1')?'copied':''} onClick={()=>copyValue(row.id+'1',pair.imei1)}>{copiedKeys.includes(row.id+'1')?'✓ ':''}IMEI 1 · {pair.imei1}</button>}
+          {pair.imei2&&<button type="button" className={copiedKeys.includes(row.id+'2')?'copied':''} onClick={()=>copyValue(row.id+'2',pair.imei2)}>{copiedKeys.includes(row.id+'2')?'✓ ':''}IMEI 2 · {pair.imei2}</button>}
+          {serial&&<button type="button" className={copiedKeys.includes(row.id+'s')?'copied':''} onClick={()=>copyValue(row.id+'s',serial)}>{copiedKeys.includes(row.id+'s')?'✓ ':''}S/N · {serial}</button>}
+          {!pair.imei1&&!pair.imei2&&!serial&&<em>No number detected</em>}</div>
+          <button type="button" className="subtle-btn copy-save" aria-label={`Download picture ${index+1}`} onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(row)),`${index+1}_${(row.imei||serial||'picture').replace(/[^A-Za-z0-9_-]/g,'_')}.jpg`)}>↓ Picture</button></li>;})}</ol>
         <button className="textbtn" disabled={sharing} onClick={()=>{setShareOneByOne(true);setShareStep('picture');setShareIndex(0);setShareStatus('');}}>Share one record at a time instead</button>
        </div>:<p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>}
        {!bulkShare&&currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
@@ -3254,6 +3262,9 @@ export default function App() {
           <img className="share-preview" src={recordPhoto(linkedPicture)} alt={`Picture for ${linkedPicture.imei || recordSerial(linkedPicture) || linkedPicture.pictureId}`} />
           <p>{[recordImeiPair(linkedPicture).imei1 && `IMEI 1: ${recordImeiPair(linkedPicture).imei1}`, recordImeiPair(linkedPicture).imei2 && `IMEI 2: ${recordImeiPair(linkedPicture).imei2}`, recordSerial(linkedPicture) && `Serial: ${recordSerial(linkedPicture)}`].filter(Boolean).join(' · ') || linkedPicture.pictureId}</p>
           <div className="share-toolbar">
+            {recordImeiPair(linkedPicture).imei1 && <button className="subtle-btn" onClick={() => void copyText(recordImeiPair(linkedPicture).imei1).then(ok => setToast(ok ? 'IMEI 1 copied.' : 'Copy failed.'))}>Copy IMEI 1</button>}
+            {recordImeiPair(linkedPicture).imei2 && <button className="subtle-btn" onClick={() => void copyText(recordImeiPair(linkedPicture).imei2).then(ok => setToast(ok ? 'IMEI 2 copied.' : 'Copy failed.'))}>Copy IMEI 2</button>}
+            {recordSerial(linkedPicture) && <button className="subtle-btn" onClick={() => void copyText(recordSerial(linkedPicture)).then(ok => setToast(ok ? 'Serial copied.' : 'Copy failed.'))}>Copy serial</button>}
             <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(linkedPicture)), `${(linkedPicture.imei || recordSerial(linkedPicture) || linkedPicture.pictureId).replace(/[^A-Za-z0-9_-]/g, '_')}.jpg`)}><Download size={16} /> Download picture</button>
             {typeof navigator.share === 'function' && <button className="subtle-btn" onClick={() => { const file = new File([dataUrlBlob(recordPhoto(linkedPicture))], 'picture.jpg', { type: 'image/jpeg' }); const data = { files: [file] }; if (navigator.canShare?.(data)) void navigator.share(data).catch(() => {}); else setToast('Sharing pictures is not available in this browser. Use Download picture.'); }}>Share picture</button>}
           </div>
