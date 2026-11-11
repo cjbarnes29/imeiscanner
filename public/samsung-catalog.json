@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-11-10T11:15:35.675Z",
+  "updatedAt": "2026-11-11T11:02:32.416Z",
   "coverage": {
     "complete": false,
     "pagesChecked": 80,
-    "productVariants": 283,
+    "productVariants": 317,
     "sources": [
       "https://www.samsung.com/ca/business/smartphones/galaxy-s/galaxy-s25-sm-s931wzsexac/",
       "https://www.samsung.com/us/common/sitemap/",
@@ -14,31 +14,7 @@
     ],
     "errors": [
       {
-        "url": "https://www.samsung.com/uk/watches/galaxy-watch/galaxy-watch8-classic-46mm-black-bluetooth-sm-l500nzkaeua/wearable-delete-bold",
-        "error": "HTTP 404"
-      },
-      {
-        "url": "https://www.samsung.com/uk/watches/galaxy-watch/galaxy-watch8-classic-46mm-black-bluetooth-sm-l500nzkaeua/wearable-play-bold",
-        "error": "HTTP 404"
-      },
-      {
-        "url": "https://www.samsung.com/uk/audio-sound/galaxy-buds/galaxy-buds4-black-sm-r540nzkaeub/Block1%20Link",
-        "error": "HTTP 404"
-      },
-      {
-        "url": "https://www.samsung.com/uk/audio-sound/galaxy-buds/galaxy-buds4-black-sm-r540nzkaeub/Block2%20Link",
-        "error": "HTTP 404"
-      },
-      {
-        "url": "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/Block1%20Link",
-        "error": "HTTP 404"
-      },
-      {
-        "url": "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/Block2%20Link",
-        "error": "HTTP 404"
-      },
-      {
-        "url": "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/www.samsung.com/uk/xr/galaxy-xr/controllers/buy/",
+        "url": "https://www.samsung.com/us/smartphones/galaxy-s25-ultra/buy/galaxy-s25-edge-256gb-verizon-sku-sm-s937ulbavzw/",
         "error": "HTTP 404"
       }
     ]
@@ -54,7 +30,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/ca/business/smartphones/galaxy-s/galaxy-s25-sm-s931wzsexac/",
-      "lastChecked": "2026-11-10T11:15:35.675Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-S948UZVEXAA",
@@ -66,7 +42,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/buy/galaxy-s26-ultra-512gb-unlocked-sku-sm-s948uzvexaa/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-F971UZGAXAA",
@@ -78,7 +54,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-256gb-unlocked-sku-sm-f971uzgaxaa/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-F976UDGEXAA",
@@ -102,7 +78,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-z-flip8/buy/galaxy-z-flip8-256gb-unlocked-sku-sm-f776ulgaxaa/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-X940NZAAXAR",
@@ -114,7 +90,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-s12/buy/galaxy-tab-s12-ultra-256gb-gray-wi-fi-sku-sm-x940nzaaxar/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-L715UZSAXAA",
@@ -125,8 +101,8 @@
       "specifications": [],
       "releaseDate": null,
       "compatibility": null,
-      "sourceUrl": "https://www.samsung.com/us/watches/galaxy-watch-ultra2/buy/galaxy-watch-ultra2-47mm-titanium-silver-lte-sku-sm-l715uzsaxaa/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "sourceUrl": "https://www.samsung.com/us/business/watches/galaxy-watch-ultra2/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-I610",
@@ -138,7 +114,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/us/xr/galaxy-xr/galaxy-xr/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BLGDEUB",
@@ -150,7 +126,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-X940NZAREUB",
@@ -193,12 +169,12 @@
       "name": "Galaxy Watch8 Classic (Bluetooth, 46 mm)",
       "modelCode": "SM-L500NZKAEUA",
       "region": "uk",
-      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/uk/f2507/gallery/uk-galaxy-watch8-classic-l500-sm-l500nzkaeua-thumb-547707845",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_Classic_black_Side_hybrid_black_1600x864_PC-549948922",
       "specifications": [],
       "releaseDate": null,
       "compatibility": null,
-      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch/galaxy-watch8-classic-46mm-black-bluetooth-sm-l500nzkaeua/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-R540NZKAEUB",
@@ -269,8 +245,8 @@
       "specifications": [],
       "releaseDate": null,
       "compatibility": null,
-      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-s26-plus/buy/",
-      "lastChecked": "2026-11-09T11:37:49.378Z"
+      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-s26/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-L340NZKAXAA",
@@ -533,8 +509,8 @@
       "specifications": [],
       "releaseDate": null,
       "compatibility": null,
-      "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-a11-plus/buy/",
-      "lastChecked": "2026-11-10T11:15:35.675Z"
+      "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-a11-plus/buy/galaxy-tab-a11-plus-128gb-gray-wi-fi-sku-sm-x230nzaixar/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-X520NZAAXAR",
@@ -630,7 +606,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/us/rings/galaxy-ring/buy/galaxy-ring-titanium-silver-size-6-sku-sm-q506nzsaxar/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-L500NZKAXAA",
@@ -690,7 +666,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZWGEUB",
@@ -702,7 +678,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZVHEUB",
@@ -714,7 +690,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZVGEUB",
@@ -726,7 +702,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BLBHEUB",
@@ -738,7 +714,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BLBGEUB",
@@ -750,7 +726,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZKHEUB",
@@ -762,7 +738,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZKGEUB",
@@ -774,7 +750,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZDHEUB",
@@ -786,7 +762,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZDGEUB",
@@ -798,7 +774,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZSHEUB",
@@ -810,7 +786,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S942BZSGEUB",
@@ -822,7 +798,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZDGEUB",
@@ -834,7 +810,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZDDEUB",
@@ -846,7 +822,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZSGEUB",
@@ -858,7 +834,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZSDEUB",
@@ -870,7 +846,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZWDEUB",
@@ -882,7 +858,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZWGEUB",
@@ -894,7 +870,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZVGEUB",
@@ -906,7 +882,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZVDEUB",
@@ -918,7 +894,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BLBGEUB",
@@ -930,7 +906,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BLBDEUB",
@@ -942,7 +918,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZKGEUB",
@@ -954,7 +930,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S947BZKDEUB",
@@ -966,7 +942,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BLGGEUB",
@@ -978,7 +954,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BLGIEUB",
@@ -990,7 +966,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BZKDEUB",
@@ -1002,7 +978,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BZKGEUB",
@@ -1014,7 +990,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BZKIEUB",
@@ -1026,7 +1002,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BZVDEUB",
@@ -1038,7 +1014,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BZVGEUB",
@@ -1050,7 +1026,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-S741BZVIEUB",
@@ -1062,7 +1038,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/",
-      "lastChecked": "2026-11-09T01:35:21.201Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F971BZWNEUB",
@@ -1218,7 +1194,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZWCEUB",
@@ -1230,7 +1206,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZWBEUB",
@@ -1242,7 +1218,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZVNEUB",
@@ -1254,7 +1230,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZVCEUB",
@@ -1266,7 +1242,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZVBEUB",
@@ -1278,7 +1254,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BDGNEUB",
@@ -1290,7 +1266,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BDGCEUB",
@@ -1302,7 +1278,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BDGBEUB",
@@ -1314,7 +1290,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZKNEUB",
@@ -1326,7 +1302,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZKCEUB",
@@ -1338,7 +1314,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "uk:SM-F976BZKBEUB",
@@ -1350,7 +1326,7 @@
       "releaseDate": null,
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
-      "lastChecked": "2026-11-09T01:13:18.149Z"
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "us:SM-F976UZKEXAA",
@@ -3332,12 +3308,12 @@
       "name": "Galaxy Watch8 (Bluetooth, 40 mm)",
       "modelCode": "SM-L320NZSAEUA",
       "region": "uk",
-      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/uk/f2507/gallery/uk-galaxy-watch8-l320-sm-l320nzsaeua-thumb-547705552",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_silver_40_Side_Sport_sm_white_1600x864_PC-549932253",
       "specifications": [],
       "releaseDate": null,
       "compatibility": null,
-      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch/galaxy-watch8-40mm-silver-bluetooth-sm-l320nzsaeua/",
-      "lastChecked": "2026-11-10T11:15:35.675Z"
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     },
     {
       "id": "fr:SM-R540NZKAXEF",
@@ -3518,28 +3494,441 @@
       "compatibility": null,
       "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch9/buy/",
       "lastChecked": "2026-11-10T11:15:35.675Z"
+    },
+    {
+      "id": "uk:SM-L335FZSAEUA",
+      "name": "Galaxy Watch8 (LTE, 44 mm)",
+      "modelCode": "SM-L335FZSAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_silver_44_Side_Sport_ml_white_1600x864_PC-549982241",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L505FZKAEUA",
+      "name": "Galaxy Watch8 Classic (LTE, 46 mm)",
+      "modelCode": "SM-L505FZKAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_Classic_black_Side_hybrid_black_1600x864_PC-549961894",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L335FDAAEUA",
+      "name": "Galaxy Watch8 (LTE, 44 mm)",
+      "modelCode": "SM-L335FDAAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_graphite_44_Side_Sport_ml_graphite_1600x864_PC-549962689",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L500NZWAEUA",
+      "name": "Galaxy Watch8 Classic (Bluetooth, 46 mm)",
+      "modelCode": "SM-L500NZWAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_Classic_white_Side_hybrid_white_1600x864_PC-549970576_10150018101528",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L325FZSAEUA",
+      "name": "Galaxy Watch8 (LTE, 40 mm)",
+      "modelCode": "SM-L325FZSAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_silver_40_Side_Sport_sm_white_1600x864_PC-549933743",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L330NZSAEUA",
+      "name": "Galaxy Watch8 (Bluetooth, 44 mm)",
+      "modelCode": "SM-L330NZSAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_silver_44_Side_Sport_ml_white_1600x864_PC-549979747",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L325FDAAEUA",
+      "name": "Galaxy Watch8 (LTE, 40 mm)",
+      "modelCode": "SM-L325FDAAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_graphite_40_Side_Sport_sm_graphite_1600x864_PC-549981159",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L330NDAAEUA",
+      "name": "Galaxy Watch8 (Bluetooth, 44 mm)",
+      "modelCode": "SM-L330NDAAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_graphite_44_Side_Sport_ml_graphite_1600x864_PC-549944666",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L505FZWAEUA",
+      "name": "Galaxy Watch8 Classic (LTE, 46 mm)",
+      "modelCode": "SM-L505FZWAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_Classic_white_Side_hybrid_white_1600x864_PC-549964755",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "uk:SM-L320NDAAEUA",
+      "name": "Galaxy Watch8 (Bluetooth, 40 mm)",
+      "modelCode": "SM-L320NDAAEUA",
+      "region": "uk",
+      "imageUrl": "//images.samsung.com/is/image/samsung/p6pim/global/global-wearable-Galaxy_Watch8_graphite_40_Side_Sport_sm_graphite_1600x864_PC-549980183",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "ae:SM-S948BZKOMDA",
+      "name": "Galaxy S26 Ultra Enterprise Edition",
+      "modelCode": "SM-S948BZKOMDA",
+      "region": "ae",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/ae/sm-s948bzkomda/gallery/ae-galaxy-s26-ultra-s948-582930-sm-s948bzkomda-thumb-551377537",
+      "specifications": [
+        {
+          "name": "CPU Type",
+          "value": "Octa-Core"
+        }
+      ],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/ae/smartphones/galaxy-s/galaxy-s26-ultra-black-512gb-sm-s948bzkomda/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-CS948CTEGUS",
+      "name": "Galaxy S26 Ultra Clear Magnet Case, Transparent",
+      "modelCode": "EF-CS948CTEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/s2602/gallery/us-galaxy-s26ultra-cs948-ef-cs948ctegus-551041607",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-s26-ultra-clear-magnet-case-transparent-sku-ef-cs948ctegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EP-P2900BBEGUS",
+      "name": "Magnet Wireless Charger, Dark Gray",
+      "modelCode": "EP-P2900BBEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/s2602/gallery/us-ep-p2900-ep-p2900bbegus-551243545",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/magnet-wireless-charger-dark-gray-sku-ep-p2900bbegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-F971ULVAXAA",
+      "name": "Galaxy Z Fold8 256GB (Unlocked)",
+      "modelCode": "SM-F971ULVAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8-f971-600257-sm-f971ulvaxaa-553840963",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-KF971SREGUS",
+      "name": "Galaxy Z Fold8 Carbon Magnet Case, Violet",
+      "modelCode": "EF-KF971SREGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8-kf971-ef-kf971sregus-553829489",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-carbon-magnet-case-violet-sku-ef-kf971sregus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-XF971SBEGUS",
+      "name": "Galaxy Z Fold8 Carbon Standing Case, Graphite",
+      "modelCode": "EF-XF971SBEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8-xf971-ef-xf971sbegus-553844505",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-carbon-standing-case-graphite-sku-ef-xf971sbegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-EF971CVEGUS",
+      "name": "Galaxy Z Fold8 Silicone Magnet Case, Lavender",
+      "modelCode": "EF-EF971CVEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8-ef971-ef-ef971cvegus-553844587",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-silicone-magnet-case-lavender-sku-ef-ef971cvegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-F976UZVAXAA",
+      "name": "Galaxy Z Fold8 Ultra 256GB (Unlocked)",
+      "modelCode": "SM-F976UZVAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8-ultra-f976-600251-sm-f976uzvaxaa-553839126",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8-ultra/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-KF976SREGUS",
+      "name": "Galaxy Z Fold8 Ultra Carbon Magnet Case, Violet",
+      "modelCode": "EF-KF976SREGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8ultra-kf976-ef-kf976sregus-553846156",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-carbon-magnet-case-violet-sku-ef-kf976sregus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-XF976SBEGUS",
+      "name": "Galaxy Z Fold8 Ultra Carbon Standing Case, Black",
+      "modelCode": "EF-XF976SBEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8ultra-xf976-ef-xf976sbegus-553846173",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-carbon-standing-case-black-sku-ef-xf976sbegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-EF976CVEGUS",
+      "name": "Galaxy Z Fold8 Ultra Silicone Magnet Case, Violet Shadow",
+      "modelCode": "EF-EF976CVEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8ultra-ef976-ef-ef976cvegus-553846380",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-silicone-magnet-case-violet-shadow-sku-ef-ef976cvegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-F776UZKAXAA",
+      "name": "Galaxy Z Flip8 256GB (Unlocked)",
+      "modelCode": "SM-F776UZKAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-zflip8-f776-sm-f776uzkaxaa-553843353",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/business/smartphones/galaxy-z-flip8/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-EF776CVEGUS",
+      "name": "Galaxy Z Flip8 Silicone Ring Magnet Case, Pink",
+      "modelCode": "EF-EF776CVEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-flip8-ef776-ef-ef776cvegus-553846066",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-silicone-ring-magnet-case-pink-sku-ef-ef776cvegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-CF776CTEGUS",
+      "name": "Galaxy Z Flip8 Clear Magnet Case, Transparent",
+      "modelCode": "EF-CF776CTEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-flip8-cf776-ef-cf776ctegus-553845870",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-clear-magnet-case-transparent-sku-ef-cf776ctegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:EF-QF776CTEGUS",
+      "name": "Galaxy Z Flip8 Clear Case, Transparent",
+      "modelCode": "EF-QF776CTEGUS",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-flip8-qf776-ef-qf776ctegus-553845848",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/mobile-accessories/phones/galaxy-z-flip8-clear-case-transparent-sku-ef-qf776ctegus/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-A276UZKAXAA",
+      "name": "Galaxy A27 5G 128GB (Unlocked)",
+      "modelCode": "SM-A276UZKAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-a276uzkaxaa/gallery/us-galaxy-a27-5g-sm-a276-sm-a276uzkaxaa-554050987",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-a27-5g/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-F971ULVEXAA",
+      "name": "Galaxy Z Fold8 512GB (Unlocked)",
+      "modelCode": "SM-F971ULVEXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/f2607/gallery/us-galaxy-z-fold8-f971-600257-sm-f971ulvexaa-553841075",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-512gb-unlocked-sku-sm-f971ulvexaa/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-A576UDBAXAA",
+      "name": "Galaxy A57 5G 128GB (Unlocked)",
+      "modelCode": "SM-A576UDBAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-a576udbaxaa/gallery/us-galaxy-a57-5g-sm-a576-sm-a576udbaxaa-551691230",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-a57-5g/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-A376UZAAXAA",
+      "name": "Galaxy A37 5G 128GB (Unlocked)",
+      "modelCode": "SM-A376UZAAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-a376uzaaxaa/gallery/us-galaxy-a37-5g-sm-a376-sm-a376uzaaxaa-551676282",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-a37-5g/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-A176UZKAXAA",
+      "name": "Galaxy A17 5G 128GB (Unlocked)",
+      "modelCode": "SM-A176UZKAXAA",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-a176uzkaxaa/gallery/us-galaxy-a17-5g-sm-a176-sm-a176uzkaxaa-550430599",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/smartphones/galaxy-a17-5g/buy/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-X930NZAEXAR",
+      "name": "Galaxy Tab S11 Ultra (14.6\")",
+      "modelCode": "SM-X930NZAEXAR",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-x930nzaexar/gallery/us-galaxy-tab-s11-ultra-sm-x930-sm-x930nzaexar-550969765",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-ultra-512gb-gray-wi-fi-sku-sm-x930nzaexar/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-X730NZAIXAR",
+      "name": "Galaxy Tab S11 (11\")",
+      "modelCode": "SM-X730NZAIXAR",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-x730nzaixar/gallery/us-galaxy-tab-s11-sm-x730-sm-x730nzaixar-550969743",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-512gb-gray-wi-fi-sku-sm-x730nzaixar/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-X820NZAAXAR",
+      "name": "Galaxy Tab S10+, 256GB, Moonstone Gray (Wi-Fi)",
+      "modelCode": "SM-X820NZAAXAR",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-x820nzaaxar/gallery/us-galaxy-tab-s10-plus-sm-x820-sm-x820nzaaxar-553570680",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-s10/buy/galaxy-tab-s10-plus-256gb-moonstone-gray-wi-fi-sm-x820nzaaxar/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
+    },
+    {
+      "id": "us:SM-X620NLBAXAR",
+      "name": "Galaxy Tab S10 FE+ (13.1\")",
+      "modelCode": "SM-X620NLBAXAR",
+      "region": "us",
+      "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/us/sm-x620nlbaxar/gallery/us-galaxy-tab-s10-fe-plus-sm-x626-sm-x620nlbaxar-553655025",
+      "specifications": [],
+      "releaseDate": null,
+      "compatibility": null,
+      "sourceUrl": "https://www.samsung.com/us/tablets/galaxy-tab-s10-fe/buy/galaxy-tab-s10-fe-plus-blue-128gb-sku-sm-x620nlbaxar/",
+      "lastChecked": "2026-11-11T11:02:32.416Z"
     }
   ],
   "checkedUrls": {
-    "https://www.samsung.com/ca/business/smartphones/galaxy-s/galaxy-s25-sm-s931wzsexac/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/us/common/sitemap/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/uk/info/sitemap/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/ae/business/smartphones/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/in/info/sitemap/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/ae/info/sitemap/": "2026-11-10T11:15:35.675Z",
+    "https://www.samsung.com/ca/business/smartphones/galaxy-s/galaxy-s25-sm-s931wzsexac/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/common/sitemap/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/uk/info/sitemap/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/business/smartphones/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/in/info/sitemap/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/info/sitemap/": "2026-11-11T11:02:32.416Z",
     "https://www.samsung.com/us/xr/galaxy-xr/galaxy-xr/buy/": "2026-11-09T01:35:21.201Z",
     "https://www.samsung.com/us/xr/galaxy-xr/galaxy-xr/accessories/": "2026-11-09T01:35:21.201Z",
     "https://www.samsung.com/us/smartphones/galaxy-z-series/certified-re-newed-store/buy/galaxy-z-fold5-certified-re-newed-256gb-sku-sm5f946uzkaxaa/": "2026-11-09T01:35:21.201Z",
     "https://www.samsung.com/us/smartphones/galaxy-s-series/certified-re-newed-store/buy/galaxy-s24-ultra-certified-re-newed-256gb-sm5s928uzkexaa/": "2026-11-09T01:35:21.201Z",
     "https://www.samsung.com/us/smartphones/galaxy-s-series/certified-re-newed-store/buy/galaxy-s26-ultra-certified-re-newed-256gb-sku-sm5s948uzvaxaa/": "2026-11-09T01:35:21.201Z",
-    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/buy/galaxy-s26-ultra-512gb-unlocked-sku-sm-s948uzvexaa/": "2026-11-09T01:35:21.201Z",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-256gb-unlocked-sku-sm-f971uzgaxaa/": "2026-11-09T01:35:21.201Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/buy/galaxy-s26-ultra-512gb-unlocked-sku-sm-s948uzvexaa/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-256gb-unlocked-sku-sm-f971uzgaxaa/": "2026-11-11T11:02:32.416Z",
     "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/buy/galaxy-z-fold8-ultra-512gb-unlocked-sku-sm-f976udgexaa/": "2026-11-09T11:37:49.378Z",
-    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/buy/galaxy-z-flip8-256gb-unlocked-sku-sm-f776ulgaxaa/": "2026-11-09T01:35:21.201Z",
-    "https://www.samsung.com/us/tablets/galaxy-tab-s12/buy/galaxy-tab-s12-ultra-256gb-gray-wi-fi-sku-sm-x940nzaaxar/": "2026-11-09T01:35:21.201Z",
-    "https://www.samsung.com/us/watches/galaxy-watch-ultra2/buy/galaxy-watch-ultra2-47mm-titanium-silver-lte-sku-sm-l715uzsaxaa/": "2026-11-09T01:35:21.201Z",
-    "https://www.samsung.com/us/xr/galaxy-xr/galaxy-xr/": "2026-11-09T01:35:21.201Z",
-    "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/": "2026-11-09T01:35:21.201Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/buy/galaxy-z-flip8-256gb-unlocked-sku-sm-f776ulgaxaa/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s12/buy/galaxy-tab-s12-ultra-256gb-gray-wi-fi-sku-sm-x940nzaaxar/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/watches/galaxy-watch-ultra2/buy/galaxy-watch-ultra2-47mm-titanium-silver-lte-sku-sm-l715uzsaxaa/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/xr/galaxy-xr/galaxy-xr/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/uk/smartphones/galaxy-s26/buy/": "2026-11-11T11:02:32.416Z",
     "https://www.samsung.com/uk/tablets/galaxy-tab-s/galaxy-tab-s12-ultra-grey-256gb-sm-x940nzareub/": "2026-11-09T01:35:21.201Z",
     "https://www.samsung.com/uk/watches/galaxy-watch/galaxy-watch-ultra2-titanium-silver-lte-sm-l715fzsaeub/": "2026-11-09T01:35:21.201Z",
     "https://www.samsung.com/uk/watches/galaxy-watch/galaxy-watch9-40mm-graphite-bluetooth-sm-l340nzkaeub/": "2026-11-09T01:35:21.201Z",
@@ -3683,7 +4072,7 @@
     "https://www.samsung.com/us/audio-sound/galaxy-buds4-pro/buy/galaxy-buds4-pro-pink-gold-sku-sm-r640nzdaxar/": "2026-11-10T11:15:35.675Z",
     "https://www.samsung.com/us/audio-sound/galaxy-buds-on/buy/": "2026-11-10T11:15:35.675Z",
     "https://www.samsung.com/us/mobile-accessories/galaxy-smarttag3-white-sku-ei-t5900bwegus/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/us/rings/galaxy-ring/buy/galaxy-ring-titanium-silver-size-6-sku-sm-q506nzsaxar/": "2026-11-10T11:15:35.675Z",
+    "https://www.samsung.com/us/rings/galaxy-ring/buy/galaxy-ring-titanium-silver-size-6-sku-sm-q506nzsaxar/": "2026-11-11T11:02:32.416Z",
     "https://www.samsung.com/us/watches/galaxy-watch8-classic/buy/": "2026-11-10T11:15:35.675Z",
     "https://www.samsung.com/us/watches/galaxy-watch8/buy/galaxy-watch8-40mm-graphite-wi-fi-bluetooth-sku-sm-l320ndadxaa/": "2026-11-10T11:15:35.675Z",
     "https://www.samsung.com/us/watches/galaxy-watch-ultra-2025/buy/": "2026-11-10T11:15:35.675Z",
@@ -3740,74 +4129,74 @@
     "https://www.samsung.com/ie/watches/": "2026-11-10T11:15:35.675Z",
     "https://www.samsung.com/levant/watches/": "2026-11-10T11:15:35.675Z",
     "https://www.samsung.com/lb/watches/": "2026-11-10T11:15:35.675Z",
-    "https://www.samsung.com/uk/watches/galaxy-watch9/buy/": "2026-11-10T11:15:35.675Z"
+    "https://www.samsung.com/uk/watches/galaxy-watch9/buy/": "2026-11-10T11:15:35.675Z",
+    "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/uk/watches/galaxy-watch8/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/smartphones/galaxy-s/galaxy-s26-ultra-black-512gb-sm-s948bzkomda/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/business/tablets/galaxy-tab-active3-t575/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/business/tablets/galaxy-a7-lite-t225/sm-t225nzalmea/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/business/tablets/galaxy-tab-s/galaxy-tab-s7-t875-sm-t875nzsaxsg/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/business/mobile-accessories/all-mobile-accessories/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/ae/smartphones/galaxy-s26-ultra/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/offers/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/mobile/phones/galaxy-s26/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-s26-ultra-clear-magnet-case-transparent-sku-ef-cs948ctegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/magnet-wireless-charger-dark-gray-sku-ep-p2900bbegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/logoURL": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/compare/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/offers/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-carbon-magnet-case-violet-sku-ef-kf971sregus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-carbon-standing-case-graphite-sku-ef-xf971sbegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-silicone-magnet-case-lavender-sku-ef-ef971cvegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/logoURL": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/compare/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/offers/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8-ultra/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8-ultra/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-carbon-magnet-case-violet-sku-ef-kf976sregus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-carbon-standing-case-black-sku-ef-xf976sbegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-silicone-magnet-case-violet-shadow-sku-ef-ef976cvegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/logoURL": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/compare/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/offers/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-flip8/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-flip8/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-silicone-ring-magnet-case-pink-sku-ef-ef776cvegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-clear-magnet-case-transparent-sku-ef-cf776ctegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile-accessories/phones/galaxy-z-flip8-clear-case-transparent-sku-ef-qf776ctegus/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/logoURL": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/watches/galaxy-watch-ultra2/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/galaxy/offers/strava/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/galaxy/offers/ifit/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-a27-5g/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26/buy/galaxy-s26-256gb-unlocked-sku-sm-s942ulbexaa/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/phones/galaxy-z/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/phones/galaxy-s/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/phones/galaxy-a/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/mobile-accessories/phones/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26-fe/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-512gb-unlocked-sku-sm-f971ulvexaa/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-s26/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-a57-5g/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-a37-5g/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/smartphones/galaxy-a17-5g/buy/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/tablets/galaxy-tab-a11-plus/buy/galaxy-tab-a11-plus-128gb-gray-wi-fi-sku-sm-x230nzaixar/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/tablets/galaxy-tab-s/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/tablets/galaxy-tab-a/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/mobile-accessories/tablets/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/mobile/tablets/all-tablets/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/shop/all-deals/tablets-laptops-computers-deals/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/business/shop/all-deals/tablets-laptops-computers-deals/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-ultra-512gb-gray-wi-fi-sku-sm-x930nzaexar/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-512gb-gray-wi-fi-sku-sm-x730nzaixar/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s10/buy/galaxy-tab-s10-plus-256gb-moonstone-gray-wi-fi-sm-x820nzaaxar/": "2026-11-11T11:02:32.416Z",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s10-fe/buy/galaxy-tab-s10-fe-plus-blue-128gb-sku-sm-x620nlbaxar/": "2026-11-11T11:02:32.416Z"
   },
   "pending": [
-    "https://www.samsung.com/uk/watches/galaxy-watch8/buy/",
-    "https://www.samsung.com/ae/smartphones/galaxy-s/galaxy-s26-ultra-black-512gb-sm-s948bzkomda/",
-    "https://www.samsung.com/ae/business/tablets/galaxy-tab-active3-t575/",
-    "https://www.samsung.com/ae/business/tablets/galaxy-a7-lite-t225/sm-t225nzalmea/",
-    "https://www.samsung.com/ae/business/tablets/galaxy-tab-s/galaxy-tab-s7-t875-sm-t875nzsaxsg/",
-    "https://www.samsung.com/ae/business/mobile-accessories/all-mobile-accessories/",
-    "https://www.samsung.com/ae/smartphones/galaxy-s26-ultra/",
-    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/offers/",
-    "https://www.samsung.com/us/business/mobile/phones/galaxy-s26/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-s26-ultra-clear-magnet-case-transparent-sku-ef-cs948ctegus/",
-    "https://www.samsung.com/us/mobile-accessories/magnet-wireless-charger-dark-gray-sku-ep-p2900bbegus/",
-    "https://www.samsung.com/us/smartphones/galaxy-s26/",
-    "https://www.samsung.com/us/business/smartphones/",
-    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/logoURL",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/compare/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/offers/",
-    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8/",
-    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8/buy/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-carbon-magnet-case-violet-sku-ef-kf971sregus/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-carbon-standing-case-graphite-sku-ef-xf971sbegus/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-silicone-magnet-case-lavender-sku-ef-ef971cvegus/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/logoURL",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/compare/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/offers/",
-    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8-ultra/",
-    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8-ultra/buy/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-carbon-magnet-case-violet-sku-ef-kf976sregus/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-carbon-standing-case-black-sku-ef-xf976sbegus/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-ultra-silicone-magnet-case-violet-shadow-sku-ef-ef976cvegus/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/logoURL",
-    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/compare/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/offers/",
-    "https://www.samsung.com/us/business/smartphones/galaxy-z-flip8/",
-    "https://www.samsung.com/us/business/smartphones/galaxy-z-flip8/buy/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-silicone-ring-magnet-case-pink-sku-ef-ef776cvegus/",
-    "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-clear-magnet-case-transparent-sku-ef-cf776ctegus/",
-    "https://www.samsung.com/us/mobile-accessories/phones/galaxy-z-flip8-clear-case-transparent-sku-ef-qf776ctegus/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-flip8/logoURL",
-    "https://www.samsung.com/us/business/watches/galaxy-watch-ultra2/buy/",
-    "https://www.samsung.com/us/mobile/galaxy/offers/strava/",
-    "https://www.samsung.com/us/mobile/galaxy/offers/ifit/",
-    "https://www.samsung.com/us/smartphones/galaxy-a27-5g/buy/",
-    "https://www.samsung.com/us/smartphones/galaxy-s26/buy/galaxy-s26-256gb-unlocked-sku-sm-s942ulbexaa/",
-    "https://www.samsung.com/us/mobile/phones/galaxy-z/",
-    "https://www.samsung.com/us/mobile/phones/galaxy-s/",
-    "https://www.samsung.com/us/mobile/phones/galaxy-a/",
-    "https://www.samsung.com/us/mobile/mobile-accessories/phones/",
-    "https://www.samsung.com/us/smartphones/galaxy-s26-fe/",
-    "https://www.samsung.com/us/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-512gb-unlocked-sku-sm-f971ulvexaa/",
-    "https://www.samsung.com/us/smartphones/galaxy-s26/buy/",
-    "https://www.samsung.com/us/smartphones/galaxy-s25-ultra/buy/galaxy-s25-edge-256gb-verizon-sku-sm-s937ulbavzw/",
-    "https://www.samsung.com/us/smartphones/galaxy-a57-5g/buy/",
-    "https://www.samsung.com/us/smartphones/galaxy-a37-5g/buy/",
-    "https://www.samsung.com/us/smartphones/galaxy-a17-5g/buy/",
-    "https://www.samsung.com/us/tablets/galaxy-tab-a11-plus/buy/galaxy-tab-a11-plus-128gb-gray-wi-fi-sku-sm-x230nzaixar/",
-    "https://www.samsung.com/us/mobile/tablets/galaxy-tab-s/",
-    "https://www.samsung.com/us/mobile/tablets/galaxy-tab-a/",
-    "https://www.samsung.com/us/mobile/mobile-accessories/tablets/",
-    "https://www.samsung.com/us/mobile/tablets/all-tablets/",
-    "https://www.samsung.com/us/shop/all-deals/tablets-laptops-computers-deals/",
-    "https://www.samsung.com/us/business/shop/all-deals/tablets-laptops-computers-deals/",
-    "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-ultra-512gb-gray-wi-fi-sku-sm-x930nzaexar/",
-    "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-512gb-gray-wi-fi-sku-sm-x730nzaixar/",
-    "https://www.samsung.com/us/tablets/galaxy-tab-s10/buy/galaxy-tab-s10-plus-256gb-moonstone-gray-wi-fi-sm-x820nzaaxar/",
-    "https://www.samsung.com/us/tablets/galaxy-tab-s10-fe/buy/galaxy-tab-s10-fe-plus-blue-128gb-sku-sm-x620nlbaxar/",
     "https://www.samsung.com/us/mobile/galaxy/offers/roblox/",
     "https://www.samsung.com/us/business/mobile/tablets/galaxy-tab-active/explore/",
     "https://www.samsung.com/us/business/mobile/tablets/galaxy-tab-active/galaxy-tab-active3-8-0-64gb-wi-fi-sm-t570nzkan20/",
@@ -6943,7 +7332,6 @@
     "https://www.samsung.com/in/galaxy-ai/",
     "https://www.samsung.com/ae/galaxy-ai/",
     "https://www.samsung.com/us/smartphones/galaxy-z-fold8-ultra/buy/galaxy-z-fold8-ultra-512gb-unlocked-sku-sm-f976uzkexaa/",
-    "https://www.samsung.com/uk/smartphones/galaxy-z-fold8-ultra/buy/",
     "https://www.samsung.com/uk/mobile-accessories/galaxy-z-fold8-ultra-carbon-magnet-case-violet-ef-kf976sregww/Block1%20Link",
     "https://www.samsung.com/uk/mobile-accessories/galaxy-z-fold8-ultra-carbon-magnet-case-violet-ef-kf976sregww/Block2%20Link",
     "https://www.samsung.com/uk/mobile-accessories/galaxy-z-fold8-ultra-carbon-magnet-case-black-ef-kf976sbegww/",
@@ -7646,6 +8034,73 @@
     "https://www.samsung.com/uk/audio-sound/galaxy-buds/galaxy-buds4-black-sm-r540nzkaeub/Block2%20Link",
     "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/Block1%20Link",
     "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/Block2%20Link",
-    "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/www.samsung.com/uk/xr/galaxy-xr/controllers/buy/"
+    "https://www.samsung.com/uk/xr/galaxy-xr/galaxy-xr-silver-shadow-sm-i610nzsaeub/www.samsung.com/uk/xr/galaxy-xr/controllers/buy/",
+    "https://www.samsung.com/ae/smartphones/galaxy-s26-ultra/reviews/",
+    "https://www.samsung.com/ae/support/mobile-devices/i-cannot-see-the-extract-text-menu-in-the-samsung-keyboard-on-my-galaxy-s26-series/",
+    "https://www.samsung.com/ae/support/mobile-devices/the-screen-of-the-galaxy-s26-series-appears-overly-red-or-yellow-overall/",
+    "https://www.samsung.com/ae/support/mobile-devices/how-to-use-privacy-display-on-the-samsung-galaxy-s26-ultra/",
+    "https://www.samsung.com/ae/business/tablets/galaxy-tab-a/galaxy-a7-lite-t225-sm-t225nzalmea/",
+    "https://www.samsung.com/ae/support/mobile-devices/galaxy-tab-s9-fe-and-tab-s9-fe-specification-and-feature/",
+    "https://www.samsung.com/ae/support/mobile-devices/what-to-do-if-your-galaxy-phone-wont-power-on-properly/",
+    "https://www.samsung.com/ae/support/mobile-devices/is-it-normal-for-galaxy-phone-to-heat-up/",
+    "https://www.samsung.com/ae/support/mobile-devices/-how-do-i-take-a-screenshot-on-my-galaxy-tablet/",
+    "https://www.samsung.com/ae/business/tablets/galaxy-tab-a/",
+    "https://www.samsung.com/ae/smartphones/galaxy-s26-ultra/specs/",
+    "https://www.samsung.com/ae/smartphones/galaxy-s26-ultra/buy/",
+    "https://www.samsung.com/ae/smartphones/galaxy-s26-ultra/compare/",
+    "https://www.samsung.com/ae/smartphones/galaxy-s26/",
+    "https://www.samsung.com/za/smartphones/galaxy-s26-ultra/reviews/",
+    "https://www.samsung.com/uk/smartphones/galaxy-s/galaxy-s26-ultra-black-512gb-enterprise-edition-sm-s948bzkgeeb/",
+    "https://www.samsung.com/us/smartphones/galaxy-s26-ultra/compare/",
+    "https://www.samsung.com/us/smartphones/t-mobile-plans/",
+    "https://www.samsung.com/us/mobile/galaxy/offers/adobe-lightroom/",
+    "https://www.samsung.com/us/mobile/galaxy/offers/lumafusion/",
+    "https://www.samsung.com/us/mobile/galaxy/offers/arcsite/",
+    "https://www.samsung.com/us/mobile/galaxy/offers/sirius-xm/",
+    "https://www.samsung.com/us/mobile/galaxy/offers/clipstudio/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-s26-ultra/buy/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-s26-fe/buy/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-s26-plus/buy/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-s26/buy/galaxy-s26-256gb-unlocked-sku-sm-s942uzwexaa/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-s26/buy/galaxy-s26-256gb-at-t-sku-sm-s942uzkeatt/",
+    "https://www.samsung.com/us/smartphones/galaxy-s26/compare/",
+    "https://www.samsung.com/us/smartphones/galaxy-s26/offers/",
+    "https://www.samsung.com/us/audio-sound/galaxy-buds4/buy/",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-s26-clear-magnet-case-transparent-sku-ef-cs942ctegus/",
+    "https://www.samsung.com/us/smartphones/galaxy-s26/logoURL",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-s/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-a/",
+    "https://www.samsung.com/us/mobile/galaxy/offers/amazon-music/",
+    "https://www.samsung.com/us/business/email-form/galaxy-z-fold6/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8/buy/galaxy-z-fold8-256gb-unlocked-sku-sm-f971ulvaxaa/",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-silicone-magnet-case-cream-sku-ef-ef971cwegus",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-fold8-silicone-magnet-case-pistachio-sku-ef-ef971cgegus",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-fold8-ultra/buy/galaxy-z-fold8-ultra-256gb-unlocked-sku-sm-f976uzvaxaa/",
+    "https://www.samsung.com/us/business/smartphones/galaxy-z-flip8/buy/galaxy-z-flip8-256gb-unlocked-sku-sm-f776uzkaxaa/",
+    "https://www.samsung.com/us/mobile-accessories/galaxy-z-flip8-silicone-ring-magnet-case-graphite-sku-ef-ef776cbegus",
+    "https://www.samsung.com/us/business/watches/galaxy-watch-ultra2/buy/galaxy-watch-ultra2-47mm-titanium-silver-lte-sku-sm-l715uzsaxaa/",
+    "https://www.samsung.com/us/watches/galaxy-watch9/buy/galaxy-watch9-44mm-graphite-bluetooth-sku-sm-l350nzkaxaa/",
+    "https://www.samsung.com/us/smartphones/galaxy-z-flip7/buy/",
+    "https://www.samsung.com/us/smartphones/galaxy-a27-5g/buy/galaxy-a27-5g-128gb-unlocked-sku-sm-a276uzkaxaa/",
+    "https://www.samsung.com/us/smartphones/galaxy-z/",
+    "https://www.samsung.com/us/smartphones/galaxy-s/",
+    "https://www.samsung.com/us/smartphones/galaxy-a/",
+    "https://www.samsung.com/us/smartphones/compare/",
+    "https://www.samsung.com/us/smartphones/galaxy-s26-fe/buy/",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s10-fe/",
+    "https://www.samsung.com/us/smartphones/galaxy-s25-fe/buy/",
+    "https://www.samsung.com/us/smartphones/galaxy-s25-fe/buy/galaxy-s25-fe-128gb-unlocked-sku-sm-s731uzwaxaa/",
+    "https://www.samsung.com/us/smartphones/galaxy-a57-5g/buy/galaxy-a57-5g-128gb-unlocked-sku-sm-a576udbaxaa/",
+    "https://www.samsung.com/us/smartphones/galaxy-a37-5g/buy/galaxy-a37-5g-128gb-unlocked-sku-sm-a376uzaaxaa/",
+    "https://www.samsung.com/us/smartphones/galaxy-a17-5g/buy/galaxy-a17-5g-128gb-unlocked-sku-sm-a176uzkaxaa/",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s/",
+    "https://www.samsung.com/us/tablets/galaxy-tab-a/",
+    "https://www.samsung.com/us/business/tablets/galaxy-tab-s12/buy/galaxy-tab-s12-plus-512gb-gray-wi-fi-sku-sm-x840nzaexar/",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s11/buy/galaxy-tab-s11-128gb-gray-wi-fi-sku-sm-x730nzaaxar",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s/galaxy-tab-s11-512gb-silver-wi-fi-sku-sm-x730nzsixar",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s10/buy/galaxy-tab-s10-plus-256gb-moonstone-gray-wi-fi-sku-sm-x820nzaaxar/",
+    "https://www.samsung.com/us/tablets/galaxy-tab-s10-fe/buy/galaxy-tab-s10-fe-plus-blue-256gb-sku-sm-x620nlbexar",
+    "https://www.samsung.com/us/smartphones/galaxy-s25-ultra/buy/galaxy-s25-edge-256gb-verizon-sku-sm-s937ulbavzw/"
   ]
 }
