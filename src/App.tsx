@@ -1843,11 +1843,28 @@ export default function App() {
     return [...m.entries()].sort((a, b) => /^Unknown/.test(a[0]) ? 1 : /^Unknown/.test(b[0]) ? -1 : b[0].localeCompare(a[0], undefined, { numeric: true }));
   }, [records, catalogEntries, knownByTac]);
 
+  /** One group per phone model: the same model code with different endings (SM-A376B, SM-A376B/DS) is one model. */
+  const modelKeyOf = (r: RecordItem) => exportModel(r.model) ? (modelCode4(r.model) || r.model.trim()) : 'unknown';
+  const modelGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; code: string; ids: string[] }>();
+    for (const record of records) {
+      const key = modelKeyOf(record);
+      let group = groups.get(key);
+      if (!group) {
+        const info = infoOf(record), known = info.series !== 'Unknown phones';
+        group = { key, label: known ? info.name : key === 'unknown' ? 'Unknown model' : key, code: modelCode4(record.model) ? `SM-${modelCode4(record.model)}` : '', ids: [] };
+        groups.set(key, group);
+      }
+      group.ids.push(record.id);
+    }
+    return [...groups.values()].sort((a, b) => (a.key === 'unknown' ? 1 : 0) - (b.key === 'unknown' ? 1 : 0) || b.ids.length - a.ids.length || a.label.localeCompare(b.label));
+  }, [records, catalogEntries, customModels, knownByTac]);
+
   const visible = records.filter(r =>
     (filter === 'All' ||
       (filter === 'Duplicates' ? r.duplicate :
         filter === 'Review' ? reviewStatus(r).includes('Needs review') :
-          infoOf(r).series === filter)) &&
+          (infoOf(r).series === filter || modelKeyOf(r) === filter))) &&
     (`${r.name} ${r.model} ${infoOf(r).name} ${r.imei} ${recordSerial(r)}`)
       .toLowerCase()
       .includes(query.toLowerCase()) &&
@@ -1963,11 +1980,11 @@ export default function App() {
   const bulkCropRows = () => selectedRows.length ? selectedRows : records.some(needsCropping) ? records.filter(needsCropping) : visible;
   const bulkCropLabel = selectedRows.length ? `${selectedRows.length} ticked` : records.some(needsCropping) ? `${records.filter(needsCropping).length} need cropping` : `all ${visible.length} shown`;
 
-  /** Send all the numbers as one numbered message (share sheet, or copied when sharing is unavailable). */
+  /** Send all the numbers as one message (share sheet, or copied when sharing is unavailable). */
   async function sendNumbers() {
     const rows = bulkTargets();
     if (!rows.length) return;
-    const text = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${index + 1}. ${[pair.imei1 || (serial ? '' : '—'), pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ')}`; }).join('\n');
+    const text = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${[pair.imei1 || (serial ? '' : '—'), pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ')}`; }).join('\n');
     if (typeof navigator.share === 'function') {
       try { await navigator.share({ text }); setToast('Numbers sent to the share menu.'); return; }
       catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
@@ -2889,7 +2906,7 @@ export default function App() {
           const extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
           return { name: `${index + 1}.${extension}`, blob };
         });
-        const list = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${index + 1}. ${[pair.imei1 && `IMEI 1 ${pair.imei1}`, pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ') || 'No number detected'}`; }).join('\r\n');
+        const list = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${[pair.imei1 && `IMEI 1 ${pair.imei1}`, pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ') || 'No number detected'}`; }).join('\r\n');
         files.push({ name: 'numbers.txt', blob: new Blob([list + '\r\n'], { type: 'text/plain;charset=utf-8' }) });
         const folderName = exportFolderName();
         const where = await saveFilesToFolder(files, folderName, folderChoice);
@@ -2953,12 +2970,12 @@ export default function App() {
   /** One message with every number, numbered in the same order as the pictures. */
   const bulkShareText=shareRows.map((row,index)=>{
     const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');
-    return `${index+1}. ${line||'No number detected'}`;
+    return `${line||'No number detected'}`;
   }).join('\n');
   function bulkPictureFiles(batch:RecordItem[]){
     return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}.jpg`,{type:entry.file.type}));
   }
-  const shareLine=(row:RecordItem,index:number)=>{const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');return `${index+1}. ${line||'No number detected'}`;};
+  const shareLine=(row:RecordItem,index:number)=>{const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');return `${line||'No number detected'}`;};
   /** One tap: a group of pictures plus their numbers (as the message text) in a single share. */
   function nativeShareTogether(batchIndex:number){
     if(sharing)return;
@@ -3449,7 +3466,7 @@ export default function App() {
 {!simpleView && (<>
               <select className="model-filter" aria-label="Filter scanned records by model" value={filter} onChange={event => setFilter(event.target.value)}>
                 <option value="All">All models</option>
-                {models.map(([model]) => <option key={model} value={model}>{model}</option>)}
+                {modelGroups.map(group => <option key={group.key} value={group.key}>{group.label} ({group.ids.length})</option>)}
                 <option value="Review">Needs review</option>
               </select>
 </>)}
@@ -3488,13 +3505,14 @@ export default function App() {
               All devices <b>{records.length}</b>
             </button>
 
-            {models.map(([m, n]) => (
+            {modelGroups.map(group => (
               <button
-                key={m}
-                className={filter === m ? 'active' : ''}
-                onClick={() => setFilter(m)}
+                key={group.key}
+                className={filter === group.key ? 'active' : ''}
+                onClick={() => setFilter(group.key)}
+                title={group.code || undefined}
               >
-                {m} <b>{n}</b>
+                {group.label} <b>{group.ids.length}</b>
               </button>
             ))}
 
@@ -3506,6 +3524,25 @@ export default function App() {
             </button>
 
           </div>}
+
+          {!simpleView && modelGroups.length > 0 && <details className="models-panel" open>
+            <summary>Models — move to a person <b>{modelGroups.length}</b></summary>
+            <ul className="models-list">
+              {modelGroups.map(group => <li key={group.key}>
+                <button type="button" className="model-name" onClick={() => setFilter(group.key)} aria-label={`Show ${group.label}`}>
+                  <strong>{group.label}</strong>
+                  <small>{group.code ? `${group.code} · ` : ''}{group.ids.length} phone{group.ids.length === 1 ? '' : 's'}</small>
+                </button>
+                <label className="move-to">Move all to
+                  <select aria-label={`Move all ${group.label} to`} value="" onChange={event => { if (event.target.value) moveRecords(group.ids, ownerOf(event.target.value)); }}>
+                    <option value="">Choose person</option>
+                    {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+                    <option value="unassigned">Unassigned</option>
+                  </select>
+                </label>
+              </li>)}
+            </ul>
+          </details>}
 
           <div className="people-controls">
             <div className="people-setup">
@@ -3956,7 +3993,7 @@ export default function App() {
        <div className="modal-head"><h2>{shareIds.length>1?`Share ${shareIds.length} records`:"Share record"}</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
        <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI (or serial if no IMEI)</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
        {bulkShare?<div className="share-bulk">
-        <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Pictures and numbers use the same 1, 2, 3 order.</p>
+        <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
         <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
         <strong>One tap · Pictures + numbers together</strong>
         <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareTogether(index)}>Share {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length} with numbers</button>)}</div>

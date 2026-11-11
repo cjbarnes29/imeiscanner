@@ -251,3 +251,12 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .settings-tabs{display:flex;gap:6px;flex-wrap:wrap}.settings-tabs button{min-height:44px;padding:0 14px;border:1px solid #35506a;border-radius:22px;background:#162638;color:#e8edf5;font:inherit;cursor:pointer}.settings-tabs button.active{background:#123b34;border-color:#4fd1a5;color:#9ff0d3}.device-missing{border-color:#b9863a!important}.settings-list small{color:#b3c4d1}
 
 .reset-entries{margin-top:10px;min-height:44px}
+.models-panel{margin:10px 0;padding:10px 12px;border:1px solid #253248;border-radius:12px;background:#0d1727}
+.models-panel>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px;font-weight:700}
+.models-panel>summary b{padding:1px 8px;border-radius:10px;background:#0b1625;color:#9ff0d3;font-size:12px}
+.models-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.models-list li{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #253248;border-radius:10px}
+.model-name{display:grid;gap:2px;text-align:left;background:none;border:0;color:#e8edf5;font:inherit;cursor:pointer;min-height:44px;padding:0 4px}
+.model-name small{color:#b3c4d1}
+.models-list .move-to{display:flex;align-items:center;gap:6px;color:#b3c4d1;font-size:14px}
+.models-list select{min-height:44px;padding:6px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;max-width:100%}
