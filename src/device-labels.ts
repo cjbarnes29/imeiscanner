@@ -1,22 +1,27 @@
 import {planImeiCrops,type OcrLine,type PixelFrame} from './scan-layout.ts';
+import {productBands} from './product-bands.ts';
+import {SERIAL_LABEL} from './serial.ts';
 
-export type DeviceAnchor={key:string;kind:1|2|3;value:string;box:OcrLine['bbox']};
+export type DeviceAnchor={key:string;kind:1|2|3;value:string;box:OcrLine['bbox'];approx?:boolean};
 export function deviceAnchors(lines:OcrLine[],width:number,height:number,frame?:PixelFrame):DeviceAnchor[] {
   const found:DeviceAnchor[]=[];
   for(const line of lines){
     const box=line.bbox;
     if(!box||![box.x0,box.y0,box.x1,box.y1].every(Number.isFinite)||box.x1<=box.x0||box.y1<=box.y0)continue;
-    const labels=[...line.text.toUpperCase().matchAll(/\bIM[E3][I1!|L]\s*(0?[12])\s*[:#.-]?\s*([0-9][0-9 -]{8,})|\b(?:S\s*[/I|]\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#.-]?\s*([A-Z0-9]{5,25})/g)];
+    const text=line.text.toUpperCase();
+    const labels=[...text.matchAll(new RegExp(String.raw`\bIM[E3][I1!|L]\s*(0?[12])\s*[:#.-]?\s*([0-9][0-9 -]{8,})|\b${SERIAL_LABEL}\s*[:#.-]?\s*((?=[A-Z0-9]*\d)[A-Z0-9]{5,25})|\bIM[E3][I1!|L]\s*(?:\/\s*MEID\s*)?[:#]\s*([0-9][0-9 -]{8,})`,'g'))];
     if(!labels.length){const bare=[...line.text.toUpperCase().matchAll(/\bIM[E3][I1!|L]\s*(0?[12])\b/g)];if(bare.length===1&&!found.some(a=>a.kind===Number(bare[0][1])&&Math.abs(a.box.x0-box.x0)<8&&Math.abs(a.box.y0-box.y0)<8))found.push({key:`label-${found.length+1}`,kind:Number(bare[0][1]) as 1|2,value:'',box:{...box}});}
     for(const match of labels){
-      const kind=(match[3]?3:Number(match[1])) as 1|2|3;
-      const value=match[3]||match[2].replace(/\D/g,'');
+      const kind=(match[3]?3:match[1]?Number(match[1]):1) as 1|2|3;
+      const value=match[3]||(match[2]||match[4]).replace(/\D/g,'');
       if(kind!==3&&value.length!==15)continue;
-      // A single OCR line containing two labels is spatially ambiguous; do not
-      // manufacture sub-line positions. It remains one region for manual review.
-      if(labels.length>1)continue;
-      const duplicate=found.some(old=>old.kind===kind&&old.value===value&&Math.abs(old.box.x0-box.x0)<Math.max(8,(box.x1-box.x0)*.15)&&Math.abs(old.box.y0-box.y0)<Math.max(8,(box.y1-box.y0)*.6));
-      if(!duplicate)found.push({key:`label-${found.length+1}`,kind,value,box:{...box}});
+      // One OCR line can hold several labels ("IMEI 1: … IMEI 2: …"). Split the
+      // line box by character offset so each label keeps its own horizontal span.
+      const split=labels.length>1,total=Math.max(1,text.length),index=labels.indexOf(match);
+      const start=match.index??0,end=labels[index+1]?.index??total;
+      const anchorBox=split?{...box,x0:box.x0+(box.x1-box.x0)*start/total,x1:box.x0+(box.x1-box.x0)*end/total}:{...box};
+      const duplicate=found.some(old=>old.kind===kind&&old.value===value&&Math.abs(old.box.x0-anchorBox.x0)<Math.max(8,(anchorBox.x1-anchorBox.x0)*.15)&&Math.abs(old.box.y0-box.y0)<Math.max(8,(box.y1-box.y0)*.6));
+      if(!duplicate)found.push({key:`label-${found.length+1}`,kind,value,box:anchorBox,...(split?{approx:true}:{})});
     }
   }
   const selected:DeviceAnchor[]=[];
@@ -38,17 +43,27 @@ export function deviceAnchors(lines:OcrLine[],width:number,height:number,frame?:
     const ca=component(a),cb=component(b);if(ca&&cb)return ca===cb;
     const dx=Math.max(0,a.box.x0-b.box.x1,b.box.x0-a.box.x1);
     const dy=Math.max(0,a.box.y0-b.box.y1,b.box.y0-a.box.y1);
-    const distance=Math.hypot(dx/width,dy/height);
-    return distance<.13;
+    // Scale with the printed text, not the frame: on a close-up a barcode between
+    // IMEI 1 and IMEI 2 is several hundred px, in a wide shot it is ~100 px.
+    const lineHeight=Math.max(a.box.y1-a.box.y0,b.box.y1-b.box.y0);
+    const reach=Math.max(Math.min(width,height)*.05,lineHeight*6);
+    return Math.hypot(dx,dy)<reach;
   };
+  // Labels already folded into a selected device still anchor their neighbours:
+  // S/N beside an absorbed IMEI 2 belongs to the same device as that IMEI 1.
+  const absorbed:DeviceAnchor[]=[];
+  const sameLine=(x:DeviceAnchor,y:DeviceAnchor)=>!!x.approx&&!!y.approx&&Math.abs(x.box.y0-y.box.y0)<2&&Math.abs(x.box.y1-y.box.y1)<2;
   for(const kind of [1,2,3])for(const anchor of found.filter(a=>a.kind===kind)){
     // IMEI 2 and S/N next to IMEI 1 belong to the same device. Repeated S/N
     // tear-off strips with the same value do not make additional products.
-    if(selected.some(other=>(other.kind<anchor.kind&&near(anchor,other))||(other.kind===3&&anchor.kind===3&&other.value===anchor.value)||(!!anchor.value&&other.kind===anchor.kind&&other.value===anchor.value&&component(anchor)>0&&component(anchor)===component(other))))continue;
+    const grouped=[...selected,...absorbed].some(other=>sameLine(anchor,other)||(other.kind<anchor.kind&&near(anchor,other)));
+    if(grouped||selected.some(other=>(other.kind===3&&anchor.kind===3&&other.value===anchor.value)||(!!anchor.value&&other.kind===anchor.kind&&other.value===anchor.value&&component(anchor)>0&&component(anchor)===component(other)))){absorbed.push(anchor);continue;}
     selected.push(anchor);
   }
   return selected;
 }
 export function planDeviceCrops(anchors:DeviceAnchor[],lines:OcrLine[],width:number,height:number,frame?:PixelFrame){
-  return planImeiCrops(anchors.map(a=>a.key),lines,width,height,frame,anchors);
+  const existing=planImeiCrops(anchors.map(a=>a.key),lines,width,height,frame,anchors);
+  const bands=frame?productBands(frame,lines):[];
+  return bands.length>=2&&bands.length>=existing.length?bands:existing;
 }

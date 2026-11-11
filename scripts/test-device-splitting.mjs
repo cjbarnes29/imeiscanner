@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile,unlink} from 'node:fs/promises';
+import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import ts from 'typescript';
 const options={target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022};
-const layout=new URL('../verification-layout.mjs',import.meta.url),devices=new URL('../verification-device-labels.mjs',import.meta.url);
-await writeFile(layout,ts.transpileModule(await readFile('src/scan-layout.ts','utf8'),{compilerOptions:options}).outputText);
-await writeFile(devices,ts.transpileModule((await readFile('src/device-labels.ts','utf8')).replace('./scan-layout.ts','./verification-layout.mjs'),{compilerOptions:options}).outputText);
+// Transpile every module the grouping code needs into a temp dir, rewriting
+// relative imports, so new imports never silently break this test again.
+const dir=await mkdtemp(join(tmpdir(),'imei-split-'));
+for(const name of ['serial','scan-layout','product-bands','device-labels']){
+ const source=(await readFile(`src/${name}.ts`,'utf8')).replace(/from '\.\/([\w-]+)(?:\.ts)?'/g,"from './$1.mjs'");
+ await writeFile(join(dir,name+'.mjs'),ts.transpileModule(source,{compilerOptions:options}).outputText);
+}
+const devices=pathToFileURL(join(dir,'device-labels.mjs'));
 try{
- const {deviceAnchors,planDeviceCrops}=await import(devices.href+'?t='+Date.now());
+ const {deviceAnchors,planDeviceCrops}=await import(devices.href);
  const line=(text,x,y)=>({text,bbox:{x0:x,y0:y,x1:x+240,y1:y+22}});
  const one=[line('IMEI 1: 490154203237518',200,180),line('IMEI 2: 356938035643809',200,210),line('S/N: RFGYC2L1PLK',200,240)];
  assert.equal(deviceAnchors(one,800,800).length,1,'One device with three identifiers stays one device');
@@ -26,5 +34,25 @@ try{
  const pale=new Uint8ClampedArray(800*800*4).fill(240);
  assert.equal(deviceAnchors([line('IMEI 1: 490154203237518',100,100),line('IMEI 2: 356938035643809',450,600)],800,800,{data:pale,width:800,height:800}).length,1,'Distant identifiers on one connected sticker stay together');
  assert.equal(deviceAnchors([line('IMEI 1:',100,100),line('IMEI 1:',100,600)],800,800).length,2,'Unreadable numbers do not hide distinct label anchors');
- console.log('PASS: IMEI/serial device grouping, duplicate OCR suppression, serial tear-off grouping, boundary-based IMEI 2/serial/mixed crops, and neighbour exclusion. These are generated fixtures, not physical camera tests.');
-}finally{await Promise.all([unlink(layout),unlink(devices)]);}
+
+ const A='490154203237518',B='356938035643809',C='353879234252633',D='358240051111110';
+ const wide=(text,y)=>line(text,100,y);wide;
+ assert.equal(deviceAnchors([line('IMEI 1: '+A+' IMEI 2: '+B,100,100),line('IMEI 1: '+C+' IMEI 2: '+D,100,500)].map(l=>({...l,bbox:{...l.bbox,x1:l.bbox.x0+500}})),800,800).length,2,'Two devices with IMEI 1 and IMEI 2 on the same OCR line');
+ assert.equal(deviceAnchors([{...line('IMEI 1: '+A+' IMEI 2: '+B+' S/N: RFGYC2L1PLK',100,100),bbox:{x0:100,y0:100,x1:700,y1:122}}],800,800).length,1,'One device with three labels on one OCR line');
+ assert.equal(deviceAnchors([line('Serial No: RFGYC2L1PLK',200,100),line('Serial No: R58M20ABCDE',200,500)],800,800).length,2,'Serial No labels');
+ assert.equal(deviceAnchors([line('SN: RFGYC2L1PLK',200,100),line('SN: R58M20ABCDE',200,500)],800,800).length,2,'SN labels');
+ assert.equal(deviceAnchors([line('IMEI: '+A,200,100),line('IMEI: '+C,200,500)],800,800).length,2,'Un-indexed IMEI labels');
+ // Scale-aware grouping: on a close-up, a barcode-sized gap between IMEI 1 and IMEI 2 is one device.
+ const big=(text,y)=>({text,bbox:{x0:200,y0:y,x1:700,y1:y+60}});
+ assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 2: '+B,420)],1000,1000).length,1,'Close-up IMEI 1/IMEI 2 with barcode gap stays one device');
+ assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 1: '+C,700)],1000,1000).length,2,'Close-up distinct devices still split');
+ // Serial extraction
+ const {extractSerial,serialReading,unindexedImeis}=await import(pathToFileURL(join(dir,'serial.mjs')).href);
+ for(const label of ['S/N: ','S/N ','SN: ','Serial No: ','Serial No. ','Serial Number: ','SERIAL: '])assert.equal(extractSerial(label+'RFGYC2L1PLK'),'RFGYC2L1PLK',label);
+ assert.equal(extractSerial('S/N: RFGYC2L1PLK\nS/N: R58M20ABCDE'),'','Conflicting serials stay blank for review');
+ assert.equal(extractSerial('SNOW1234567 on the box'),'','SN prefix of a word is not a label');
+ assert.equal(extractSerial('Serial number: MODELNAME'),'','Words without digits are not serials');
+ assert.deepEqual(unindexedImeis('IMEI: '+A),[A]);assert.deepEqual(unindexedImeis('IMEI 1: '+A),[]);
+ assert.equal(serialReading('SN: RFGYC2L1PLK').serial,'RFGYC2L1PLK');
+ console.log('PASS: IMEI/serial device grouping, duplicate OCR suppression, serial tear-off grouping, boundary-based IMEI 2/serial/mixed crops, and neighbour exclusion. Generated fixtures, not physical camera tests.');
+}finally{await rm(dir,{recursive:true,force:true});}

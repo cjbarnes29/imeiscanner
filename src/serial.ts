@@ -1,6 +1,19 @@
+// One shared serial-label pattern so OCR parsing, device splitting and the
+// server scanner cannot drift apart. Accepts S/N, SN, Serial, Serial No/Number.
+// The value must contain a digit so ordinary words after the label are ignored.
+export const SERIAL_LABEL = String.raw`(?:S\s*[/|I]\s*N|SN(?=[\s:#.-])|SERIAL(?:\s*(?:NUMBER|NO|NUM))?\.?|SER\.?\s*NO\.?)`;
+const SERIAL_VALUE = String.raw`\s*[:#.-]?\s*((?=[A-Z0-9]*\d)[A-Z0-9]{5,25})\b`;
+const SERIAL_NOISE = /^(MODEL|IMEI|SERIAL|NUMBER)$/;
+const serialValues = (text: string) => [...text.toUpperCase().matchAll(new RegExp(String.raw`\b${SERIAL_LABEL}${SERIAL_VALUE}`, 'g'))].map(m => m[1]).filter(v => !SERIAL_NOISE.test(v));
+
+/** Digits after a bare "IMEI:" label (no 1/2), e.g. Apple/Pixel style labels. Caller applies Luhn. */
+export function unindexedImeis(text: string): string[] {
+  const values = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:\/\s*MEID\s*)?[:#]\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(m => m[1].replace(/\D/g, ''));
+  return [...new Set(values)];
+}
+
 export function extractSerial(text: string): string {
-  const candidates = [...text.toUpperCase().matchAll(/\b(?:S\s*[/|I]\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#.-]?\s*([A-Z0-9]{5,25})\b/g)].map(m => m[1]);
-  const unique = [...new Set(candidates.filter(v => !/^(MODEL|IMEI|SERIAL|NUMBER)$/.test(v)))];
+  const unique = [...new Set(serialValues(text))];
   return unique.length === 1 ? unique[0] : '';
 }
 
@@ -22,6 +35,6 @@ export function serialLabelRegion(frame: {data:ArrayLike<number>;width:number;he
 }
 
 export function serialReading(text: string) {
- const values = [...text.toUpperCase().matchAll(/\b(?:S\s*[/|I]\s*N|SERIAL(?:\s+NUMBER)?)\s*[:#.-]?\s*([A-Z0-9]{5,25})\b/g)].map(m=>m[1]).filter(v=>! /^(MODEL|IMEI|SERIAL|NUMBER)$/.test(v));
+ const values = serialValues(text);
  return {serial:values[0] || '',serialNeedsReview:new Set(values).size>1 || values.some(value=>value.length<8)};
 }

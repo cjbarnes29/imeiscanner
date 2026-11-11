@@ -1,5 +1,5 @@
 import {deviceAnchors,planDeviceCrops} from '../src/device-labels.ts';
-import { extractSerial, serialLabelRegion, serialReading } from '../src/serial.ts';
+import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from '../src/serial.ts';
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
@@ -24,7 +24,8 @@ function preferredImei(text, firstOnly = false) {
     const valid = labelledNumbers(text, type).filter(luhnValid);
     if (valid.length === 1) return valid[0];
   }
-  return '';
+  const plain = unindexedImeis(text).filter(luhnValid);
+  return plain.length === 1 ? plain[0] : '';
 }
 
 function modelFrom(text, filename) {
@@ -94,10 +95,11 @@ export async function createScanner() {
           lines = ocrLines(second);
         }
       }
-      let anchors=deviceAnchors(lines,colorSize.width,colorSize.height);
-      let regions=[];
-      if(anchors.length>1){const {data,info:frameInfo}=await sharp(color).ensureAlpha().raw().toBuffer({resolveWithObject:true});const frame={data,width:frameInfo.width,height:frameInfo.height};anchors=deviceAnchors(lines,colorSize.width,colorSize.height,frame);regions=planDeviceCrops(anchors,lines,frameInfo.width,frameInfo.height,frame);}
-      const splitFailed=(anchors.length>1&&regions.length!==anchors.length)||(anchors.length<2&&imeis.length>1);
+      const {data:frameData,info:frameInfo}=await sharp(color).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+      const frame={data:frameData,width:frameInfo.width,height:frameInfo.height};
+      const anchors=deviceAnchors(lines,colorSize.width,colorSize.height,frame);
+      const regions=planDeviceCrops(anchors,lines,colorSize.width,colorSize.height,frame);
+      const splitFailed=(anchors.length>1&&regions.length<2)||(anchors.length<2&&regions.length<2&&imeis.length>1);
       const sourcePictureId = `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const selections = !splitFailed && regions.length ? regions : [null];
       const results = [];
@@ -105,9 +107,12 @@ export async function createScanner() {
         const photo = region ? await sharp(color).extract({ left: Math.max(0, Math.floor(region.x)), top: Math.max(0, Math.floor(region.y)), width: Math.min(colorSize.width - Math.floor(region.x), Math.ceil(region.width)), height: Math.min(colorSize.height - Math.floor(region.y), Math.ceil(region.height)) }).jpeg({ quality: 85 }).toBuffer() : color;
         let cropRaw = region ? (await worker.recognize(photo)).data.text || '' : raw;
         let imei = splitFailed ? '' : preferredImei(cropRaw);
-        if (region && !imei && mode !== 'fast') {
-          const improved = await sharp(photo).grayscale().linear(1.5, -40).jpeg().toBuffer();
+        if (region && !labelledNumbers(cropRaw,1).some(luhnValid) && mode !== 'fast') {
+          const improved = await sharp(photo).resize({width:2600,height:2600,fit:'inside'}).grayscale().normalise().sharpen().jpeg({quality:96}).toBuffer();
           cropRaw += `\n${(await worker.recognize(improved)).data.text || ''}`;
+          await worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK});
+          cropRaw += `\n${(await worker.recognize(improved)).data.text || ''}`;
+          await worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT});
           imei = preferredImei(cropRaw);
         }
         if (!imei && !extractSerial(cropRaw)) {

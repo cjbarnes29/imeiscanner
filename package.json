@@ -8,9 +8,12 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "laptop": "node server/index.mjs",
+    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs",
     "laptop:build": "npm run build && npm run laptop"
   },
   "dependencies": {
+    "@gutenye/ocr-browser": "^1.4.9",
+    "@gutenye/ocr-models": "^1.4.2",
     "@zxing/browser": "^0.2.1",
     "docx": "^9.15.3",
     "exceljs": "^4.4.0",

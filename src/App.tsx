@@ -1,7 +1,7 @@
 import { labelledBarcodeImeis, type PositionedBarcode } from './barcode-imei';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
-import { buildSharePackage } from './share-package';
-import { extractSerial, serialLabelRegion, serialReading } from './serial';
+import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
+import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
@@ -220,7 +220,11 @@ function extractPreferredImei(text: string) {
   if (first.length > 1) return '';
   const second = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid);
   const unique = [...new Set(second)];
-  return unique.length === 1 ? unique[0] : '';
+  if (unique.length === 1) return unique[0];
+  if (unique.length > 1) return '';
+  // Labels with no 1/2 (e.g. "IMEI: …") are accepted only when exactly one passes Luhn.
+  const plain = unindexedImeis(text).filter(luhnValid);
+  return plain.length === 1 ? plain[0] : '';
 }
 
 function hasMultipleDeviceText(raw:string) {
@@ -995,6 +999,9 @@ export default function App() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [shareIds,setShareIds]=useState<string[]>([]);
   const [shareStatus,setShareStatus]=useState('');
+  const [shareMode,setShareMode]=useState<ShareMode>('imei');
+  const [shareIndex,setShareIndex]=useState(0);
+  const [shareStep,setShareStep]=useState<'picture'|'text'>('picture');
   const [sharing,setSharing]=useState(false);
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
@@ -1598,12 +1605,12 @@ export default function App() {
         const mostlyWhite = looksMostlyWhite(color);
         let anchors=deviceAnchors(lines,sourceWidth,sourceHeight);
         const multiText=hasMultipleDeviceText(raw);
-        const frame=anchors.length>1?color.getContext('2d')?.getImageData(0,0,sourceWidth,sourceHeight):undefined;
+        const frame=color.getContext('2d')?.getImageData(0,0,sourceWidth,sourceHeight);
         if(frame)anchors=deviceAnchors(lines,sourceWidth,sourceHeight,frame);
         const regions=planDeviceCrops(anchors,lines,sourceWidth,sourceHeight,frame);
         let croppedPhotos=new Map<string,string>();
-        if(regions.length===anchors.length&&anchors.length>1){try{croppedPhotos=await createCroppedPhotos(color,regions,sourceWidth,sourceHeight);}catch(error){console.error('Unable to split labels',error);}}
-        const cropNeedsReview=(anchors.length>1&&croppedPhotos.size!==anchors.length)||(anchors.length<2&&multiText);
+        if(regions.length>1){try{croppedPhotos=await createCroppedPhotos(color,regions,sourceWidth,sourceHeight);}catch(error){console.error('Unable to split labels',error);}}
+        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&multiText);
         const cropKeys=croppedPhotos.size?[...croppedPhotos.keys()]:[''];
 
         const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
@@ -2077,20 +2084,24 @@ export default function App() {
     void performExport(rows);
   }
 
-  const shareRows = records.filter(row=>shareIds.includes(row.id));
-  function shareRecord(record:RecordItem) {setShareIds([record.id]);setShareStatus('');}
-  function copyShareMessage() {
-    const message=shareRows.map(row=>`Photo #${row.number} · ${row.pictureId}\nModel: ${exportModel(row.model)||'Not identified'}\nIMEI: ${row.imei||'Not detected'}${recordSerial(row)?'\nS/N: '+recordSerial(row):''}`).join('\n\n');
-    void copyText(message).then(ok=>setShareStatus(ok?'Message copied. Paste it into your chat.':'Copy failed. Try copying individual numbers below.'));
-  }
-  function sharePhotos() {
-    if(sharing)return;
-    try {
-      const payload=buildSharePackage(shareRows.map(row=>({number:row.number,pictureId:row.pictureId,model:exportModel(row.model),imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})));
-      if(!navigator.share||!navigator.canShare?.({files:payload.files})){setShareStatus('This browser cannot share these photos together. Try fewer photos, or use Copy message and the Download photo buttons below.');return;}
-      setSharing(true);setShareStatus('Choose WhatsApp, Messenger, Facebook or another available app.');
-      void navigator.share({...payload,title:'IMEI Lens device photos'}).then(()=>setShareStatus('Share request completed. Check that photos and numbers are present in your chat before sending.')).catch(error=>setShareStatus(error?.name==='AbortError'?'Sharing cancelled. Your records are still here.':'Sharing failed. Try fewer photos, or copy the message and attach downloaded photos.')).finally(()=>setSharing(false));
-    } catch(error) {setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
+  const shareRows=records.filter(row=>shareIds.includes(row.id));
+  const currentShareRow=shareRows[Math.min(shareIndex,Math.max(0,shareRows.length-1))];
+  const currentShareText=currentShareRow?shareNumberText({imei:currentShareRow.imei,serial:recordSerial(currentShareRow)},shareMode):'';
+  function openSharing(ids:string[]){setShareIds(ids);setShareIndex(0);setShareStep('picture');setShareStatus('');}
+  function shareRecord(record:RecordItem){openSharing([record.id]);}
+  function nativeShareStep(kind:'picture'|'text'){
+    if(sharing||!currentShareRow)return;
+    try{
+      let data:ShareData;
+      if(kind==='picture'){
+        const {entries}=buildSharePackage([{number:currentShareRow.number,pictureId:currentShareRow.pictureId,model:'',imei:currentShareRow.imei,serial:recordSerial(currentShareRow),photo:recordPhoto(currentShareRow)}],shareMode);
+        data={files:[entries[0].file]};
+        if(!navigator.canShare?.(data)){setShareStatus('Picture sharing is unavailable in this browser. Download the picture, attach it in your chat, then continue to text.');return;}
+      }else{if(!currentShareText)return;data={text:currentShareText};}
+      if(!navigator.share){setShareStatus('Sharing is unavailable. Use Download picture and Copy text.');return;}
+      setSharing(true);
+      void navigator.share(data).then(()=>setShareStatus('Returned from the share menu. Check the same conversation before continuing; delivery is not confirmed.')).catch(error=>setShareStatus(error?.name==='AbortError'?'Share menu cancelled. Nothing is marked as sent.':'Could not open sharing. Use Download picture or Copy text.')).finally(()=>setSharing(false));
+    }catch(error){setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
   }
 
   function saveDirectFile(blob: Blob, filename: string) {
@@ -2589,7 +2600,7 @@ export default function App() {
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
-              <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{setShareIds(selectedRows.map(row=>row.id));setShareStatus('');}}>Share selected ({selectedRows.length})</button>
+              <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{openSharing(selectedRows.map(row=>row.id));}}>Share selected ({selectedRows.length})</button>
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
@@ -2944,13 +2955,13 @@ export default function App() {
         </div>
       )}
 
-      {shareIds.length>0&&<div className="modal-backdrop share-backdrop"><section className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share device photos">
-        <div className="modal-head"><h2>Share {shareRows.length} record(s)</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
-        <p>1. Share photos + numbers. 2. Choose WhatsApp, Messenger, Facebook or another app. 3. Check the photos and caption, then send.</p>
-        <p>If your chat app leaves out the caption, use Copy message here and paste it before sending. Numbers stay matched by photo number and filename.</p>
-        <div className="share-toolbar"><button className="primary" disabled={!shareRows.length||sharing} onClick={sharePhotos}>{sharing?'Sharing…':'Share photos + numbers'}</button><button className="subtle-btn" disabled={!shareRows.length} onClick={copyShareMessage}>Copy message</button><button className="subtle-btn" disabled={!shareRows.length} onClick={()=>saveDirectFile(new Blob([createPhotoGalleryHtml(shareRows,personGroups)],{type:'text/html;charset=utf-8'}),'device-photos-copy-and-download.html')}>Download viewer with Copy / Download buttons</button></div>
-        <p role="status">{shareStatus}</p><p>Downloads are saved by your browser. Gallery visibility and captions depend on your phone and the receiving app. Share up to 50 photos / 100 MB per batch.</p>
-        <div className="share-records">{shareRows.map(row=><article key={row.id}><img src={recordPhoto(row)} alt={`Photo #${row.number}`}/><div><strong>Photo #{row.number} · {row.pictureId}</strong><p>{exportModel(row.model)||'Model not identified'}</p><p>IMEI: {row.imei||'Not detected'}{recordSerial(row)&&` · S/N: ${recordSerial(row)}`}</p><button className="subtle-btn" disabled={!row.imei} onClick={()=>void copyText(row.imei).then(ok=>setShareStatus(ok?`IMEI for photo #${row.number} copied.`:'Copy failed.'))}>Copy IMEI</button>{recordSerial(row)&&<button className="subtle-btn" onClick={()=>void copyText(recordSerial(row)).then(ok=>setShareStatus(ok?'Serial copied.':'Copy failed.'))}>Copy S/N</button>}<button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(row)),photoFilename(row))}>Download photo</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds(old=>old.filter(id=>id!==row.id))}>Remove from sharing</button></div></article>)}</div>
+      {shareIds.length>0&&<div className="modal-backdrop share-backdrop"><section className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share selected records">
+       <div className="modal-head"><h2>Share selected records</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
+       <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
+       <p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>
+       {currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
+       {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
+       <p role="status">{shareStatus}</p>
       </section></div>}
       {toast && (
         <div className="toast">

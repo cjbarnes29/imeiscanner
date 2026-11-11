@@ -60,15 +60,15 @@ try {
   assert.ok(f.recordsCsv([serialOnly],new Map(),peopleForTest(),false,'simple').includes('RFGYC2L1PLK'));
   function peopleForTest(){return [{id:'p',label:'Person 1',name:''}];}
   const share=f.buildSharePackage([{number:3,pictureId:'PIC-ONE',model:'Watch',imei:'490154203237518',serial:'',photo:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}]);
-  assert.equal(share.files.length,2);
-  assert.equal(await share.files[0].text(),'CROPONE');
-  assert.equal(await share.files[1].text(),'CROP2TWO');
-  assert.ok(share.files[0].name.includes('490154203237518_PIC-ONE'));
-  assert.ok(share.files[1].name.includes('000ABC123_PIC-TWO'));
-  assert.ok(share.text.includes(share.files[0].name)&&share.text.includes(share.files[1].name));
-  assert.ok(share.text.includes('IMEI: Not detected\nS/N: 000ABC123'));
+  assert.equal(share.entries.length,2);
+  assert.equal(await share.entries[0].file.text(),'CROPONE');
+  assert.equal(await share.entries[1].file.text(),'CROP2TWO');
+  assert.equal(share.entries[0].text,'490154203237518');
+  assert.equal(share.entries[1].text,'','Serial is not shared in IMEI-only mode');
+  const withSerial=f.buildSharePackage([{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}],'imei_serial');
+  assert.equal(withSerial.entries[0].text,'000ABC123');
   assert.throws(()=>f.buildSharePackage([]),/Select at least one/);
-  assert.throws(()=>f.buildSharePackage(Array(51).fill({})),/50 photos/);
+  assert.throws(()=>f.buildSharePackage(Array(51).fill({})),/up to 50 records/);
   assert.throws(()=>f.buildSharePackage([{photo:'blob:temporary',pictureId:'bad'}]),/unavailable/);
   assert.equal(f.recordPhoto(row),row.cropDataUrl);
   assert.equal(f.markDuplicateRecords([row])[0],row, 'Unchanged records retain identity for storage performance');
@@ -87,5 +87,9 @@ try {
   const sheet=workbook.getWorksheet('All IMEIs');
   assert.equal(sheet.getCell('A2').value,first); assert.equal(sheet.getCell('A3').value,'');
   assert.equal(sheet.getCell('B3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
+  assert.equal(f.extractPreferredImei('IMEI: 490154203237518'),'490154203237518','Un-indexed IMEI label');
+  assert.equal(f.extractPreferredImei('IMEI: 490154203237519'),'','Un-indexed IMEI must pass Luhn');
+  assert.equal(f.extractPreferredImei('IMEI 1: 490154203237518\nIMEI: 356938035643809'),'490154203237518','Indexed IMEI wins over un-indexed');
+  assert.equal(f.recordSerial({raw:'SN: RFGYC2L1PLK'}),'RFGYC2L1PLK');
   console.log('PASS: camera/upload IMEI 1 then IMEI 2 priority, positioned barcode matching, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
 } finally { await unlink(runtime); }
