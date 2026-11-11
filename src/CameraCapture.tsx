@@ -23,6 +23,13 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
   const [capturing,setCapturing] = useState(false);
   const [zoom,setZoom] = useState(1);
   const [zoomMax,setZoomMax] = useState(1);
+  const [zoomMin,setZoomMin] = useState(1);
+  const [photoMax,setPhotoMax] = useState<{w:number;h:number}>();
+  const [fullSize,setFullSize] = useState(()=>localStorage.getItem('imei-camera-full-size')!=='off');
+  const [exposure,setExposure] = useState(0);
+  const [exposureCap,setExposureCap] = useState<{min:number;max:number;step:number}>();
+  const [frameInfo,setFrameInfo] = useState('');
+  useEffect(()=>{localStorage.setItem('imei-camera-full-size',fullSize?'on':'off');},[fullSize]);
   const alive = useRef(true);
   const [photos,setPhotos]=useState<File[]>([]);
   const submitted=useRef(false);
@@ -45,16 +52,33 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
   useEffect(() => {
     let cancelled = false;
     let current: MediaStream | undefined;
-    setReady(false);setError('');setHasTorch(false);setTorch(false);setZoomMax(1);
+    setReady(false);setError('');setHasTorch(false);setTorch(false);setZoomMax(1);setZoomMin(1);setPhotoMax(undefined);setExposureCap(undefined);setExposure(0);setFrameInfo('');
     if (!navigator.mediaDevices?.getUserMedia) { setError('Camera access requires HTTPS and a supported browser. Photo upload is still available.'); return; }
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false }).then(async media => {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 4032 }, height: { ideal: 3024 } }, audio: false }).then(async media => {
       if (cancelled) { media.getTracks().forEach(track => track.stop()); return; }
       current = media; stream.current = media;
       const track = media.getVideoTracks()[0];
       const caps = (track.getCapabilities?.() || {}) as MediaTrackCapabilities & { torch?: boolean; focusMode?: string[] };
       setHasTorch(!!caps.torch);
       const zoomCap = (caps as MediaTrackCapabilities & {zoom?:{min:number;max:number}}).zoom;
-      if(zoomCap && zoomCap.min<=1){setZoomMax(zoomCap.max);setZoom(1);}
+      if(zoomCap && zoomCap.max>zoomCap.min){setZoomMin(zoomCap.min);setZoomMax(zoomCap.max);setZoom((track.getSettings() as MediaTrackSettings & {zoom?:number}).zoom??Math.max(1,zoomCap.min));}
+      // Match what you see to what is saved: phones take photos at the sensor's full shape (usually 4:3) but
+      // often stream a cropped 16:9 preview. Ask the phone for its largest photo size and make the preview the same shape.
+      const Still=(window as any).ImageCapture;
+      if(Still){try{
+        const options=await new Still(track).getPhotoCapabilities();
+        const w=options.imageWidth?.max,h=options.imageHeight?.max;
+        if(w&&h){
+          setPhotoMax({w,h});
+          const now=track.getSettings(),shape=(x:number,y:number)=>Math.max(x,y)/Math.min(x,y);
+          if(now.width&&now.height&&Math.abs(shape(w,h)-shape(now.width,now.height))/shape(w,h)>0.02){
+            const portrait=now.height>now.width,ratio=portrait?Math.min(w,h)/Math.max(w,h):Math.max(w,h)/Math.min(w,h);
+            await track.applyConstraints({aspectRatio:ratio,width:{ideal:portrait?Math.min(w,h):Math.max(w,h)},height:{ideal:portrait?Math.max(w,h):Math.min(w,h)}}).catch(()=>{});
+          }
+        }
+        const ev=options.exposureCompensation;
+        if(ev&&ev.max>ev.min)setExposureCap({min:ev.min,max:ev.max,step:ev.step||0.1});
+      }catch{/* Older browsers: the preview keeps the shape the browser chose. */}}
       if (caps.focusMode?.includes('continuous')) await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => {});
       if (video.current) { video.current.srcObject = media; await video.current.play(); }
       setReady(true);
@@ -65,7 +89,7 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
   async function takeExposure():Promise<Blob> {
     const track=stream.current?.getVideoTracks()[0];
     const Still=(window as any).ImageCapture;
-    if(Still&&track){try{return await new Still(track).takePhoto();}catch{/* Fall back to a sharp video frame. */}}
+    if(Still&&track){try{return await new Still(track).takePhoto(fullSize&&photoMax?{imageWidth:photoMax.w,imageHeight:photoMax.h}:undefined);}catch{/* Fall back to a sharp video frame. */}}
     const source=video.current;
     if(!source?.videoWidth)throw new Error('Camera is not ready. Try Phone camera below.');
     const canvas=document.createElement('canvas');canvas.width=source.videoWidth;canvas.height=source.videoHeight;
@@ -81,6 +105,8 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
       for(let i=0;i<burst;i++){
         if(!alive.current||stopBurst.current||photos.length+i>=50)break;
         const blob=await takeExposure();if(!alive.current)return;
+        if(!alive.current)return;
+        createImageBitmap(blob).then(bitmap=>{if(alive.current)setFrameInfo(`Last photo ${bitmap.width}×${bitmap.height}`);bitmap.close();}).catch(()=>{});
         if(blob.size>20*1024*1024)throw new Error('This photo is too large. Use a lower resolution in Phone camera.');
         if(burst===1)setPhoto(blob);
         else {const file=new File([blob],`camera-${crypto.randomUUID()}.jpg`,{type:blob.type||'image/jpeg'});setPhotos(old=>[...old,file]);setBarcodeStatus(`Burst: ${i+1} of ${burst} saved. Review the thumbnails before scanning.`);}
@@ -99,7 +125,9 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
     <div className="review-photo-stage"><video ref={video} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', display: photo ? 'none' : 'block' }} />{preview && <img className="preview" src={preview} alt="Captured label" />}</div>
     {photos.length>0&&<div className="camera-batch" aria-label="Saved camera photos">{photos.map((file,index)=><div key={file.name}><CameraThumbnail file={file}/><button onClick={()=>setPhotos(old=>old.filter(item=>item!==file))} aria-label={`Remove camera photo ${index+1}`}>× {index+1}</button></div>)}</div>}
     <p role="status">{photos.length} kept{photo?' + 1 current photo':''} · Not scanned yet</p>
-    {!photo && <div className="camera-options"><button className="subtle-btn" disabled={capturing} onClick={()=>setFacing(facing==='environment'?'user':'environment')}>Switch camera</button><label>Burst <select aria-label="Burst count" disabled={capturing} value={burst} onChange={e=>setBurst(Number(e.target.value))}><option value={1}>Single photo</option><option value={3}>3 photos</option><option value={5}>5 photos</option></select></label><label>Timer <select disabled={capturing} value={timer} onChange={e=>setTimer(Number(e.target.value))}><option value={0}>Off</option><option value={3}>3 seconds</option><option value={5}>5 seconds</option></select></label>{zoomMax>1&&<label>Zoom {zoom.toFixed(1)}× <input aria-label="Camera zoom" type="range" min={1} max={zoomMax} step={0.1} value={zoom} onChange={async e=>{const value=Number(e.target.value);try{await stream.current?.getVideoTracks()[0].applyConstraints({advanced:[{zoom:value} as MediaTrackConstraintSet]});setZoom(value);}catch{setError('Zoom is unavailable. Move closer to the label.');}}}/></label>}</div>}
+    {!photo && <div className="camera-options"><button className="subtle-btn" disabled={capturing} onClick={()=>setFacing(facing==='environment'?'user':'environment')}>Switch camera</button><label>Burst <select aria-label="Burst count" disabled={capturing} value={burst} onChange={e=>setBurst(Number(e.target.value))}><option value={1}>Single photo</option><option value={3}>3 photos</option><option value={5}>5 photos</option></select></label><label>Timer <select disabled={capturing} value={timer} onChange={e=>setTimer(Number(e.target.value))}><option value={0}>Off</option><option value={3}>3 seconds</option><option value={5}>5 seconds</option></select></label>{zoomMax>zoomMin&&<label>Zoom {zoom.toFixed(1)}× <input aria-label="Camera zoom" type="range" min={zoomMin} max={zoomMax} step={0.1} value={zoom} onChange={async e=>{const value=Number(e.target.value);try{await stream.current?.getVideoTracks()[0].applyConstraints({advanced:[{zoom:value} as MediaTrackConstraintSet]});setZoom(value);}catch{setError('Zoom is unavailable. Move closer to the label.');}}}/></label>}</div>}
+    {!photo&&(photoMax||exposureCap)&&<div className="camera-options">{photoMax&&<label><input type="checkbox" checked={fullSize} disabled={capturing} onChange={e=>setFullSize(e.target.checked)}/> Full phone resolution ({photoMax.w}×{photoMax.h})</label>}{exposureCap&&<label>Brightness {exposure>0?'+':''}{exposure.toFixed(1)} <input aria-label="Camera brightness" type="range" min={exposureCap.min} max={exposureCap.max} step={exposureCap.step} value={exposure} onChange={async e=>{const value=Number(e.target.value);try{await stream.current?.getVideoTracks()[0].applyConstraints({advanced:[{exposureCompensation:value} as MediaTrackConstraintSet]});setExposure(value);}catch{setError('Brightness is unavailable on this camera.');}}}/></label>}</div>}
+    {frameInfo&&<p role="status">{frameInfo}</p>}
     {countdown>0&&<div className="camera-countdown" role="status">{countdown}</div>}
     <div className="review-fixed-actions">
       {capturing&&<button className="subtle-btn" onClick={()=>{stopBurst.current=true;setCountdown(0);}}>Stop capture</button>}
