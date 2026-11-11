@@ -115,3 +115,7 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .modal>.modal-head .subtle-btn,.modal>.modal-head button{min-height:44px;min-width:44px}
 /* Floating shortcut back to the top of a long list. */
 .back-to-top{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:max(76px,calc(env(safe-area-inset-bottom) + 64px));z-index:7;min-height:48px;min-width:56px;padding:0 14px;border:1px solid #4fd1a5;border-radius:24px;background:#123b34;color:#9ff0d3;font:inherit;font-weight:700;box-shadow:0 6px 20px #0007;cursor:pointer}
+
+/* Guided crop: boxes already drawn stay on the photo, numbered, until all are read together. */
+.crop-box-done{position:absolute;border:3px solid #ffd166;background:#ffd16622;border-radius:4px;pointer-events:none}
+.crop-box-done span{position:absolute;left:4px;top:4px;min-width:26px;height:26px;padding:0 6px;display:grid;place-items:center;border-radius:13px;background:#ffd166;color:#241a00;font-weight:800;font-size:14px}
