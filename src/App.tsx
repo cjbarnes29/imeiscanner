@@ -13,7 +13,7 @@ import {
   UploadCloud, ScanLine, Download, Search, Trash2,
   CheckCircle2, AlertTriangle, Copy, Smartphone, Image as ImageIcon,
   X, LoaderCircle, ExternalLink, RefreshCw, Eye,
-  CloudUpload, Camera, Pencil
+  CloudUpload, Camera, Pencil, Share2
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
@@ -2940,6 +2940,18 @@ export default function App() {
   function bulkPictureFiles(batch:RecordItem[]){
     return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}.jpg`,{type:entry.file.type}));
   }
+  const shareLine=(row:RecordItem,index:number)=>{const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');return `${index+1}. ${line||'No number detected'}`;};
+  /** One tap: a group of pictures plus their numbers (as the message text) in a single share. */
+  function nativeShareTogether(batchIndex:number){
+    if(sharing)return;
+    try{
+      const batch=shareBatches[batchIndex];
+      const data:ShareData={files:bulkPictureFiles(batch),text:batch.map((row,i)=>shareLine(row,batchIndex*SHARE_BATCH+i)).join('\n')};
+      if(!navigator.share||!navigator.canShare?.(data)){setShareStatus('This browser cannot send pictures and text together. Use Step 1 and Step 2 below.');return;}
+      setSharing(true);
+      void navigator.share(data).then(()=>setShareStatus(`Records ${batchIndex*SHARE_BATCH+1}-${batchIndex*SHARE_BATCH+batch.length} sent to the share menu. If a chat app dropped the numbers, use Step 2 below. Delivery is not confirmed.`)).catch(error=>setShareStatus(error?.name==='AbortError'?'Share menu cancelled. Nothing is marked as sent.':'Could not open sharing. Use Step 1 and Step 2 below.')).finally(()=>setSharing(false));
+    }catch(error){setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
+  }
   function nativeShareBulk(kind:'pictures'|'text',batchIndex=0){
     if(sharing)return;
     try{
@@ -2954,7 +2966,7 @@ export default function App() {
     }catch(error){setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
   }
   async function downloadBulkPictures(batch:RecordItem[]){
-    try{for(const file of bulkPictureFiles(batch)){saveDirectFile(file,file.name);await new Promise(resolve=>setTimeout(resolve,400));}setShareStatus(`${batch.length} picture(s) downloaded. Attach them in your chat.`);}
+    try{for(let start=0;start<batch.length;start+=SHARE_BATCH){for(const file of bulkPictureFiles(batch.slice(start,start+SHARE_BATCH))){saveDirectFile(file,file.name);await new Promise(resolve=>setTimeout(resolve,400));}}setShareStatus(`${batch.length} picture(s) downloaded. Attach them in your chat.`);}
     catch(error){setShareStatus(error instanceof Error?error.message:'Could not download the pictures.');}
   }
   function shareRecord(record:RecordItem){openSharing([record.id]);}
@@ -3544,6 +3556,7 @@ export default function App() {
                 <button className="subtle-btn" onClick={() => { const person = personGroups.find(item => item.id === personFilter); if (person) { setEditingPersonId(person.id); setPersonDraft(person.name); } }}><Pencil size={14} /> Rename</button>
                 <button className="subtle-btn danger" disabled={personGroups.length < 2} title={personGroups.length < 2 ? 'Keep at least one person' : undefined} onClick={() => setDeletePersonId(personFilter)}><Trash2 size={14} /> Delete person</button>
               </>}
+              <button className="primary" disabled={!visible.length} onClick={() => openSharing(visible.slice(0, 200).map(row => row.id))}><Share2 size={14} /> Share {personFilter === UNASSIGNED_FILTER ? 'Unassigned' : personNameOf(personFilter)} ({Math.min(visible.length, 200)})</button>
               <label className="move-to">Move all to
                 <select aria-label="Move all shown IMEIs to" value="" disabled={!visible.length} onChange={event => { if (event.target.value) moveRecords(visible.map(row => row.id), ownerOf(event.target.value)); }}>
                   <option value="">{visible.length ? `Choose (${visible.length})` : 'Nothing to move'}</option>
@@ -3923,6 +3936,9 @@ export default function App() {
        {bulkShare?<div className="share-bulk">
         <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Pictures and numbers use the same 1, 2, 3 order.</p>
         <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
+        <strong>One tap · Pictures + numbers together</strong>
+        <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareTogether(index)}>Share {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length} with numbers</button>)}</div>
+        <p className="copy-hint">Sends each group of {SHARE_BATCH} pictures with their numbers as the message. Some chat apps keep only the pictures; then use Step 1 and Step 2.</p>
         <strong>Step 1 · Pictures</strong>
         <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareBulk('pictures',index)}>Share pictures {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length}</button>)}</div>
         <button className="subtle-btn" onClick={()=>void downloadBulkPictures(shareRows)}>Download all {shareRows.length} pictures instead</button>
