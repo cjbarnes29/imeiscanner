@@ -111,6 +111,8 @@ try {
     const files=await f.createImeiPhotoFiles([{...row,serial:'R58M20ABCDE',raw:`IMEI 1: ${first}\nIMEI 2: ${second}`,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{...serialOnly,cropDataUrl:'data:image/jpeg;base64,Q1JPUDJUV08='}]);
     assert.equal(files[0].name,'imei-pictures.xlsx');assert.equal(files.length,3,'Workbook plus one picture per row, no ZIP');
     assert.ok(files.every(file=>!file.name.includes('/')),'All files sit in one folder');
+    assert.deepEqual(files.slice(1).map(file=>file.name),['1.jpg','2.jpg'],'Pictures are named by number only');
+    assert.equal(f.photoFilename({number:7,imei:first,name:'x.jpg',cropDataUrl:'data:image/jpeg;base64,AA=='}),'7.jpg','Single downloads are named by record number only');
     const named=name=>files.find(file=>file.name===name);
     const book=new ExcelJS.Workbook();await book.xlsx.load(await files[0].blob.arrayBuffer());
     assert.equal(book.worksheets.length,1,'One sheet only');

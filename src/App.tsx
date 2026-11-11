@@ -681,10 +681,10 @@ function recordsCsv(
   return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
 }
 
-/** Picture file name: record number first, then the IMEI (or serial), e.g. 3_351973130210365.jpg. */
+/** Picture file name: just the record number, e.g. 3.jpg. */
 function photoFilename(r: RecordItem) {
   const ext = (r.cropDataUrl ? 'jpg' : r.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-  return `${r.number}_${(r.imei || recordSerial(r) || 'IMEI_NOT_FOUND').replace(/[^A-Za-z0-9_-]/g, '_')}.${ext}`;
+  return `${r.number}.${ext}`;
 }
 
 async function workbookImage(r: RecordItem, maxSize = 1200) {
@@ -928,9 +928,8 @@ async function createImeiPhotoFiles(rows: RecordItem[], webLinks = true): Promis
   const used = new Set<string>();
   for (const [index, record] of rows.entries()) {
     // No '#', spaces or slashes: Excel treats '#' in a link as a jump inside the workbook.
-    const label = (record.imei || recordSerial(record) || 'no-imei').replace(/[^A-Za-z0-9_-]/g, '_');
-    let name = `${index + 1}_${label}.jpg`;
-    for (let n = 2; used.has(name); n++) name = `${index + 1}_${label}_${n}.jpg`;
+    // Plain numbers, matching the row order: 1.jpg, 2.jpg, ...
+    const name = `${index + 1}.jpg`;
     used.add(name);
     pictures.push({ name, blob: dataUrlBlob(recordPhoto(record)) });
     // Blank cells when a number was not detected.
@@ -2284,18 +2283,17 @@ export default function App() {
     setBulkBusy(true);
     void (async () => {
       try {
-        const label = (row: RecordItem) => (row.imei || recordSerial(row) || 'IMEI_NOT_FOUND').replace(/[^A-Za-z0-9_-]/g, '_');
         const files: ExportFile[] = rows.map((row, index) => {
           const blob = dataUrlBlob(recordPhoto(row));
           const extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
-          return { name: `${index + 1}_${label(row)}.${extension}`, blob };
+          return { name: `${index + 1}.${extension}`, blob };
         });
         const list = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${index + 1}. ${[pair.imei1 && `IMEI 1 ${pair.imei1}`, pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ') || 'No number detected'}`; }).join('\r\n');
         files.push({ name: 'numbers.txt', blob: new Blob([list + '\r\n'], { type: 'text/plain;charset=utf-8' }) });
         const folderName = exportFolderName();
         const where = await saveFilesToFolder(files, folderName, folderChoice);
         setToast(where === 'android' ? 'Choose a folder to save into.' : where === 'picked' ? `Saved ${rows.length} pictures in folder "${folderName}".` : `Downloading ${rows.length} pictures into your Downloads folder. Allow multiple downloads if asked.`);
-        setDownloadStatus(where === 'android' ? `Choose where to create the folder "${folderName}" with ${rows.length} numbered pictures and numbers.txt.` : where === 'picked' ? `Saved folder "${folderName}": ${rows.length} numbered pictures plus numbers.txt.` : `${rows.length} numbered pictures and numbers.txt downloaded into Downloads. Files are named 1_IMEI.jpg, 2_IMEI.jpg and so on.`);
+        setDownloadStatus(where === 'android' ? `Choose where to create the folder "${folderName}" with ${rows.length} numbered pictures and numbers.txt.` : where === 'picked' ? `Saved folder "${folderName}": ${rows.length} numbered pictures plus numbers.txt.` : `${rows.length} numbered pictures and numbers.txt downloaded into Downloads. Files are named 1.jpg, 2.jpg and so on.`);
       } catch (error) {
         setToast(error instanceof Error ? error.message : 'Could not download the pictures.');
       } finally { setBulkBusy(false); }
@@ -2357,7 +2355,7 @@ export default function App() {
     return `${index+1}. ${line||'No number detected'}`;
   }).join('\n');
   function bulkPictureFiles(batch:RecordItem[]){
-    return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}_${(batch[index].imei||recordSerial(batch[index])||'picture').replace(/[^A-Za-z0-9_-]/g,'_')}.jpg`,{type:entry.file.type}));
+    return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}.jpg`,{type:entry.file.type}));
   }
   function nativeShareBulk(kind:'pictures'|'text',batchIndex=0){
     if(sharing)return;
@@ -3278,13 +3276,13 @@ export default function App() {
         <textarea aria-label="All numbers to share" readOnly value={bulkShareText}/>
         <div className="share-toolbar"><button className="primary" disabled={sharing||!bulkShareText} onClick={()=>nativeShareBulk('text')}>Share all numbers</button><button className="subtle-btn" onClick={()=>void copyText(bulkShareText).then(ok=>setShareStatus(ok?'Numbers copied. Paste them as a new message.':'Copy failed. Select and copy the text above.'))}>Copy numbers</button></div>
         <strong>Or copy one by one</strong>
-        <p className="copy-hint">Tap a number to copy it. It gets a tick so you know where you are. Picture files are named with the same number: {shareRows.slice(0,2).map((row,index)=>`${index+1}_${(row.imei||recordSerial(row)||'picture').replace(/[^A-Za-z0-9_-]/g,'_')}.jpg`).join(', ')}…</p>
+        <p className="copy-hint">Tap a number to copy it. It gets a tick so you know where you are. Picture files are named with the same number: 1.jpg, 2.jpg, 3.jpg…</p>
         <ol className="copy-list">{shareRows.map((row,index)=>{const pair=recordImeiPair(row),serial=recordSerial(row);return <li key={row.id}><img src={recordPhoto(row)} alt={`Picture ${index+1}`}/><span className="copy-num">{index+1}</span><div className="copy-values">
           {pair.imei1&&<button type="button" className={copiedKeys.includes(row.id+'1')?'copied':''} onClick={()=>copyValue(row.id+'1',pair.imei1)}>{copiedKeys.includes(row.id+'1')?'✓ ':''}IMEI 1 · {pair.imei1}</button>}
           {pair.imei2&&<button type="button" className={copiedKeys.includes(row.id+'2')?'copied':''} onClick={()=>copyValue(row.id+'2',pair.imei2)}>{copiedKeys.includes(row.id+'2')?'✓ ':''}IMEI 2 · {pair.imei2}</button>}
           {serial&&<button type="button" className={copiedKeys.includes(row.id+'s')?'copied':''} onClick={()=>copyValue(row.id+'s',serial)}>{copiedKeys.includes(row.id+'s')?'✓ ':''}S/N · {serial}</button>}
           {!pair.imei1&&!pair.imei2&&!serial&&<em>No number detected</em>}</div>
-          <button type="button" className="subtle-btn copy-save" aria-label={`Download picture ${index+1}`} onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(row)),`${index+1}_${(row.imei||serial||'picture').replace(/[^A-Za-z0-9_-]/g,'_')}.jpg`)}>↓ Picture</button></li>;})}</ol>
+          <button type="button" className="subtle-btn copy-save" aria-label={`Download picture ${index+1}`} onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(row)),`${index+1}.jpg`)}>↓ Picture</button></li>;})}</ol>
         <button className="textbtn" disabled={sharing} onClick={()=>{setShareOneByOne(true);setShareStep('picture');setShareIndex(0);setShareStatus('');}}>Share one record at a time instead</button>
        </div>:<p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>}
        {!bulkShare&&currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
@@ -3300,7 +3298,7 @@ export default function App() {
             {recordImeiPair(linkedPicture).imei1 && <button className="subtle-btn" onClick={() => void copyText(recordImeiPair(linkedPicture).imei1).then(ok => setToast(ok ? 'IMEI 1 copied.' : 'Copy failed.'))}>Copy IMEI 1</button>}
             {recordImeiPair(linkedPicture).imei2 && <button className="subtle-btn" onClick={() => void copyText(recordImeiPair(linkedPicture).imei2).then(ok => setToast(ok ? 'IMEI 2 copied.' : 'Copy failed.'))}>Copy IMEI 2</button>}
             {recordSerial(linkedPicture) && <button className="subtle-btn" onClick={() => void copyText(recordSerial(linkedPicture)).then(ok => setToast(ok ? 'Serial copied.' : 'Copy failed.'))}>Copy serial</button>}
-            <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(linkedPicture)), `${(linkedPicture.imei || recordSerial(linkedPicture) || linkedPicture.pictureId).replace(/[^A-Za-z0-9_-]/g, '_')}.jpg`)}><Download size={16} /> Download picture</button>
+            <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(linkedPicture)), `${linkedPicture.number}.jpg`)}><Download size={16} /> Download picture</button>
             {typeof navigator.share === 'function' && <button className="subtle-btn" onClick={() => { const file = new File([dataUrlBlob(recordPhoto(linkedPicture))], 'picture.jpg', { type: 'image/jpeg' }); const data = { files: [file] }; if (navigator.canShare?.(data)) void navigator.share(data).catch(() => {}); else setToast('Sharing pictures is not available in this browser. Use Download picture.'); }}>Share picture</button>}
           </div>
         </> : <p>This picture is saved in the browser that scanned it. Open the Excel link on that phone in the same browser (Chrome) where you scanned, or use the picture file saved next to the Excel file.</p>}
