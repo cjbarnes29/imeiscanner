@@ -10,15 +10,20 @@ Android may pause and retry queued work when it restricts background activity, a
 
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
-- IMEI extraction prioritizes a readable `IMEI 1`, then a readable `IMEI 2` from the same picture. Ambiguous or unreadable numbers are left for review.
-- When multiple distinct IMEI 1 labels are detected, the scanner attempts to separate them using visible box edges. Uncertain splits are marked for review and crops can be adjusted manually.
+- IMEI extraction prioritizes a readable `IMEI 1`, then a readable `IMEI 2` from the same picture. Ambiguous or unreadable numbers are left for review. Records store **IMEI 1, IMEI 2 and serial number**; all three are editable in the review window.
+- **Barcode confirmation.** Every photo is also read for Code 128 barcodes (zxing-wasm, bundled with the app, works in every browser including iPhone Safari). A barcode value that matches what OCR read on its label replaces misread digits, and serial numbers are confirmed from the S/N barcode. Barcode-confirmed numbers outrank OCR.
+- **Misread guard.** If OCR reads the same IMEI twice and the readings differ by 1-2 digits, the record is marked **Needs review** even when the checksum passes.
+- Recognised serial labels: `S/N`, `SN`, `Serial`, `Serial No`, `Serial Number`. A bare `IMEI:` label (no 1 or 2) is accepted when exactly one number passes Luhn.
+- **Multiple devices in one photo.** Device labels are grouped with OCR text positions, barcode positions and visible sticker/box edges. A line holding several labels (`IMEI 1: ... IMEI 2: ...`) is split per label. Grouping distance scales with the printed text size. Uncertain splits are not cut blindly: the record asks **"Is this 1 device or N?"** and offers one record or the crop tool with N prefilled. Crops can be adjusted manually.
 - The Android scanner frames each separated box using a visible seam between labels and keeps the full width or height of that box face. If it cannot find a reliable seam, it keeps the full photo as one review record for manual splitting instead of saving a cut-off label. The review editor loads the original photo and saves manually selected crops even when automatic text reading fails.
 - Review a photo to rotate it, draw crops by touch or mouse, and enter an unreadable IMEI manually. Guided cropping can replace one review record with several separate records.
 - Luhn checksum validation.
 - Each new upload skips exact copies of a photo and removes later rows with the same readable 15-digit IMEI within that upload. Rows without a readable IMEI remain for review. Older saved uploads are not compared or deleted.
 - Manual exports only; scanning does not start downloads automatically.
 - Numbered photos, selected-only downloads, and image names matched to the `#3`-starting record numbers.
-- Excel with pictures downloads one `.xlsx` file with each record's photo (or matching crop) beside its IMEI. Photos keep their proportions and remain embedded at up to 1200 pixels on the longest side. Excel desktop documents **Save as Picture** in the picture's right-click menu; Excel mobile image saving has not been verified. For a separate image file, open its record in the app and choose **Download photo**. Word, CSV, and Google Sheets-compatible exports remain available.
+- **Default export: IMEI + picture with download button.** Every format uses columns **IMEI 1, IMEI 2, Serial** (blank when not detected), with no person, validation or status columns. Excel adds **Picture** and **Download picture**. Word adds the picture. CSV and Google Sheets (imported from Excel) are numbers only, one tab. The older layouts (IMEI and model, or with person and photos) remain in the *Information to include* menu.
+- **No ZIP.** The Excel file and the picture files are saved as normal files in one folder: the Android app and Chrome/Edge on a computer ask you to pick a location and create `IMEI pictures <date time>` inside it; other browsers download the workbook and pictures together into Downloads.
+- **Download picture links on phones.** Excel for Android and iOS cannot open links to files on the phone (Chrome shows an error). When exported from the website, each link is `https://<site>/#picture=<id>`; opening it shows that picture from this browser's saved records with **Download picture** and **Share picture** buttons. It works on the phone and browser that scanned the photos. The Android app and desktop Excel use the local picture file beside the workbook instead. Excel desktop also offers **Save as Picture** on the embedded image.
 - Person groups with editable names, per-record assignment, and person tabs in Excel/Google Sheets.
 - Photo exports can save the report, photo gallery HTML, and record photos to a folder when the browser supports folder selection. Other browsers provide separate downloads for the report, the self-contained HTML gallery, and each photo. Split records use the cropped picture.
 - Best-effort device model classification from OCR text and filenames; unknown models can be edited.
@@ -27,7 +32,8 @@ Android may pause and retry queued work when it restricts background activity, a
 - Samsung labels with an `SM-` model code record the next five characters, such as `SM-A075F`, when OCR can read them.
 - The in-app photo viewer and self-contained offline HTML gallery keep their controls in place when moving between differently sized pictures. The HTML gallery can view, download, and copy the IMEI for each cropped picture.
 - Editable model and IMEI values; records recalculate validation and duplicate state.
-- Excel and Google Sheets workbooks include an all-records tab, model tabs, and person tabs.
+- The older Excel/Google Sheets layouts include an all-records tab, model tabs, and person tabs; the default IMEI + picture layout is one sheet.
+- **Sharing** sends the picture and the numbers as two separate messages (a browser cannot force two chat messages from one share). *Picture + IMEI* falls back to the serial when a unit has no IMEI; *Picture + IMEI + Serial* sends both on separate lines.
 - Android exports transfer files to the system save picker in small pieces, then report whether the file was saved, cancelled, or failed. Sheets-compatible exports download as Excel files to import into Google Sheets.
 
 ## Run locally
@@ -36,6 +42,7 @@ Install Node.js 24 or newer, then:
 ```bash
 npm install
 npm run dev
+npm test    # unit tests for parsing, splitting, barcode matching and exports
 ```
 
 Open the local URL printed by Vite (usually http://localhost:5173).
@@ -47,6 +54,13 @@ Build for production:
 npm run build
 npm run preview
 ```
+
+## Real-photo regression check
+Real label photos contain IMEIs and this repository is public, so they are never committed (`test-photos/` is git-ignored). To check the scanner against your own photos:
+
+1. Put label photos in `test-photos/`.
+2. Run `node scripts/scan-real-photos.mjs`. It scans each photo with the same scanner the laptop/cloud server uses and prints IMEI 1, IMEI 2, serials and how many records need review.
+3. Once the output is verified by hand, run it with `--write-expected` to save `test-photos/expected.json`, edit anything wrong, and later runs report PASS/FAIL per photo.
 
 ## Scan and review
 1. Choose photos and select **Extract IMEI**. Wait for scanning to finish.
@@ -101,3 +115,6 @@ Exports work without Google authorization. To use a report in Google Sheets, imp
 - IMEI values are sensitive device identifiers. Use a trusted device and Google account, and avoid sharing exported sheets publicly.
 - The model classifier is heuristic and currently contains common Samsung Galaxy S/A/Z families plus selected iPhone and Pixel models. It uses OCR text and filenames; an unknown result needs manual correction.
 - IMEI 1 cannot always be distinguished from IMEI 2 if the photo contains multiple unlabeled numbers. The tool deliberately sends ambiguous cases to review rather than guessing.
+- Barcodes need enough pixels: on photos around 1000 px wide, small S/N and IMEI 2 barcodes often cannot be read and fall back to OCR or review. Full-resolution camera photos work best.
+- If a second device shows only an IMEI 2 or serial close under another device's IMEI 1 with no visible sticker edge between them, it is treated as the same device; the scanner cannot tell them apart from the text alone.
+- Picture links in Excel exported from the website open the picture saved in the browser that scanned it; on another phone or browser they show *Picture not found*.
