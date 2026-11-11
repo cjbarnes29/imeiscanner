@@ -420,6 +420,24 @@ async function compactPhoto(dataUrl: string): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.82);
 }
 
+/**
+ * The original photo is kept for manual cropping later. A raw phone photo is 3-5 MB and is
+ * most of what the app stores, so keep it at up to 3200 px (scans only ever use 2400 px)
+ * as a high-quality JPEG. Anything that cannot be re-encoded is kept exactly as it is.
+ */
+async function shrinkOriginal(file: File): Promise<Blob> {
+  if (file.size < 1.2 * 1024 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, 3200 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+    const smaller = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+    return smaller && smaller.size < file.size * 0.9 ? smaller : file;
+  } catch { return file; }
+}
+
 function recordPhoto(record: RecordItem) {
   return record.cropDataUrl || record.dataUrl;
 }
@@ -600,15 +618,59 @@ async function readSerialPhoto(worker: Awaited<ReturnType<typeof createWorker>>,
   return '';
 }
 
+/** White-on-black text reads far better inverted: flip a canvas to dark-on-light grayscale. */
+function invertCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+  const canvas = document.createElement('canvas'); canvas.width = source.width; canvas.height = source.height;
+  const context = canvas.getContext('2d', { willReadFrequently: true })!;
+  context.drawImage(source, 0, 0);
+  const image = context.getImageData(0, 0, canvas.width, canvas.height), data = image.data;
+  let low = 255, high = 0;
+  for (let i = 0; i < data.length; i += 4) { const gray = 255 - (data[i] * .299 + data[i + 1] * .587 + data[i + 2] * .114); data[i] = data[i + 1] = data[i + 2] = gray; if (gray < low) low = gray; if (gray > high) high = gray; }
+  const span = Math.max(1, high - low);
+  for (let i = 0; i < data.length; i += 4) data[i] = data[i + 1] = data[i + 2] = (data[i] - low) * 255 / span;
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+/** Share of clearly bright pixels in a canvas: low means dark labels with light text. */
+function brightShare(source: HTMLCanvasElement): number {
+  const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+  const context = canvas.getContext('2d', { willReadFrequently: true })!;
+  context.drawImage(source, 0, 0, 64, 64);
+  const data = context.getImageData(0, 0, 64, 64).data; let bright = 0;
+  for (let i = 0; i < data.length; i += 4) if ((data[i] + data[i + 1] + data[i + 2]) / 3 > 170) bright++;
+  return bright / (data.length / 4);
+}
+
+/** True when a picture is mostly dark (a dark label with light text). */
+async function isDarkPicture(source: string): Promise<boolean> {
+  const image = new Image(); image.src = source; await image.decode();
+  const canvas = document.createElement('canvas'); canvas.width = 48; canvas.height = 48;
+  const context = canvas.getContext('2d', { willReadFrequently: true })!;
+  context.drawImage(image, 0, 0, 48, 48);
+  const data = context.getImageData(0, 0, 48, 48).data; let sum = 0;
+  for (let i = 0; i < data.length; i += 4) sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+  return sum / (data.length / 4) < 115;
+}
+
+async function pictureCanvas(source: string): Promise<HTMLCanvasElement> {
+  const image = new Image(); image.src = source; await image.decode();
+  const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+  canvas.getContext('2d')!.drawImage(image, 0, 0);
+  return canvas;
+}
+
 async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cropDataUrl: string, mode: 'fast' | 'standard' | 'detailed' = 'detailed') {
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
-  const firstRead=await worker.recognize(cropDataUrl);
+  // A dark crop is read inverted from the start; reading it normally first wastes passes.
+  const dark = mode !== 'fast' && await isDarkPicture(cropDataUrl);
+  const firstRead=await worker.recognize(dark ? invertCanvas(await pictureCanvas(cropDataUrl)) : cropDataUrl);
   let cropLines=ocrLines(firstRead.data);
   let raw=firstRead.data.text || '';
   let first = extractImei1s(raw);
   if (mode !== 'fast' && (first.length !== 1 || !luhnValid(first[0]))) {
-    const enhanced = await createOcrImage(new File([dataUrlBlob(cropDataUrl)], 'crop.jpg', { type: 'image/jpeg' }));
-    const enhancedText = (await worker.recognize(enhanced)).data.text || '';
+    const enhanced = dark ? invertCanvas(await pictureCanvas(cropDataUrl)) : await createOcrImage(new File([dataUrlBlob(cropDataUrl)], 'crop.jpg', { type: 'image/jpeg' }));
+    const enhancedText = dark ? '' : (await worker.recognize(enhanced)).data.text || '';
     if (enhancedText) raw += `\n${enhancedText}`;
     first = extractImei1s(raw);
     if (mode === 'detailed' && (first.length !== 1 || !luhnValid(first[0]))) {
@@ -672,6 +734,13 @@ type DrawnBox = { x: number; y: number; width: number; height: number };
 type SplitCrop = { cropDataUrl: string; imei: string; model: string; raw: string };
 type BulkItem = { id: string; name: string; source: string; deviceCount?: number; model: string };
 const FULL_BOX: DrawnBox = { x: 0, y: 0, width: 100, height: 100 };
+
+/**
+ * Text-reading worker using the engine and language data served by this app itself
+ * (public/ocr), not a CDN: no download on the first scan, and it works offline.
+ */
+const OCR_BASE = new URL('ocr', document.baseURI).href;
+const newOcrWorker = () => createWorker('eng', 1, { workerPath: `${OCR_BASE}/worker.min.js`, corePath: OCR_BASE, langPath: OCR_BASE });
 
 /** True when a new box covers most of an existing one (the same label drawn twice). */
 function overlapsBox(boxes: DrawnBox[], box: DrawnBox) {
@@ -781,7 +850,7 @@ function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClos
   const item = items[index];
   const planned = items.filter(entry => plans[entry.id]?.length);
   const plannedBoxes = planned.reduce((sum, entry) => sum + plans[entry.id].length, 0);
-  const worker = async () => workerRef.current ||= await createWorker('eng');
+  const worker = async () => workerRef.current ||= await newOcrWorker();
   function open(next: number) {
     const target = items[next], plan = plans[target.id] || [];
     setIndex(next); setBoxes(plan); setCount(plan.length || target.deviceCount || 2); setCur(FULL_BOX); setPhase('draw'); setMessage('');
@@ -1974,13 +2043,15 @@ export default function App() {
     const startedAt = performance.now();
 
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
+    // A second reading worker lets the crops of one photo be read in parallel.
+    let helper: Awaited<ReturnType<typeof createWorker>> | null = null;
 
     try {
       const scanFiles = await uniqueUploadPhotos(inputFiles);
       if (stopScanRequested.current) { if(capturedFiles)setFiles(old=>[...old,...capturedFiles]);setToast('Scan stopped. Photos remain in the queue.'); return; }
       const skippedPhotos = inputFiles.length - scanFiles.length;
       const uploadBatchId = newId();
-      worker = await createWorker('eng');
+      worker = await newOcrWorker();
 
       let newRows: RecordItem[] = [];
       let addedCount = 0;
@@ -2013,7 +2084,24 @@ export default function App() {
           user_defined_dpi: '300'
         });
 
-        let enhancedResult = await worker.recognize(ocrImage);
+        // A photo with very few bright pixels is probably dark labels with light text: start
+        // with the inverted picture. If that reads nothing label-like, fall back to the normal one.
+        let enhancedResult: Awaited<ReturnType<typeof worker.recognize>> | undefined;
+        let triedInverted = false, invertedRead = false;
+        if (scanMode !== 'fast' && brightShare(color) < 0.18) {
+          triedInverted = true;
+          const flipped = invertCanvas(ocrImage);
+          const flippedResult = await worker.recognize(flipped);
+          if (labelTextScore(flippedResult.data.text || '') >= 2) { enhancedResult = flippedResult; ocrImage = flipped; invertedRead = true; }
+        }
+        enhancedResult ||= await worker.recognize(ocrImage);
+        // Light text on a dark label reads as noise. If the first read found little, read the
+        // inverted picture and keep it when it is clearly better (this replaces a wasted pass).
+        if (scanMode !== 'fast' && !triedInverted && labelTextScore(enhancedResult.data.text || '') < 2) {
+          const flipped = invertCanvas(ocrImage);
+          const flippedResult = await worker.recognize(flipped);
+          if (labelTextScore(flippedResult.data.text || '') > labelTextScore(enhancedResult.data.text || '')) { enhancedResult = flippedResult; ocrImage = flipped; invertedRead = true; }
+        }
         // Nothing label-like read: the photo may be upside down, sideways or mirrored. Read a
         // smaller copy each way and, if one clearly reads as a label, scan that copy instead.
         if (scanMode !== 'fast' && labelTextScore(enhancedResult.data.text || '') === 0) {
@@ -2021,10 +2109,10 @@ export default function App() {
           let best: { score: number; file?: File } = { score: 0 };
           for (const turn of ORIENTATIONS) {
             const turned = await turnFile(file, turn);
-            const probe = await createScanImages(turned, 1600);
+            const probe = await createScanImages(turned, 1200);
             const score = labelTextScore((await worker.recognize(probe.enhanced)).data.text || '');
             if (score > best.score) best = { score, file: turned };
-            if (score >= 6) break;
+            if (score >= 4) break;
           }
           if (best.file && best.score >= 2) {
             file = best.file;
@@ -2039,7 +2127,7 @@ export default function App() {
         const sourceWidth = color.width;
         const sourceHeight = color.height;
 
-        if (scanMode === 'detailed' || (scanMode === 'standard' && (imeis.length === 0 || (imeis.length === 1 && !luhnValid(imeis[0]))))) {
+        if (!invertedRead && (scanMode === 'detailed' || (scanMode === 'standard' && (imeis.length === 0 || (imeis.length === 1 && !luhnValid(imeis[0])))))) {
           const originalResult = await worker.recognize(color);
           const originalText = originalResult.data.text || '';
           const originalImeis = extractImei1s(originalText);
@@ -2075,13 +2163,25 @@ export default function App() {
         const cropKeys=croppedPhotos.size?[...croppedPhotos.keys()]:[''];
 
         const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
-        for (const detectedImei of cropNeedsReview ? [''] : cropKeys) {
+        // Read every device's crop. Two or more crops are read in parallel on two workers.
+        const cropOrder = cropNeedsReview ? [''] : cropKeys;
+        const readCrop = async (detectedImei: string, w: NonNullable<typeof worker>) => {
+          const region = regions.find(item => item.imei === detectedImei);
+          const cropDataUrl = croppedPhotos.get(detectedImei);
+          const cropResult = cropDataUrl ? await readCropImei(w, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw), lines };
+          let text = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
+          if (scanMode !== 'fast' && !cropNeedsReview) text = await refineCropText(w, cropDataUrl || dataUrl, text, cropResult.lines);
+          if (!cropNeedsReview && !extractPreferredImei(text) && !extractSerial(text)) { const serialRaw = await readSerialPhoto(w, cropDataUrl || dataUrl); if (serialRaw) text = serialRaw; }
+          return text;
+        };
+        const cropTexts = new Map<string, string>();
+        if (cropOrder.length > 1 && scanMode !== 'fast' && (navigator.hardwareConcurrency || 2) >= 4 && !helper) { try { helper = await newOcrWorker(); } catch (error) { console.warn('Parallel reading unavailable', error); } }
+        const readers = [worker, helper].filter((w): w is NonNullable<typeof worker> => !!w);
+        await Promise.all(readers.map(async (w, slot) => { for (let k = slot; k < cropOrder.length; k += readers.length) cropTexts.set(cropOrder[k], await readCrop(cropOrder[k], w)); }));
+        for (const detectedImei of cropOrder) {
         const region = regions.find(item => item.imei === detectedImei);
         const cropDataUrl = croppedPhotos.get(detectedImei);
-        const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw), lines };
-        let cropRaw = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
-        if (scanMode !== 'fast' && !cropNeedsReview) cropRaw = await refineCropText(worker, cropDataUrl || dataUrl, cropRaw, cropResult.lines);
-        if (!cropNeedsReview && !extractPreferredImei(cropRaw) && !extractSerial(cropRaw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl || dataUrl); if (serialRaw) cropRaw = serialRaw; }
+        let cropRaw = cropTexts.get(detectedImei) || '';
         // Possibly several devices but only one IMEI 1 was read: keep it (the
         // record still asks "1 device or N?"). Several different IMEI 1s stay blank.
         const readableImei1s = [...new Set([barcodeImei(cropRaw, 1), ...extractImei1s(cropRaw).filter(luhnValid)].filter(Boolean))];
@@ -2132,7 +2232,7 @@ export default function App() {
         if (sourceRows.length) {
           const storedPhoto = await compactPhoto(dataUrl);
           for (const record of sourceRows) record.dataUrl = storedPhoto;
-          await saveOriginalSource(pictureId, file);
+          await saveOriginalSource(pictureId, await shrinkOriginal(file));
         }
         if ((i + 1) % 20 === 0) {
           const completed = newRows;
@@ -2156,6 +2256,7 @@ export default function App() {
 
       await worker.terminate();
       worker = null;
+      if (helper) { await helper.terminate(); helper = null; }
 
       addedCount += newRows.length;
       needsReviewCount += newRows.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
@@ -2175,6 +2276,7 @@ export default function App() {
       setToast('Scanning failed. Captured photos stay in the upload queue for retry. Check your connection for OCR resources, or try Phone camera and a clearer label.');
     } finally {
       if (worker) await worker.terminate();
+      if (helper) await helper.terminate();
 
       setBusy(false);
       setStoppingScan(false);
@@ -2226,7 +2328,7 @@ export default function App() {
       const cropDataUrl = photos.get('manual')!;
       let raw = '', imei = '';let barcodeLines:OcrLine[]=[];
       try {
-        worker = await createWorker('eng');
+        worker = await newOcrWorker();
         ({ raw, imei, lines:barcodeLines } = await readCropImei(worker, cropDataUrl));
         raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw);
       } catch (error) { console.warn('Crop saved without automatic text reading', error); }
@@ -2304,7 +2406,7 @@ export default function App() {
     try {
       const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
       setSplitProgress('Preparing…');
-      if (!guidedCropWorker.current) { try { guidedCropWorker.current = await createWorker('eng'); } catch (error) { console.warn('Text reading unavailable', error); } }
+      if (!guidedCropWorker.current) { try { guidedCropWorker.current = await newOcrWorker(); } catch (error) { console.warn('Text reading unavailable', error); } }
       const crops = await readBoxCrops(guidedCropWorker.current, source, reviewSplit.boxes, () => manualModel.trim() || selected.model, box => setSplitProgress(`Reading box ${box} of ${reviewSplit.boxes.length}…`));
       setReviewSplit({ ...reviewSplit, crops });
       setToast('All boxes read. Check each IMEI and model, then save.');
@@ -2323,7 +2425,7 @@ export default function App() {
     if (!selected || adjustingCrop) return;
     setAdjustingCrop(true); setSplitProgress('Detecting labels…');
     try {
-      if (!guidedCropWorker.current) guidedCropWorker.current = await createWorker('eng');
+      if (!guidedCropWorker.current) guidedCropWorker.current = await newOcrWorker();
       const found = await autoDetectBoxes(guidedCropWorker.current, reviewSource || selected.originalDataUrl || selected.dataUrl);
       if (found.boxes.length >= 2) {
         setReviewCountInput(found.boxes.length);

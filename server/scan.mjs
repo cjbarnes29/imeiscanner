@@ -6,6 +6,15 @@ import { planImeiCrops } from '../src/scan-layout.ts';
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, pickImei2 } from '../src/barcode-imei.ts';
 
 import { readBarcodes } from 'zxing-wasm/reader';
+import { cpus } from 'node:os';
+
+/** Share of clearly bright pixels: low means dark labels with light text. */
+async function brightShare(image) {
+  const { data, info } = await sharp(image).resize(64, 64, { fit: 'fill' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  let bright = 0;
+  for (let i = 0; i < data.length; i += info.channels) if ((data[i] + data[i + 1] + data[i + 2]) / 3 > 170) bright++;
+  return bright / (data.length / info.channels);
+}
 
 /** All Code 128 barcodes in the frame with their boxes, for pairing with IMEI labels. */
 async function frameBarcodes(frame) {
@@ -119,6 +128,12 @@ function scaledLines(lines, from, to) {
 
 export async function createScanner() {
   const worker = await createWorker('eng');
+  // A second worker reads the crops of one photo in parallel (only on machines with 4+ cores).
+  let helper = null;
+  const helperWorker = async () => {
+    if (!helper) { helper = await createWorker('eng'); await helper.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' }); }
+    return helper;
+  };
   return {
     async scan(input, filename, mode = 'standard', orientationTried = false) {
       const max = mode === 'fast' ? 1600 : mode === 'detailed' ? 3000 : 2400;
@@ -127,17 +142,20 @@ export async function createScanner() {
       const colorSize = { width: info.width, height: info.height };
       const enhanced = await sharp(color).grayscale().linear(1.45, -40).jpeg({ quality: 88 }).toBuffer();
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
+      // (The whole photo is always read normally here: reading it inverted changes which
+      // labels are found and can add phantom devices. Only each device's crop is inverted.)
       const first = (await worker.recognize(enhanced)).data;
+      const invertedRead = false;
       // Nothing label-like read: the photo may be upside down, sideways or mirrored. Read a
       // smaller copy each way, and if one clearly reads as a label, scan that copy instead.
       if (!orientationTried && mode !== 'fast' && labelTextScore(first.text || '') === 0) {
         let best = { score: 0, turn: null };
         for (const turn of ORIENTATIONS) {
-          let probe = sharp(color).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true });
+          let probe = sharp(color).resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true });
           probe = turn.flop ? probe.flop() : probe.rotate(turn.angle);
           const score = labelTextScore((await worker.recognize(await probe.grayscale().linear(1.45, -40).jpeg({ quality: 88 }).toBuffer())).data.text || '');
           if (score > best.score) best = { score, turn };
-          if (score >= 6) break;
+          if (score >= 4) break;
         }
         if (best.turn && best.score >= 2) {
           const upright = best.turn.flop ? sharp(color).flop() : sharp(color).rotate(best.turn.angle);
@@ -147,7 +165,7 @@ export async function createScanner() {
       let raw = first.text || '';
       let imeis = labelledNumbers(raw, 1);
       let lines = scaledLines(ocrLines(first), colorSize, colorSize);
-      if (mode === 'detailed' || (mode === 'standard' && (imeis.length === 0 || (imeis.length === 1 && !luhnValid(imeis[0]))))) {
+      if (!invertedRead && (mode === 'detailed' || (mode === 'standard' && (imeis.length === 0 || (imeis.length === 1 && !luhnValid(imeis[0])))))) {
         const second = (await worker.recognize(color)).data;
         const secondImeis = labelledNumbers(second.text || '', 1);
         if (secondImeis.length > imeis.length || (!imeis.length && second.text)) {
@@ -170,15 +188,19 @@ export async function createScanner() {
       const sourcePictureId = `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const selections = !splitFailed && regions.length ? regions : [null];
       const results = [];
-      for (const region of selections) {
+      const readRegion = async (region, worker) => {
         const photo = region ? await sharp(color).extract({ left: Math.max(0, Math.floor(region.x)), top: Math.max(0, Math.floor(region.y)), width: Math.min(colorSize.width - Math.floor(region.x), Math.ceil(region.width)), height: Math.min(colorSize.height - Math.floor(region.y), Math.ceil(region.height)) }).jpeg({ quality: 85 }).toBuffer() : color;
-        const cropData = region ? (await worker.recognize(photo)).data : null;
+        // A dark crop is read inverted from the start (same size, so boxes stay valid).
+        const darkCrop = !!region && mode !== 'fast' && await brightShare(photo) < 0.18;
+        const cropData = region ? (await worker.recognize(darkCrop ? await sharp(photo).grayscale().negate().normalise().jpeg({ quality: 92 }).toBuffer() : photo)).data : null;
         let cropRaw = cropData ? cropData.text || '' : raw;
         const cropLines = cropData ? ocrLines(cropData) : lines;
         { const cropCodes = [...new Set([...await cropBarcodeValues(photo), ...codesInside(region)])]; const fromBarcodes = [resolveImeisFromBarcodes(cropCodes, cropRaw), resolveSerialFromBarcodes(cropCodes, cropRaw)].filter(Boolean).join('\n'); if (fromBarcodes) cropRaw = `${fromBarcodes}\n${cropRaw}`; }
         let imei = splitFailed ? '' : preferredImei(cropRaw);
         if (region && !labelledNumbers(cropRaw,1).some(luhnValid) && mode !== 'fast') {
-          const improved = await sharp(photo).resize({width:2600,height:2600,fit:'inside'}).grayscale().normalise().sharpen().jpeg({quality:96}).toBuffer();
+          let improvedImage = sharp(photo).resize({width:2600,height:2600,fit:'inside'}).grayscale();
+          if (darkCrop) improvedImage = improvedImage.negate();
+          const improved = await improvedImage.normalise().sharpen().jpeg({quality:96}).toBuffer();
           cropRaw += `\n${(await worker.recognize(improved)).data.text || ''}`;
           await worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK});
           cropRaw += `\n${(await worker.recognize(improved)).data.text || ''}`;
@@ -211,7 +233,7 @@ ${stripText}`;
         }
         // Dark labels (white text on black) read far better inverted. Only when IMEI 2
         // or the serial is still missing, so ordinary white labels cost nothing extra.
-        if (region && mode !== 'fast' && (!pickImei2(imei, cropRaw) || !extractSerial(cropRaw))) {
+        if (region && mode !== 'fast' && !darkCrop && (!pickImei2(imei, cropRaw) || !extractSerial(cropRaw))) {
           const { channels } = await sharp(photo).stats();
           if ((channels[0].mean + channels[1].mean + channels[2].mean) / 3 < 115) {
             const inverted = await sharp(photo).resize({ width: 2600, height: 2600, fit: 'inside' }).grayscale().negate().normalise().sharpen().jpeg({ quality: 95 }).toBuffer();
@@ -241,7 +263,7 @@ ${stripText}`;
         }
         imei=splitFailed?'':preferredImei(cropRaw);
         await worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT});
-        results.push({
+        return {
           id: crypto.randomUUID(),
           pictureId: `PIC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
           sourcePictureId,
@@ -257,10 +279,15 @@ ${stripText}`;
           raw: cropRaw,
           createdAt: new Date().toISOString(),
           photo
-        });
-      }
+        };
+      };
+      const pool = [worker];
+      if (selections.length > 1 && mode !== 'fast' && cpus().length >= 4) pool.push(await helperWorker());
+      const done = new Array(selections.length);
+      await Promise.all(pool.map(async (w, slot) => { for (let k = slot; k < selections.length; k += pool.length) done[k] = await readRegion(selections[k], w); }));
+      results.push(...done);
       return results;
     },
-    async close() { await worker.terminate(); }
+    async close() { await worker.terminate(); if (helper) await helper.terminate(); }
   };
 }

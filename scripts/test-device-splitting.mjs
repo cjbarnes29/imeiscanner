@@ -95,6 +95,15 @@ try{
    assert.equal(labelTextScore('9 SIA lWI ;N/S :1 lWI'),0,'Upside-down text scores zero');
    assert.equal(ORIENTATIONS.length,4,'Upside down, both sideways turns and mirrored');
  }
+ // A stray unreadable label between two readable devices must not become a third blank crop.
+ {
+   const B=(text,y)=>({text,bbox:{x0:200,y0:y,x1:520,y1:y+30}});
+   const stray=[B('IMEI 1: 490154203237518',200),B('IMEI: ape iB 35708 3',1000),B('IMEI 1: 356938035643809',1800)];
+   const pale={data:new Uint8ClampedArray(1000*2200*4).fill(240),width:1000,height:2200};
+   const found=deviceAnchors(stray,1000,2200,pale);
+   assert.ok(found.length>=2,'Readable devices are found');
+   assert.equal(planDeviceCrops(found,stray,1000,2200,pale).length,2,'Unreadable stray label adds no third crop');
+ }
  // Serial from the S/N barcode, confirmed by misread OCR (real case: OCR read RE3L555D0).
  assert.equal(resolveSerialFromBarcodes(['350000192221535','R83L555D0QQ','8806099448974'],'S/N - RE3L555D0!'),'S/N (barcode): R83L555D0QQ','Serial barcode fixes 8/B and cut-off OCR');
  assert.equal(resolveSerialFromBarcodes(['R83L555D0QQ'],'nothing like it'),'','Serial barcode needs OCR evidence');

@@ -8,6 +8,15 @@ Changes since 1.5. The web app (GitHub Pages) has all of them; the Android app 1
 - **Barcode confirmation** in every browser: exact IMEI and serial values replace OCR misreads; IMEI readings that disagree by 1-2 digits go to review.
 - **Photo orientation.** Upside-down, sideways and mirrored photos are detected and read automatically: when nothing label-like is read, the scanner tries each orientation on a smaller copy and scans the best one. Tested on all four on a real two-box photo (the server scanner reads every number; the browser scanner reads both devices, IMEI 1 and serials). Costs about 6 to 8 extra seconds only for photos where nothing was read.
 
+## Speed
+- **Parallel reading:** the crops of a photo are read on two workers at once (when the device has 4+ cores), in the browser and in the laptop scanner. Photos with several devices are 25-35% faster.
+- **Dark labels:** a dark crop is read inverted from the start instead of wasting passes; in the browser a dark-looking photo is also read inverted first.
+- **Engine bundled:** the text-reading engine, the language data (smaller, same accuracy on every test photo) and the fonts are served by the app itself instead of jsDelivr and Google Fonts: the first scan no longer downloads them (6.4 s to 4.3 s) and the app works offline once opened. They are copied into the build by .
+- **Storage:** the original photo is kept at up to 3200 px as a high-quality JPEG instead of the raw 3-5 MB phone file; about half the storage per photo (4.85 MB to 2.3 MB for a two-box photo).
+- **Orientation check** probes at a smaller size and stops earlier.
+- **Fixed:** Detailed mode could add a blank phantom record on dark photos; an unreadable label only counts as its own device when a separate box is visible for it.
+- Measured on this PC with real photos (browser): single label 4.8 s to 4.4 s, two boxes 5.8 s to 4.9 s, four-box stack 9.8 s to 6.9 s, dark two-box 24.2 s to 19.7 s.
+
 ## Cropping
 - **Draw all the boxes first, then process.** Enter the number of labels, draw every box (each stays numbered on the photo; Undo removes the last), then Process all reads them together and shows every result before saving.
 - **Auto-detect** counts the labels and draws the boxes for you to check.

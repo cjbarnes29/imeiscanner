@@ -125,9 +125,14 @@ export function labelGroupCrops(anchors:DeviceAnchor[],width:number,height:numbe
   }
   return [];
 }
-export function planDeviceCrops(anchors:DeviceAnchor[],lines:OcrLine[],width:number,height:number,frame?:PixelFrame){
-  const existing=planImeiCrops(anchors.map(a=>a.key),lines,width,height,frame,anchors);
+export function planDeviceCrops(allAnchors:DeviceAnchor[],lines:OcrLine[],width:number,height:number,frame?:PixelFrame){
   const bands=frame?productBands(frame,lines):[];
+  // A label whose number could not be read is only its own device when a separate box is
+  // visible for it (bands). Otherwise it is stray text between devices (e.g. a tear-off
+  // strip): drop it so it cannot become a blank phantom record.
+  const readable=allAnchors.filter(a=>a.value);
+  const anchors=readable.length>=2&&readable.length<allAnchors.length&&bands.length<allAnchors.length?readable:allAnchors;
+  const existing=planImeiCrops(anchors.map(a=>a.key),lines,width,height,frame,anchors);
   // Dark-seam bands are a fallback. When labels already show how many devices
   // there are, bands may only be used if they find exactly that many.
   if(anchors.length>=2){
