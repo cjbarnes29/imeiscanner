@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
@@ -52,6 +53,12 @@ public final class MainActivity extends Activity {
     private File pendingExport;
     private String pendingExportName;
     private File stagingExport;
+    // Folder export: files staged in cache, then copied into a new folder the user picks.
+    private File stagingFolder;
+    private String stagingFolderToken;
+    private String stagingFolderName;
+    private File pendingFolder;
+    private String pendingFolderName;
     private String stagingToken;
 
     @Override public void onCreate(Bundle state) {
@@ -111,6 +118,36 @@ public final class MainActivity extends Activity {
             webFileCallback = null;
             return;
         }
+        if (requestCode == 1004) {
+            boolean saved = false;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingFolder != null) {
+                try {
+                    Uri tree = data.getData();
+                    Uri parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+                    Uri folder = DocumentsContract.createDocument(getContentResolver(), parent, DocumentsContract.Document.MIME_TYPE_DIR, pendingFolderName);
+                    if (folder == null) throw new IllegalStateException("Cannot create folder");
+                    File[] files = pendingFolder.listFiles();
+                    if (files != null) for (File file : files) {
+                        String name = file.getName();
+                        String mime = name.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : name.endsWith(".jpg") ? "image/jpeg" : "application/octet-stream";
+                        Uri target = DocumentsContract.createDocument(getContentResolver(), folder, mime, name);
+                        if (target == null) throw new IllegalStateException("Cannot create " + name);
+                        try (InputStream input = new FileInputStream(file); OutputStream output = getContentResolver().openOutputStream(target)) {
+                            if (output == null) throw new IllegalStateException("Cannot open " + name);
+                            byte[] chunk = new byte[8192]; int count;
+                            while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
+                        }
+                    }
+                    saved = true;
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Folder export failed", error); }
+            }
+            String name = pendingFolderName;
+            deleteFolder(pendingFolder);
+            pendingFolder = null;
+            pendingFolderName = null;
+            reportExport(saved ? "saved" : resultCode == RESULT_CANCELED ? "cancelled" : "failed", name);
+            return;
+        }
         if (requestCode == 1003) {
             boolean saved = false;
             if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingExport != null) {
@@ -166,6 +203,13 @@ public final class MainActivity extends Activity {
 
     private void notifyWeb() {
         runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new Event('android-scan-updated'))", null));
+    }
+
+    private static void deleteFolder(File folder) {
+        if (folder == null) return;
+        File[] files = folder.listFiles();
+        if (files != null) for (File file : files) file.delete();
+        folder.delete();
     }
 
     private void reportExport(String status, String filename) {
@@ -296,6 +340,67 @@ public final class MainActivity extends Activity {
                 }
             });
             return true;
+        }
+
+        @JavascriptInterface public String beginFolder(String folderName) {
+            synchronized (MainActivity.this) {
+                if (stagingFolder != null || pendingFolder != null) return "";
+                File folder = new File(getCacheDir(), "imei-folder-" + UUID.randomUUID());
+                if (!folder.mkdirs()) return "";
+                stagingFolder = folder;
+                stagingFolderName = folderName.replaceAll("[/\\\\:*?\"<>|]", "_");
+                stagingFolderToken = UUID.randomUUID().toString();
+                return stagingFolderToken;
+            }
+        }
+
+        @JavascriptInterface public boolean appendFolderFile(String token, String filename, String base64) {
+            synchronized (MainActivity.this) {
+                if (stagingFolder == null || !token.equals(stagingFolderToken)) return false;
+                String safe = filename.replaceAll("[/\\\\:*?\"<>|]", "_");
+                if (safe.isEmpty() || safe.startsWith(".")) return false;
+                try (FileOutputStream output = new FileOutputStream(new File(stagingFolder, safe), true)) {
+                    output.write(Base64.decode(base64, Base64.DEFAULT));
+                    return true;
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Folder chunk failed", error); return false; }
+            }
+        }
+
+        @JavascriptInterface public boolean finishFolder(String token) {
+            synchronized (MainActivity.this) {
+                if (stagingFolder == null || !token.equals(stagingFolderToken) || pendingFolder != null) return false;
+                pendingFolder = stagingFolder;
+                pendingFolderName = stagingFolderName;
+                stagingFolder = null;
+                stagingFolderToken = null;
+                stagingFolderName = null;
+            }
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                    intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    startActivityForResult(intent, 1004);
+                } catch (Exception error) {
+                    android.util.Log.e("IMEI-Lens", "Folder picker failed", error);
+                    String name = pendingFolderName;
+                    deleteFolder(pendingFolder);
+                    pendingFolder = null;
+                    pendingFolderName = null;
+                    reportExport("failed", name);
+                }
+            });
+            return true;
+        }
+
+        @JavascriptInterface public void abortFolder(String token) {
+            synchronized (MainActivity.this) {
+                if (stagingFolder != null && token.equals(stagingFolderToken)) {
+                    deleteFolder(stagingFolder);
+                    stagingFolder = null;
+                    stagingFolderToken = null;
+                    stagingFolderName = null;
+                }
+            }
         }
 
         @JavascriptInterface public void abortFile(String token) {

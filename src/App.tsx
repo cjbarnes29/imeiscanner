@@ -54,6 +54,11 @@ type AndroidBridge = {
   appendFile(token: string, base64: string): boolean;
   finishFile(token: string, filename: string, mimeType: string): boolean;
   abortFile(token: string): void;
+  // Folder export (APK 1.5+). Optional so older installed APKs keep working.
+  beginFolder?(folderName: string): string;
+  appendFolderFile?(token: string, filename: string, base64: string): boolean;
+  finishFolder?(token: string): boolean;
+  abortFolder?(token: string): void;
 };
 const androidBridge = (window as Window & { AndroidScanner?: AndroidBridge }).AndroidScanner;
 const NATIVE_IMPORTED_STORE = 'imei-lens-native-imported-v1';
@@ -853,17 +858,18 @@ async function createInventoryWorkbook(
   });
 }
 
+type ExportFile = { name: string; blob: Blob };
+
 /**
  * Minimal Excel export: one sheet with IMEI, the picture, and a "Download picture"
- * link. Excel cannot hand out an embedded picture as a file, so the pictures ship
- * beside the workbook in a ZIP and each link opens its own copy.
+ * link. Excel cannot hand out an embedded picture as a file, so the picture files
+ * are saved in the same folder as the workbook and each link opens its own copy.
+ * Returns the workbook first, then one file per picture (flat: no sub-folders).
  */
-async function createImeiPhotoPackage(rows: RecordItem[]) {
+async function createImeiPhotoFiles(rows: RecordItem[]): Promise<ExportFile[]> {
   const ExcelJS = await import('exceljs');
   const Workbook = ExcelJS.Workbook || ExcelJS.default?.Workbook;
   if (!Workbook) throw new Error('The Excel exporter could not load. Please reload the app and retry.');
-  const { default: JSZip } = await import('jszip');
-  const zip = new JSZip();
   const workbook = new Workbook();
   workbook.creator = 'IMEI Lens';
   const sheet = workbook.addWorksheet('IMEIs');
@@ -875,6 +881,7 @@ async function createImeiPhotoPackage(rows: RecordItem[]) {
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF183B43' } };
+  const pictures: ExportFile[] = [];
   const used = new Set<string>();
   for (const [index, record] of rows.entries()) {
     // No '#', spaces or slashes: Excel treats '#' in a link as a jump inside the workbook.
@@ -882,12 +889,11 @@ async function createImeiPhotoPackage(rows: RecordItem[]) {
     let name = `${index + 1}_${label}.jpg`;
     for (let n = 2; used.has(name); n++) name = `${index + 1}_${label}_${n}.jpg`;
     used.add(name);
-    const path = `pictures/${name}`;
-    zip.file(path, dataUrlBlob(recordPhoto(record)));
+    pictures.push({ name, blob: dataUrlBlob(recordPhoto(record)) });
     const row = sheet.addRow({ imei: record.imei || (recordSerial(record) ? `S/N ${recordSerial(record)}` : 'Not detected'), picture: '', download: '' });
     row.height = 150;
     row.alignment = { vertical: 'middle', wrapText: true };
-    row.getCell(3).value = { text: 'Download picture', hyperlink: path, tooltip: `Open or save ${name}` };
+    row.getCell(3).value = { text: 'Download picture', hyperlink: name, tooltip: `Open or save ${name}` };
     row.getCell(3).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
     const image = await workbookImage(record);
     const id = workbook.addImage({ base64: image.dataUrl, extension: 'jpeg' });
@@ -897,12 +903,65 @@ async function createImeiPhotoPackage(rows: RecordItem[]) {
     sheet.addImage(id, {
       tl: { col: 1 + (cellWidth - width) / (2 * cellWidth), row: row.number - 1 + (cellHeight - height) / (2 * cellHeight) },
       ext: { width, height }, editAs: 'oneCell',
-      hyperlinks: { hyperlink: path, tooltip: `Open or save ${name}` }
+      hyperlinks: { hyperlink: name, tooltip: `Open or save ${name}` }
     });
   }
-  zip.file('imei-pictures.xlsx', await workbook.xlsx.writeBuffer());
-  zip.file('READ ME FIRST.txt', 'Extract this ZIP first (Windows: right-click > Extract All; phone: tap the ZIP > Extract).\nThen open imei-pictures.xlsx and click "Download picture" (or the picture) on any row to open that picture as a file you can save or share.\nThe pictures folder must stay next to the Excel file for the links to work.\n');
-  return zip.generateAsync({ type: 'blob', mimeType: 'application/zip' });
+  const xlsx = new Blob([await workbook.xlsx.writeBuffer() as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return [{ name: 'imei-pictures.xlsx', blob: xlsx }, ...pictures];
+}
+
+function exportFolderName() {
+  const now = new Date(), pad = (n: number) => String(n).padStart(2, '0');
+  return `IMEI pictures ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
+}
+
+/**
+ * Save the workbook and pictures as plain files in one folder (no ZIP).
+ * Android app: native folder picker. Chrome/Edge desktop: browser folder picker.
+ * Other browsers cannot create folders, so every file downloads into the same
+ * Downloads folder, which keeps the Excel links working.
+ * Returns where the files went, for the status message.
+ */
+async function saveFilesToFolder(files: ExportFile[], folderName: string, parent?: Promise<any>): Promise<'android' | 'android-each' | 'picked' | 'downloads'> {
+  if (androidBridge && !androidBridge.beginFolder) {
+    // Older installed APK: no folder support, so save file by file in the same place.
+    for (const file of files) {
+      await downloadBlob(file.blob, file.name);
+      await new Promise<void>(resolve => { const done = () => { window.removeEventListener('android-export-result', done); resolve(); }; window.addEventListener('android-export-result', done); });
+    }
+    return 'android-each';
+  }
+  if (androidBridge?.beginFolder) {
+    const token = androidBridge.beginFolder(folderName);
+    if (!token) throw new Error('Finish or cancel the current save before starting another.');
+    try {
+      for (const file of files) for (let offset = 0; offset < file.blob.size || offset === 0; offset += 64 * 1024) {
+        const chunk = (await blobDataUrl(file.blob.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
+        if (!androidBridge.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
+        if (file.blob.size === 0) break;
+      }
+      if (!androidBridge.finishFolder!(token)) throw new Error('Could not open the folder picker.');
+      return 'android';
+    } catch (error) { androidBridge.abortFolder?.(token); throw error; }
+  }
+  const root = parent ? await parent.catch((error: unknown) => { if ((error as DOMException)?.name === 'AbortError') throw new Error('Folder choice cancelled. Nothing was saved.'); return undefined; }) : undefined;
+  if (root) {
+    const folder = await root.getDirectoryHandle(folderName, { create: true });
+    for (const file of files) {
+      const writable = await (await folder.getFileHandle(file.name, { create: true })).createWritable();
+      await writable.write(file.blob);
+      await writable.close();
+    }
+    return 'picked';
+  }
+  for (const file of files) {
+    const url = URL.createObjectURL(file.blob);
+    const link = Object.assign(document.createElement('a'), { href: url, download: file.name });
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    await new Promise(resolve => setTimeout(resolve, 350));
+  }
+  return 'downloads';
 }
 
 async function uploadPhotoToDrive(record: RecordItem, token: string, folderId: string) {
@@ -1971,7 +2030,7 @@ export default function App() {
     client.requestAccessToken();
   }
 
-  async function performExport(rows: RecordItem[], token?: string) {
+  async function performExport(rows: RecordItem[], token?: string, folderChoice?: Promise<any>) {
     if (!rows.length) {
       setToast(selectedOnly ? 'Select at least one scanned record first.' : 'There are no records to export.');
       return;
@@ -1995,11 +2054,16 @@ export default function App() {
 
       if (exportFormat === 'excel' && reportLayout === 'imei_photo') {
         setGoogleProgress('Building Excel with pictures…');
-        const file = await createImeiPhotoPackage(rows);
-        await downloadBlob(file, selectedOnly ? 'imei-pictures-selected.zip' : 'imei-pictures.zip');
-        const done = `Downloaded a ZIP with Excel and ${rows.length} picture(s). Extract it, open imei-pictures.xlsx, then click Download picture on any row.`;
-        setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the export.' : done);
-        setToast(androidBridge ? 'Choose where to save the ZIP file.' : `Excel + ${rows.length} picture(s) downloaded as ZIP.`);
+        const files = await createImeiPhotoFiles(rows);
+        const folderName = exportFolderName();
+        setGoogleProgress('Saving the Excel file and pictures…');
+        const where = await saveFilesToFolder(files, folderName, folderChoice);
+        const message = where === 'android-each' ? `Saved imei-pictures.xlsx and ${rows.length} picture(s) one by one. Update the Android app to save them as one folder in a single step.`
+          : where === 'android' ? `Choose where to create the folder "${folderName}". The Excel file and ${rows.length} picture(s) will be saved inside it.`
+          : where === 'picked' ? `Saved folder "${folderName}" with imei-pictures.xlsx and ${rows.length} picture(s). Open the Excel file and click Download picture on any row.`
+          : `Downloaded imei-pictures.xlsx and ${rows.length} picture(s) into your Downloads folder. Keep them together, open the Excel file and click Download picture on any row.`;
+        setDownloadStatus(message);
+        setToast(where === 'android' ? 'Choose a folder to save into.' : `Excel + ${rows.length} picture(s) saved.`);
       } else if (exportFormat === 'excel') {
         setGoogleProgress('Building the Excel workbook…');
         const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, legacyLayout);
@@ -2153,6 +2217,15 @@ export default function App() {
       catch { folderChoice = undefined; }
       setPhotoDownloads([]);
       void exportPhotoPackage(rows, folderChoice);
+      return;
+    }
+    if (exportFormat === 'excel' && reportLayout === 'imei_photo' && !androidBridge?.beginFolder) {
+      // The folder picker must open directly from the tap, before any await.
+      const picker = (window as any).showDirectoryPicker;
+      let folderChoice: Promise<any> | undefined;
+      try { folderChoice = typeof picker === 'function' ? picker.call(window, { mode: 'readwrite', id: 'imei-pictures' }) : undefined; }
+      catch { folderChoice = undefined; }
+      void performExport(rows, undefined, folderChoice);
       return;
     }
     if (exportFormat === 'sheets') {
@@ -2480,7 +2553,9 @@ export default function App() {
             </label>
             {reportLayout === 'imei_photo' && (
               <div className="download-status">{exportFormat === 'excel'
-                ? 'Downloads a ZIP: an Excel sheet with only IMEI, picture and a Download picture button, plus the picture files. Extract the ZIP first, then open the Excel file.'
+                ? (androidBridge?.beginFolder || typeof (window as any).showDirectoryPicker === 'function'
+                  ? 'Choose a folder: a new folder is created inside it with the Excel file (IMEI, picture, Download picture button) and every picture. No ZIP.'
+                  : 'The Excel file (IMEI, picture, Download picture button) and every picture download into your Downloads folder together. Allow multiple downloads if the browser asks. No ZIP.')
                 : 'Pictures with download buttons are available in Excel only. This format exports IMEIs only.'}</div>
             )}
             {reportLayout === 'person_photo' && (

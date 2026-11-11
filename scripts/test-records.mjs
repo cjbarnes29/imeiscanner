@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoPackage', 'dataUrlBlob'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -97,18 +97,19 @@ try {
   assert.equal(f.extractPreferredImei('IMEI 1: 490154203237518\nIMEI: 356938035643809'),'490154203237518','Indexed IMEI wins over un-indexed');
   assert.equal(f.recordSerial({raw:'SN: RFGYC2L1PLK'}),'RFGYC2L1PLK');
   {
-    const JSZip=(await import('jszip')).default;
-    const pkg=await JSZip.loadAsync(await (await f.createImeiPhotoPackage([{...row,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{...serialOnly,cropDataUrl:'data:image/jpeg;base64,Q1JPUDJUV08='}])).arrayBuffer());
-    const book=new ExcelJS.Workbook();await book.xlsx.load(await pkg.file('imei-pictures.xlsx').async('nodebuffer'));
+    const files=await f.createImeiPhotoFiles([{...row,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{...serialOnly,cropDataUrl:'data:image/jpeg;base64,Q1JPUDJUV08='}]);
+    assert.equal(files[0].name,'imei-pictures.xlsx');assert.equal(files.length,3,'Workbook plus one picture per row, no ZIP');
+    assert.ok(files.every(file=>!file.name.includes('/')),'All files sit in one folder');
+    const named=name=>files.find(file=>file.name===name);
+    const book=new ExcelJS.Workbook();await book.xlsx.load(await files[0].blob.arrayBuffer());
     assert.equal(book.worksheets.length,1,'One sheet only');
     const ws=book.getWorksheet('IMEIs');
     assert.deepEqual([1,2,3,4].map(c=>ws.getRow(1).getCell(c).value),['IMEI','Picture','Download',null],'Only IMEI, picture and download columns');
     assert.equal(ws.getCell('A2').value,first);assert.equal(ws.getCell('A3').value,'S/N RFGYC2L1PLK');
     const link=ws.getCell('C2').value;assert.equal(link.text,'Download picture');assert.ok(!link.hyperlink.includes('#'),'No # in file links');
-    assert.ok(pkg.file(link.hyperlink),'Link points at a picture inside the ZIP');
-    assert.ok(pkg.file(ws.getCell('C3').value.hyperlink),'Serial-only row has its picture too');
+    assert.equal(await named(link.hyperlink).blob.text(),'CROPONE','Link points at that row\'s picture file next to the workbook');
+    assert.ok(named(ws.getCell('C3').value.hyperlink),'Serial-only row has its picture too');
     assert.equal(ws.getImages().length,2,'Each row shows its picture');
-    assert.ok(pkg.file('READ ME FIRST.txt'));
   }
   console.log('PASS: camera/upload IMEI 1 then IMEI 2 priority, positioned barcode matching, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');
 } finally { await unlink(runtime); }
