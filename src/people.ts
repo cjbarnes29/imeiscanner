@@ -66,3 +66,18 @@ export function recordsForFilter<T extends Owned>(records: T[], filter: string):
 
 /** True when the current view is one real person (delete there means unassign, not remove). */
 export const isPersonView = (filter: string) => filter !== 'All' && filter !== UNASSIGNED_FILTER;
+
+/**
+ * Delete a person. Their phones either move to UNASSIGNED (kept, nothing lost) or are removed with them.
+ * "affected" lists the phones that belonged to the person.
+ */
+export function planDeletePerson<T extends Owned>(records: T[], personId: string, deletePhones: boolean): { records: T[]; affected: string[] } {
+  const affected = records.filter(record => record.personId === personId).map(record => record.id);
+  const set = new Set(affected);
+  return { records: deletePhones ? records.filter(record => !set.has(record.id)) : records.map(record => set.has(record.id) ? { ...record, personId: UNASSIGNED } : record), affected };
+}
+
+/** Next free "Person N" number, so a deleted person's label is never handed out twice. */
+export function nextPersonNumber(labels: string[]): number {
+  return labels.reduce((highest, label) => Math.max(highest, Number(label.match(/(\d+)\s*$/)?.[1] || 0)), 0) + 1;
+}

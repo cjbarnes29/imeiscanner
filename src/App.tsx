@@ -2,7 +2,7 @@ import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickIm
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, type CatalogEntry } from './phone-names';
-import { planMove, planUnassign, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
+import { planMove, planUnassign, planDeletePerson, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
@@ -1550,6 +1550,9 @@ export default function App() {
   const [bulkEditPerson, setBulkEditPerson] = useState('');
   const [bulkEditChecked, setBulkEditChecked] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState('');
+  const [deletePersonId, setDeletePersonId] = useState('');
+  const [personUndo, setPersonUndo] = useState<{ people: PersonGroup[]; records: RecordItem[]; text: string; activePersonId: string } | null>(null);
+  useEffect(() => { if (!personUndo) return; const timer = setTimeout(() => setPersonUndo(null), 12000); return () => clearTimeout(timer); }, [personUndo]);
   // People whose phones were all moved away (so their empty view can say "All IMEIs moved."); kept across reloads.
   const [emptiedPeople, setEmptiedPeople] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-lens-emptied-people') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('imei-lens-emptied-people', JSON.stringify(emptiedPeople)); } catch { /* storage full: the message just falls back */ } }, [emptiedPeople]);
@@ -1762,6 +1765,7 @@ export default function App() {
   useBackLayer(!!selected, closePhotoReview, 'review');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
+  useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
 
@@ -1923,7 +1927,7 @@ export default function App() {
   const allVisibleSelected = visible.length > 0 &&
     visible.every(r => selectedIdSet.has(r.id));
   function addPersonGroup() {
-    const next = personGroups.length + 1;
+    const next = nextPersonNumber(personGroups.map(item => item.label));
     const person = {
       id: `person-${newId()}`,
       label: `Person ${next}`,
@@ -2018,6 +2022,36 @@ export default function App() {
       return;
     }
     void performExport(rows);
+  }
+
+  /** Delete a person. Keeping their phones (moved to Unassigned) can be undone; deleting the phones too cannot. */
+  function deletePerson(id: string, deletePhones: boolean) {
+    const person = personGroups.find(item => item.id === id);
+    if (!person || personGroups.length < 2) { setDeletePersonId(''); return; }
+    const title = person.name || person.label;
+    const plan = planDeletePerson(records, id, deletePhones);
+    const remaining = personGroups.filter(item => item.id !== id);
+    setPersonUndo(deletePhones ? null : { people: personGroups, records, text: `${title} deleted.`, activePersonId });
+    if (deletePhones) removeRecords(plan.affected);
+    else { setRecords(plan.records); setSelectedIds(old => old.filter(item => !plan.affected.includes(item))); }
+    setPersonGroups(remaining);
+    if (activePersonId === id) setActivePersonId(remaining[0].id);
+    if (personFilter === id) setPersonFilter('All');
+    if (editingPersonId === id) setEditingPersonId('');
+    setEmptiedPeople(old => old.filter(item => item !== id));
+    setDeletePersonId('');
+    const phones = plan.affected.length;
+    setToast(deletePhones
+      ? `${title} and ${phones} phone${phones === 1 ? '' : 's'} deleted.`
+      : `${title} deleted.${phones ? ` ${phones} phone${phones === 1 ? '' : 's'} moved to Unassigned.` : ''}`);
+  }
+  function undoDeletePerson() {
+    if (!personUndo) return;
+    setPersonGroups(personUndo.people);
+    setRecords(personUndo.records);
+    setActivePersonId(personUndo.activePersonId);
+    setPersonUndo(null);
+    setToast('Person restored.');
   }
 
   function renamePerson(id: string, name: string) {
@@ -3488,16 +3522,12 @@ export default function App() {
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
             </div>
-            <div className="people-bar" aria-label="People">
-              {personGroups.map(person => <span key={person.id} className="person-chip">
-                <button onClick={() => { setEditingPersonId(person.id); setPersonDraft(person.name); }} aria-label={`Rename ${person.name || person.label}`}><Pencil size={14} /> Rename {person.name || person.label}</button>
-              </span>)}
-            </div>
             {editingPersonId && (() => { const person = personGroups.find(item => item.id === editingPersonId); return person ? <div className="person-edit-row">
               <label>Name for {person.label}<input autoFocus value={personDraft} placeholder="Type a name" maxLength={60} onChange={event => setPersonDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { renamePerson(person.id, personDraft.trim()); setEditingPersonId(''); } }} /></label>
               <button className="primary" onClick={() => { renamePerson(person.id, personDraft.trim()); setEditingPersonId(''); }}>Save name</button>
               <button className="subtle-btn" onClick={() => setEditingPersonId('')}>Cancel</button>
             </div> : null; })()}
+            {personFilter === 'All' && personGroups.length > 0 && <p className="people-hint">Tap a person below to rename, move or delete them.</p>}
             <div className="person-filters">
               <button className={personFilter === 'All' ? 'active' : ''} onClick={() => setPersonFilter('All')}>Everyone <b>{records.length}</b></button>
               {personGroups.map(person => (
@@ -3510,6 +3540,10 @@ export default function App() {
             {personFilter !== 'All' && <div className="person-actions" role="group" aria-label="This person's IMEIs">
               <strong>{personFilter === UNASSIGNED_FILTER ? 'Unassigned' : personNameOf(personFilter)}: {visible.length} IMEI{visible.length === 1 ? '' : 's'}</strong>
               <span>{isPersonView(personFilter) ? 'Delete here moves phones to Everyone as unassigned.' : 'Delete here removes phones permanently, after you confirm.'}</span>
+              {isPersonView(personFilter) && <>
+                <button className="subtle-btn" onClick={() => { const person = personGroups.find(item => item.id === personFilter); if (person) { setEditingPersonId(person.id); setPersonDraft(person.name); } }}><Pencil size={14} /> Rename</button>
+                <button className="subtle-btn danger" disabled={personGroups.length < 2} title={personGroups.length < 2 ? 'Keep at least one person' : undefined} onClick={() => setDeletePersonId(personFilter)}><Trash2 size={14} /> Delete person</button>
+              </>}
               <label className="move-to">Move all to
                 <select aria-label="Move all shown IMEIs to" value="" disabled={!visible.length} onChange={event => { if (event.target.value) moveRecords(visible.map(row => row.id), ownerOf(event.target.value)); }}>
                   <option value="">{visible.length ? `Choose (${visible.length})` : 'Nothing to move'}</option>
@@ -3914,6 +3948,16 @@ export default function App() {
         <p>{confirmDelete.ids.length} IMEI record{confirmDelete.ids.length === 1 ? '' : 's'} and {confirmDelete.ids.length === 1 ? 'its' : 'their'} saved picture{confirmDelete.ids.length === 1 ? '' : 's'} will be removed from this device. This cannot be undone.</p>
         <div className="share-toolbar"><button className="subtle-btn danger" onClick={() => { removeRecords(confirmDelete.ids, confirmDelete.fromReview); setConfirmDelete(null); }}>Delete permanently</button><button className="subtle-btn" onClick={() => setConfirmDelete(null)}>Cancel</button></div>
       </section></div>}
+      {deletePersonId && (() => { const person = personGroups.find(item => item.id === deletePersonId); if (!person) return null; const count = records.filter(row => row.personId === person.id).length, title = person.name || person.label; return <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label={`Delete ${title}`}>
+        <h2>Delete {title}?</h2>
+        {count === 0 ? <p>{title} has no phones. Only the person is removed.</p> : <p>{title} has <b>{count}</b> phone{count === 1 ? '' : 's'}. What should happen to {count === 1 ? 'it' : 'them'}?</p>}
+        <div className="delete-person-choices">
+          <button className="primary" onClick={() => deletePerson(person.id, false)}>{count === 0 ? 'Delete person' : `Delete person, keep ${count === 1 ? 'the phone' : 'phones'}`}{count > 0 && <small>Phones move to Unassigned. You can undo this.</small>}</button>
+          {count > 0 && <button className="subtle-btn danger" onClick={() => deletePerson(person.id, true)}>{`Delete person and ${count} phone${count === 1 ? '' : 's'}`}<small>Removes the phones and their pictures permanently.</small></button>}
+          <button className="subtle-btn" onClick={() => setDeletePersonId('')}>Cancel</button>
+        </div>
+      </section></div>; })()}
+      {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
         <div className="modal-head"><h2>Bulk edit</h2><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Close</button></div>
         <p className="copy-hint">Changes {selectedRows.length ? `${selectedRows.length} ticked phone${selectedRows.length === 1 ? '' : 's'}` : `all ${visible.length} phones shown`}. Leave a field empty to keep it as it is.</p>

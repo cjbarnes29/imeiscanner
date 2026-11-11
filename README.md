@@ -26,7 +26,7 @@ Summary cards (scanned records, valid IMEI, needs review, models) and quick navi
 
 ### People: move and delete
 Every phone belongs to exactly one person or to nobody (**Unassigned**), so **Everyone** is simply all phones and never lists one twice.
-- **Person chips** show how many phones each person has: *Everyone*, each person, and *Unassigned* when there are any. Rename a person with their **Rename** button (or the name box); **Add person** adds one.
+- **Person chips** show how many phones each person has: *Everyone*, each person, and *Unassigned* when there are any. Tap a person to get **Rename** and **Delete person** buttons; **Add person** adds one. Deleting a person asks whether to keep their phones (moved to Unassigned, with Undo) or delete them too. At least one person is always kept.
 - **Move** (the person menu on each row, **Move selected to**, **Move all to** in a person's view, Bulk edit, or the Person menu in the photo review window): the previous person loses the phone automatically and Everyone is updated without duplicates. A phone is **never moved if the destination already has the same IMEI**; it stays where it is and a message says so.
 - **All IMEIs moved.** When the last phone leaves a person, that person's view says *All IMEIs moved.* (remembered across reloads).
 - **Delete:** while viewing **one person**, Delete (row trash, **Delete selected**, **Delete all**, or the review window) takes the phone off that person and leaves it under Everyone as **Unassigned**, with no confirmation. While viewing **Everyone** or **Unassigned**, Delete removes it **permanently**, after an in-app confirmation (*Delete permanently? / Cancel*).

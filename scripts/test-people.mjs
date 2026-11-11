@@ -9,7 +9,7 @@ import ts from 'typescript';
 const dir = await mkdtemp(join(tmpdir(), 'imei-people-'));
 try {
   await writeFile(join(dir, 'people.mjs'), ts.transpileModule(await readFile('src/people.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText);
-  const { planMove, planUnassign, recordsForFilter, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } = await import(pathToFileURL(join(dir, 'people.mjs')).href);
+  const { planDeletePerson, nextPersonNumber, planMove, planUnassign, recordsForFilter, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } = await import(pathToFileURL(join(dir, 'people.mjs')).href);
   const rec = (id, personId, imei) => ({ id, personId, imei });
   const base = () => [rec('a', 'p1', '490154203237518'), rec('b', 'p1', '356938035643809'), rec('c', 'p2', '353879234252633'), rec('d', 'p2', '358240051111110')];
 
@@ -71,5 +71,17 @@ try {
   assert.equal(isPersonView(UNASSIGNED_FILTER), false);
   // Everyone never lists a record twice even if the input did.
   assert.equal(recordsForFilter([...base(), rec('a', 'p1', '490154203237518')], 'All').length, 4);
+  // Delete a person: keep phones (they become unassigned) or delete them with the person.
+  let gone = planDeletePerson(base(), 'p1', false);
+  assert.deepEqual(gone.affected.sort(), ['a', 'b']);
+  assert.equal(gone.records.length, 4, 'keeping phones loses nothing');
+  assert.equal(recordsForFilter(gone.records, UNASSIGNED_FILTER).length, 2);
+  assert.equal(recordsForFilter(gone.records, 'p2').length, 2, 'other people are untouched');
+  gone = planDeletePerson(base(), 'p1', true);
+  assert.deepEqual(gone.records.map(r => r.id).sort(), ['c', 'd']);
+  assert.equal(planDeletePerson(base(), 'p9', true).records.length, 4, 'unknown person changes nothing');
+  assert.equal(nextPersonNumber(['Person 1', 'Person 3']), 4, 'label of a deleted person is not reused');
+  assert.equal(nextPersonNumber([]), 1);
+
   console.log('PASS: moving IMEIs between people (previous owner loses them, no duplicates, All IMEIs moved), delete-under-a-person becomes unassigned under Everyone, unassigned filter.');
 } finally { await rm(dir, { recursive: true, force: true }); }
