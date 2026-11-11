@@ -39,9 +39,9 @@ try {
   assert.equal(f.cameraImei(f.labelledBarcodeImeis([positioned[1]],[barcodeLines[1]])),second);
   assert.equal(f.labelledBarcodeImeis(positioned,[{...barcodeLines[0],text:'IMEI 1 IMEI 2'}]),'');
   assert.equal(f.labelledBarcodeImeis([{rawValue:first}],barcodeLines),'');
-  assert.equal(f.hasMultipleDeviceText(`IMEI 1: ${first}\nIMEI 2: ${second}\nS/N: R8YL6`),false);
+  assert.equal(f.hasMultipleDeviceText(`IMEI 1: ${first}\nIMEI 2: ${second}\nS/N: R0YL6`),false);
   assert.equal(f.hasMultipleDeviceText('S/N: FIRST0001\nS/N: SECOND002'),true);
-  assert.equal(f.hasMultipleDeviceText('S/N: RFGYC2L1PLK'),false);
+  assert.equal(f.hasMultipleDeviceText('S/N: RTEST2L1PLK'),false);
   assert.ok(f.luhnValid(first)); assert.ok(f.luhnValid(second));
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 2: ${second}`),first);
   assert.equal(f.cameraImei(`IMEI 2: ${second}`),second);
@@ -49,17 +49,17 @@ try {
   assert.equal(f.extractPreferredImei(`IMEI 1: unreadable\nIMEI 2: ${second}`),second);
   assert.equal(f.cameraImei(`IMEI 1: ${first}\nIMEI 1: ${second}`),'');
   assert.equal(f.recordSerial({raw:'S/N: 00012345AB'}),'00012345AB');
-  assert.equal(f.recordSerial({raw:'S / N:\nR8YL6ABC012'}),'R8YL6ABC012');
-  assert.equal(f.recordSerial({raw:'S/N: R8YL6ABC012\nS/N: R8YL6ABC012'}),'R8YL6ABC012');
-  assert.equal(f.recordSerial({raw:'S/N: R8YL6ABC012\nS/N: OTHER12345'}),'');
+  assert.equal(f.recordSerial({raw:'S / N:\nR0YL6ABC012'}),'R0YL6ABC012');
+  assert.equal(f.recordSerial({raw:'S/N: R0YL6ABC012\nS/N: R0YL6ABC012'}),'R0YL6ABC012');
+  assert.equal(f.recordSerial({raw:'S/N: R0YL6ABC012\nS/N: OTHER12345'}),'');
   assert.equal(f.recordSerial({raw:'S/N:\nMODEL: SM-A075F'}),'');
   assert.equal(f.recordSerial({raw:'S/N: OLD12345',serial:'000012'}),'000012');
   const row = {id:'one',pictureId:'PIC-ONE',number:3,personId:'p',name:'photo.jpg',dataUrl:'data:image/jpeg;base64,ORIGINAL',cropDataUrl:'data:image/jpeg;base64,CROP',model:'Unknown unit',imei:first,status:'Valid',duplicate:false,createdAt:'2026-11-09',uploadBatchId:'latest',raw:''};
   const blank = {...row,id:'two',pictureId:'PIC-TWO',number:4,imei:'',status:'Review',cropDataUrl:'data:image/jpeg;base64,CROP2'};
-  const serialOnly = {...blank,serial:'RFGYC2L1PLK'};
+  const serialOnly = {...blank,serial:'RTEST2L1PLK'};
   assert.equal(f.reviewStatus(serialOnly),'Serial only');
   assert.equal(f.reviewStatus({...serialOnly,serialNeedsReview:true}),'Needs review');
-  assert.ok(f.recordsCsv([serialOnly],new Map(),peopleForTest(),false,'simple').includes('RFGYC2L1PLK'));
+  assert.ok(f.recordsCsv([serialOnly],new Map(),peopleForTest(),false,'simple').includes('RTEST2L1PLK'));
   function peopleForTest(){return [{id:'p',label:'Person 1',name:''}];}
   const share=f.buildSharePackage([{number:3,pictureId:'PIC-ONE',model:'Watch',imei:'490154203237518',serial:'',photo:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}]);
   assert.equal(share.entries.length,2);
@@ -67,8 +67,8 @@ try {
   assert.equal(await share.entries[1].file.text(),'CROP2TWO');
   assert.equal(share.entries[0].text,'490154203237518');
   assert.equal(share.entries[1].text,'000ABC123','IMEI mode falls back to serial when there is no IMEI');
-  assert.equal(f.shareNumberText({imei:'490154203237518',serial:'RFGYC2L1PLK'},'imei'),'490154203237518','IMEI mode sends only the IMEI');
-  assert.equal(f.shareNumberText({imei:'490154203237518',serial:'RFGYC2L1PLK'},'imei_serial'),'490154203237518\nRFGYC2L1PLK');
+  assert.equal(f.shareNumberText({imei:'490154203237518',serial:'RTEST2L1PLK'},'imei'),'490154203237518','IMEI mode sends only the IMEI');
+  assert.equal(f.shareNumberText({imei:'490154203237518',serial:'RTEST2L1PLK'},'imei_serial'),'490154203237518\nRTEST2L1PLK');
   assert.equal(Object.keys(share.entries[0]).sort().join(),'file,text','Picture and text are separate share payloads');
   const withSerial=f.buildSharePackage([{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}],'imei_serial');
   assert.equal(withSerial.entries[0].text,'000ABC123');
@@ -92,11 +92,11 @@ try {
   const sheet=workbook.getWorksheet('All IMEIs');
   assert.deepEqual([1,2,3].map(c=>sheet.getRow(1).getCell(c).value),['IMEI 1','IMEI 2','Serial']);
   assert.equal(sheet.getCell('A2').value,first); assert.equal(sheet.getCell('A3').value,'');
-  assert.equal(sheet.getCell('C3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
+  assert.equal(sheet.getCell('C3').value,'RTEST2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
   {
     const pair={...row,serial:'R58M20ABCDE',raw:`IMEI 1: ${first}\nIMEI 2: ${second}`};
     const minimalCsv=f.recordsCsv([pair,serialOnly],new Map(),people,false,'imei_photo').replace('\uFEFF','').split('\r\n');
-    assert.deepEqual(minimalCsv,['"IMEI 1","IMEI 2","Serial"',`"${first}","${second}","R58M20ABCDE"`,'"","","RFGYC2L1PLK"'],'CSV: IMEI 1, IMEI 2, Serial only');
+    assert.deepEqual(minimalCsv,['"IMEI 1","IMEI 2","Serial"',`"${first}","${second}","R58M20ABCDE"`,'"","","RTEST2L1PLK"'],'CSV: IMEI 1, IMEI 2, Serial only');
     const minimalBook=new ExcelJS.Workbook();await minimalBook.xlsx.load(await (await f.createInventoryWorkbook([pair],new Map(),false,people,'',false,'imei_photo')).arrayBuffer());
     assert.equal(minimalBook.worksheets.length,1,'Sheets export: one tab');
     assert.deepEqual([1,2,3,4].map(c=>minimalBook.worksheets[0].getRow(2).getCell(c).value??null),[first,second,'R58M20ABCDE',null]);
@@ -104,7 +104,7 @@ try {
   assert.equal(f.extractPreferredImei('IMEI: 490154203237518'),'490154203237518','Un-indexed IMEI label');
   assert.equal(f.extractPreferredImei('IMEI: 490154203237519'),'','Un-indexed IMEI must pass Luhn');
   assert.equal(f.extractPreferredImei('IMEI 1: 490154203237518\nIMEI: 356938035643809'),'490154203237518','Indexed IMEI wins over un-indexed');
-  assert.equal(f.recordSerial({raw:'SN: RFGYC2L1PLK'}),'RFGYC2L1PLK');
+  assert.equal(f.recordSerial({raw:'SN: RTEST2L1PLK'}),'RTEST2L1PLK');
   {
     assert.deepEqual(f.recordImeiPair({imei:second,raw:`IMEI 2: ${second}`}),{imei1:'',imei2:second},'Stored IMEI 2 is not shown as IMEI 1');
     assert.deepEqual(f.recordImeiPair({imei:first,raw:`IMEI 2: 356938035643808`}),{imei1:first,imei2:''},'Invalid IMEI 2 is left blank');
@@ -119,7 +119,7 @@ try {
     const ws=book.getWorksheet('IMEIs');
     assert.deepEqual([1,2,3,4,5,6].map(c=>ws.getRow(1).getCell(c).value),['IMEI 1','IMEI 2','Serial','Picture','Download',null],'IMEI 1, IMEI 2, serial, picture and download only');
     assert.deepEqual(['A2','B2','C2'].map(c=>ws.getCell(c).value),[first,second,'R58M20ABCDE'],'Both IMEIs and the serial');
-    assert.deepEqual(['A3','B3','C3'].map(c=>ws.getCell(c).value??''),['','','RFGYC2L1PLK'],'Serial-only unit: blank IMEIs, serial filled');
+    assert.deepEqual(['A3','B3','C3'].map(c=>ws.getCell(c).value??''),['','','RTEST2L1PLK'],'Serial-only unit: blank IMEIs, serial filled');
     // Off a website (Android app / local file) the link is the picture file beside the workbook.
     const link=ws.getCell('E2').value;assert.equal(link.text,'Download picture');assert.ok(!link.hyperlink.includes('#'),'No # in file links');
     assert.equal(await named(link.hyperlink).blob.text(),'CROPONE','Link points at that row\'s picture file next to the workbook');

@@ -3,7 +3,8 @@ import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from 
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
-import { barcodeImei, imeiReadingsDisagree, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes } from '../src/barcode-imei.ts';
+import { barcodeImei, imeiReadingsDisagree, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, pickImei2 } from '../src/barcode-imei.ts';
+
 import { readBarcodes } from 'zxing-wasm/reader';
 
 /** All Code 128 barcodes in the frame with their boxes, for pairing with IMEI labels. */
@@ -155,7 +156,9 @@ export async function createScanner() {
       const results = [];
       for (const region of selections) {
         const photo = region ? await sharp(color).extract({ left: Math.max(0, Math.floor(region.x)), top: Math.max(0, Math.floor(region.y)), width: Math.min(colorSize.width - Math.floor(region.x), Math.ceil(region.width)), height: Math.min(colorSize.height - Math.floor(region.y), Math.ceil(region.height)) }).jpeg({ quality: 85 }).toBuffer() : color;
-        let cropRaw = region ? (await worker.recognize(photo)).data.text || '' : raw;
+        const cropData = region ? (await worker.recognize(photo)).data : null;
+        let cropRaw = cropData ? cropData.text || '' : raw;
+        const cropLines = cropData ? ocrLines(cropData) : lines;
         { const cropCodes = [...new Set([...await cropBarcodeValues(photo), ...codesInside(region)])]; const fromBarcodes = [resolveImeisFromBarcodes(cropCodes, cropRaw), resolveSerialFromBarcodes(cropCodes, cropRaw)].filter(Boolean).join('\n'); if (fromBarcodes) cropRaw = `${fromBarcodes}\n${cropRaw}`; }
         let imei = splitFailed ? '' : preferredImei(cropRaw);
         if (region && !labelledNumbers(cropRaw,1).some(luhnValid) && mode !== 'fast') {
@@ -166,10 +169,59 @@ export async function createScanner() {
           await worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT});
           imei = preferredImei(cropRaw);
         }
-        if (!imei && !extractSerial(cropRaw)) {
+        // IMEI 2 is printed just to the right of IMEI 1 on the same strip
+        // ("IMEI 1: ...   IMEI 2: ..."). When it is still missing, re-read a tight box
+        // to the right of each IMEI 1 line, enlarged 2x, in block and sparse modes.
+        // A wide strip fails: barcodes above/below and the label's tilt confuse OCR.
+        // samsungImei2 then checks the result against IMEI 1's serial block.
+        if (imei && mode !== 'fast' && !pickImei2(imei, cropRaw)) {
+          const meta = await sharp(photo).metadata();
+          const strip = cropLines.filter(line => line.bbox && /IM[E3][I1!|L]/i.test(line.text) && line.text.replace(/D/g, '').length >= 6).slice(0, 4);
+          for (const line of strip) {
+            const h = Math.max(8, line.bbox.y1 - line.bbox.y0), w = line.bbox.x1 - line.bbox.x0;
+            const left = Math.min(meta.width - 1, Math.round(line.bbox.x1 + h * .4)), top = Math.max(0, Math.round(line.bbox.y0 - h * 1.3));
+            const box = { left, top, width: Math.max(1, Math.min(meta.width - left, Math.round(w * 1.35))), height: Math.max(1, Math.min(meta.height - top, Math.round(h * 2.6))) };
+            if (box.width < 20 || box.height < 8) continue;
+            const image = await sharp(photo).extract(box).resize({ width: box.width * 2 }).grayscale().normalise().sharpen().png().toBuffer();
+            for (const psm of [PSM.SINGLE_BLOCK, PSM.SPARSE_TEXT]) {
+              await worker.setParameters({ tessedit_pageseg_mode: psm });
+              const stripText = (await worker.recognize(image)).data.text || '';
+              cropRaw += `
+${stripText}`;
+            }
+            if (pickImei2(imei, cropRaw)) break;
+          }
+          await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+        }
+        // Dark labels (white text on black) read far better inverted. Only when IMEI 2
+        // or the serial is still missing, so ordinary white labels cost nothing extra.
+        if (region && mode !== 'fast' && (!pickImei2(imei, cropRaw) || !extractSerial(cropRaw))) {
+          const { channels } = await sharp(photo).stats();
+          if ((channels[0].mean + channels[1].mean + channels[2].mean) / 3 < 115) {
+            const inverted = await sharp(photo).resize({ width: 2600, height: 2600, fit: 'inside' }).grayscale().negate().normalise().sharpen().jpeg({ quality: 95 }).toBuffer();
+            await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+            cropRaw += `\n${(await worker.recognize(inverted)).data.text || ''}`;
+            await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
+            cropRaw += `\n${(await worker.recognize(inverted)).data.text || ''}`;
+            await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+            if (!imei) imei = preferredImei(cropRaw);
+          }
+        }
+        // Serial still missing: Samsung prints "S/N" at the top-left of the label, under
+        // the model barcode. Reading just that part of the box (sparse mode) is far more
+        // reliable than the whole box, where barcodes drown out the short S/N line.
+        if (region && mode !== 'fast' && !extractSerial(cropRaw)) {
+          const meta = await sharp(photo).metadata();
+          const corner = await sharp(photo).extract({ left: 0, top: 0, width: Math.max(1, Math.round(meta.width * .6)), height: Math.max(1, Math.round(meta.height * .6)) }).grayscale().normalise().sharpen().png().toBuffer();
+          await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+          const cornerText = (await worker.recognize(corner)).data.text || '';
+          if (extractSerial(cornerText)) cropRaw = `${cornerText}\n${cropRaw}`;
+        }
+        // Serial still missing: focused re-read of the label (also when the IMEI was found).
+        if ((!imei || mode !== 'fast') && !extractSerial(cropRaw)) {
           const {data,info}=await sharp(photo).ensureAlpha().raw().toBuffer({resolveWithObject:true});const box=serialLabelRegion({data,width:info.width,height:info.height});
           await worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK});
-          for(const angle of [6,0,-6]) { const focus=await sharp(photo).extract({left:box.x,top:box.y,width:box.width,height:box.height}).resize({width:2200,height:2200,fit:'inside'}).rotate(angle,{background:'white'}).grayscale().normalise().sharpen().toBuffer();const text=(await worker.recognize(focus)).data.text||'';if(serialReading(text).serial){cropRaw=text;break;} }
+          for(const angle of [6,0,-6]) { const focus=await sharp(photo).extract({left:box.x,top:box.y,width:box.width,height:box.height}).resize({width:2200,height:2200,fit:'inside'}).rotate(angle,{background:'white'}).grayscale().normalise().sharpen().toBuffer();const text=(await worker.recognize(focus)).data.text||'';if(serialReading(text).serial){cropRaw=`${text}\n${cropRaw}`;break;} }
         }
         imei=splitFailed?'':preferredImei(cropRaw);
         await worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT});
@@ -182,8 +234,9 @@ export async function createScanner() {
           imei,
           ...serialReading(cropRaw),
           status: imei ? 'Valid' : 'Review',
-          cropNeedsReview: splitFailed || !!region?.needsReview || imeiReadingsDisagree(cropRaw, imei),
-          imei2: (() => { const second = barcodeImei(cropRaw, 2) || [...new Set(labelledNumbers(cropRaw, 2).filter(luhnValid))].join(); return /^\d{15}$/.test(second) ? second : ''; })(),
+          // A crop whose IMEI is barcode-confirmed is trusted even if a box edge was unclear.
+          cropNeedsReview: splitFailed || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
+          imei2: pickImei2(imei, cropRaw),
           ...(splitFailed ? (() => { const found = labelledNumbers(raw, 1).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
           raw: cropRaw,
           createdAt: new Date().toISOString(),

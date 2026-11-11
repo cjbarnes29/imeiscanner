@@ -1,4 +1,4 @@
-import { barcodeImei, imeiReadingsDisagree, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
+import { barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
@@ -622,6 +622,50 @@ async function readCropImei(worker: Awaited<ReturnType<typeof createWorker>>, cr
   return { raw, imei: extractPreferredImei(raw), lines:cropLines };
 }
 
+/**
+ * Second-chance reads for one device's picture, only for what is still missing:
+ * - IMEI 2: printed just right of IMEI 1 on the same strip. Re-read a tight box to
+ *   the right of each IMEI line at 2x; pickImei2 checks it against IMEI 1's serial block.
+ * - Serial: Samsung prints S/N at the top-left of the label; read just that corner,
+ *   where barcodes do not drown out the short line.
+ */
+async function refineCropText(worker: Awaited<ReturnType<typeof createWorker>>, photo: string, raw: string, lines: OcrLine[]) {
+  try {
+    const imei = extractPreferredImei(raw);
+    const needImei2 = !!imei && !pickImei2(imei, raw), needSerial = !extractSerial(raw);
+    if (!needImei2 && !needSerial) return raw;
+    const image = new Image(); image.src = photo; await image.decode();
+    const W = image.naturalWidth, H = image.naturalHeight;
+    const cut = (left: number, top: number, width: number, height: number, scale: number) => {
+      const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
+      const context = canvas.getContext('2d')!; context.imageSmoothingQuality = 'high'; context.filter = 'grayscale(1) contrast(1.4)';
+      context.drawImage(image, left, top, width, height, 0, 0, canvas.width, canvas.height); return canvas;
+    };
+    if (needImei2) {
+      const strip = lines.filter(line => line.bbox && /IM[E3][I1!|L]/i.test(line.text) && line.text.replace(/\D/g, '').length >= 6).slice(0, 4);
+      for (const line of strip) {
+        const h = Math.max(8, line.bbox.y1 - line.bbox.y0), w = line.bbox.x1 - line.bbox.x0;
+        const left = Math.min(W - 1, Math.round(line.bbox.x1 + h * .4)), top = Math.max(0, Math.round(line.bbox.y0 - h * 1.3));
+        const width = Math.min(W - left, Math.round(w * 1.35)), height = Math.min(H - top, Math.round(h * 2.6));
+        if (width < 20 || height < 8) continue;
+        const canvas = cut(left, top, width, height, 2);
+        for (const mode of [PSM.SINGLE_BLOCK, PSM.SPARSE_TEXT]) {
+          await worker.setParameters({ tessedit_pageseg_mode: mode });
+          raw += `\n${(await worker.recognize(canvas)).data.text || ''}`;
+        }
+        if (pickImei2(imei, raw)) break;
+      }
+    }
+    if (needSerial) {
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+      const cornerText = (await worker.recognize(cut(0, 0, Math.round(W * .6), Math.round(H * .6), 1))).data.text || '';
+      if (extractSerial(cornerText)) raw = `${cornerText}\n${raw}`;
+    }
+  } catch (error) { console.warn('Refine pass failed', error); }
+  finally { await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT }); }
+  return raw;
+}
+
 function csvCell(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
 }
@@ -885,7 +929,8 @@ function recordImeiPair(record: RecordItem) {
   let imei2 = record.imei2;
   if (imei2 === undefined) {
     const seconds = [...new Set([...(record.raw || '').matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid))];
-    imei2 = barcodeImei(record.raw || '', 2) || (seconds.length === 1 ? seconds[0] : '');
+    // The stored IMEI may itself be the label's IMEI 2 (no IMEI 1 was readable).
+    imei2 = seconds.length === 1 && seconds[0] === record.imei ? seconds[0] : pickImei2(record.imei, record.raw || '') || (!record.imei && seconds.length === 1 ? seconds[0] : '');
   }
   return { imei1: record.imei === imei2 ? '' : record.imei, imei2 };
 }
@@ -1814,6 +1859,7 @@ export default function App() {
         const cropDataUrl = croppedPhotos.get(detectedImei);
         const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw), lines };
         let cropRaw = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
+        if (scanMode !== 'fast' && !cropNeedsReview) cropRaw = await refineCropText(worker, cropDataUrl || dataUrl, cropRaw, cropResult.lines);
         if (!cropNeedsReview && !extractPreferredImei(cropRaw) && !extractSerial(cropRaw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl || dataUrl); if (serialRaw) cropRaw = serialRaw; }
         // Possibly several devices but only one IMEI 1 was read: keep it (the
         // record still asks "1 device or N?"). Several different IMEI 1s stay blank.
@@ -1846,7 +1892,8 @@ export default function App() {
           dataUrl,
           cropDataUrl,
           // Flag OCR that disagrees with itself about this IMEI, even if Luhn passes.
-          cropNeedsReview: cropNeedsReview || !!region?.needsReview || imeiReadingsDisagree(cropRaw, imei),
+          // A crop whose IMEI is barcode-confirmed is trusted even if a box edge was unclear.
+          cropNeedsReview: cropNeedsReview || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
           imei2: recordImeiPair({ imei, raw: cropRaw } as RecordItem).imei2,
           ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
           model,

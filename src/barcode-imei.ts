@@ -5,20 +5,27 @@ function valid(value:string){if(!/^\d{15}$/.test(value))return false;let sum=0;f
 export function labelledBarcodeLines(codes:PositionedBarcode[],lines:OcrLine[]):OcrLine[] {
   const matches:{type:string;code:number;label:OcrLine['bbox'];offset:number}[]=[];
   for(const line of lines){
-    const labels=[...line.text.matchAll(/\bIM[E3][I1!|L]\s*(0?[12])\b/gi)];
+    // "IMEI 1", "IMEI 2", or a bare "IMEI:" (OCR often drops the 1; treated as IMEI 1).
+    const labels=[...line.text.matchAll(/\bIM[E3][I1!|L]\s*(?:(0?[12])\b|(?=\s*[:#;]))/gi)];
     if(labels.length!==1)continue;
     const b=line.bbox,h=b.y1-b.y0;
+    // Where the label text itself starts (OCR lines can begin with other text).
+    const labelX=b.x0+(b.x1-b.x0)*(labels[0].index??0)/Math.max(1,line.text.length);
+    // Digits OCR read after the label, even partly: they must agree with the barcode.
+    const readDigits=line.text.slice((labels[0].index??0)+labels[0][0].length).replace(/\D/g,'');
     const nearby=codes.map((code,index)=>({code,index})).filter(({code})=>{
       const r=code.boundingBox;if(!r||!valid(code.rawValue))return false;
       // 1-D decoders report the scan line (a box ~1px tall), not the bars. IMEI
       // barcodes are roughly 5x wider than tall, so estimate the real bottom edge.
       const barHeight=Math.max(r.height,r.width*.2),bottom=r.height>=r.width*.2?r.y+r.height:r.y+barHeight/2;
       const gap=b.y0-bottom,center=(b.x0+b.x1)/2;
-      return gap>=-h&&gap<=Math.max(h*3,barHeight*.6)&&center>=r.x-r.width*.15&&center<=r.x+r.width*1.15;
+      // Labels are printed left-aligned under their own barcode. A label starting
+      // far to the right (an IMEI 2 under a strip's single IMEI 1 barcode) is not its owner.
+      const aligned=labelX>=r.x-r.width*.12&&labelX<=r.x+r.width*.3;
+      const agrees=readDigits.length<6||commonRun(readDigits,code.rawValue)>=6;
+      return aligned&&agrees&&gap>=-h&&gap<=Math.max(h*3,barHeight*.6)&&center>=r.x-r.width*.15&&center<=r.x+r.width*1.15;
     });
-    // Where the label text itself starts (OCR lines can begin with other text).
-    const labelX=b.x0+(b.x1-b.x0)*(labels[0].index??0)/Math.max(1,line.text.length);
-    if(nearby.length===1)matches.push({type:String(Number(labels[0][1])),code:nearby[0].index,label:b,offset:Math.abs(labelX-codes[nearby[0].index].boundingBox!.x)});
+    if(nearby.length===1)matches.push({type:String(Number(labels[0][1]||1)),code:nearby[0].index,label:b,offset:Math.abs(labelX-codes[nearby[0].index].boundingBox!.x)});
   }
   // Two labels may sit under one wide barcode (IMEI 1 and IMEI 2 side by side).
   // Labels are printed left-aligned under their own barcode, so the label that
@@ -67,7 +74,7 @@ export function resolveImeisFromBarcodes(values:string[],text:string):string {
 const fold=(value:string)=>value.toUpperCase().replace(/O/g,'0').replace(/[IL|]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2').replace(/G/g,'6');
 /**
  * Serial from a Code 128 S/N barcode, confirmed by the OCR text. Samsung
- * serials are letters+digits (e.g. R83L810D0MW); OCR often swaps 8/B, 0/O.
+ * serials are letters+digits (e.g. R58M20ABCDE); OCR often swaps 8/B, 0/O.
  * Returns "S/N (barcode): VALUE" so serial parsing can prefer it, or ''.
  */
 export function resolveSerialFromBarcodes(values:string[],text:string):string {
@@ -96,4 +103,56 @@ export function imeiReadingsDisagree(text:string,chosen:string):boolean {
   if(!/^\d{15}$/.test(chosen)||barcodeImei(text,1)===chosen||barcodeImei(text,2)===chosen)return false;
   const readings=[...text.matchAll(/(?<!\d)((?:\d[ -]?){14}\d)(?![ -]?\d)/g)].map(m=>m[1].replace(/\D/g,'')).filter(v=>v.length===15&&v!==chosen);
   return readings.some(v=>{let d=0;for(let i=0;i<15;i++)if(v[i]!==chosen[i])d++;return d<=2;});
+}
+
+function luhnDigit(first14:string){let sum=0;for(let i=0;i<14;i++){let n=Number(first14[13-i]);if(i%2===0){n*=2;if(n>9)n-=9;}sum+=n;}return String((10-sum%10)%10);}
+/**
+ * IMEI 2 on Samsung dual-SIM labels. Samsung prints IMEI 1 and IMEI 2 with the
+ * same 6-digit serial block (digits 9-14), e.g. 35000011 085661 6 and
+ * 35000012 085661 4. Each 15-digit IMEI 2 reading is checked against that:
+ * a reading that already matches is used; a reading at most 2 digits away from
+ * "its own first 8 digits + IMEI 1's serial block + check digit" is corrected to
+ * that value. No reading close enough means no IMEI 2 (left blank), never a guess.
+ */
+export function samsungImei2(imei1:string,text:string):string{
+  if(!valid(imei1))return '';
+  const block=imei1.slice(8,14);
+  // OCR variants of the label seen on real labels: "IMEI 2", "IME| 2", "IME\ 2", "IME) 2", "MEI 2".
+  const readings=[...text.matchAll(/(?:\bI?M[E3][I1!|L\\)]?|\bIM[E3])\s*0?2\s*[:;#.,-]?\s*((?:\d[\s-]?){15})(?![\s-]?\d)/gi)].map(m=>m[1].replace(/\D/g,'')).filter(v=>v.length===15&&v!==imei1);
+  // Exact readings first: a Luhn-valid reading that already shares IMEI 1's serial
+  // block is taken as read. Corrections are only for when no reading is exact, so a
+  // misread digit can never "fix" a correct number into a wrong one.
+  const exact=new Map<string,number>();
+  for(const reading of readings)if(valid(reading)&&reading.slice(8,14)===block&&reading.slice(0,8)!==imei1.slice(0,8))exact.set(reading,(exact.get(reading)||0)+1);
+  const exactRanked=[...exact].sort((a,b)=>b[1]-a[1]);
+  if(exactRanked.length)return exactRanked.length<2||exactRanked[0][1]>exactRanked[1][1]?exactRanked[0][0]:'';
+  const votes=new Map<string,number>();
+  for(const reading of readings){
+    const candidate=reading.slice(0,8)+block;const full=candidate+luhnDigit(candidate);
+    let diff=0;for(let i=0;i<15;i++)if(reading[i]!==full[i])diff++;
+    // The correction only rebuilds the serial block (digits 9-14) and the check digit.
+    // If the block already matched, the misread is in the first 8 digits, which this
+    // cannot fix: rebuilding the check digit would turn a misread into a valid-looking
+    // wrong number. Only accept corrections where the block itself was misread.
+    const blockMisread=reading.slice(8,14)!==block;
+    if(blockMisread&&diff<=2&&full.slice(0,8)!==imei1.slice(0,8))votes.set(full,(votes.get(full)||0)+1);
+  }
+  const ranked=[...votes].sort((a,b)=>b[1]-a[1]);
+  return ranked.length&&(ranked.length<2||ranked[0][1]>ranked[1][1])?ranked[0][0]:'';
+}
+
+/**
+ * IMEI 2 for one device's text: its barcode, then a reading that shares IMEI 1's
+ * serial block (exact or block-corrected), then a single plain Luhn-valid OCR
+ * reading. On Samsung labels a reading with a different serial block is a misread
+ * and is dropped. Returns '' rather than guess.
+ */
+export function pickImei2(imei:string,text:string):string{
+  const samsung=/\bS\s*M\s*[-–—]?\s*[A-Z]\d{3}/i.test(text);
+  const sameBlock=(value:string)=>!samsung||!imei||value.slice(8,14)===imei.slice(8,14);
+  const fromBarcode=barcodeImei(text,2);
+  if(fromBarcode&&fromBarcode!==imei&&sameBlock(fromBarcode))return fromBarcode;
+  if(imei){const reconciled=samsungImei2(imei,text);if(reconciled)return reconciled;}
+  const readings=[...new Set([...text.matchAll(/\bIM[E3][I1!|L]\s*0?2\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(m=>m[1].replace(/\D/g,'')).filter(valid))].filter(value=>value!==imei&&sameBlock(value));
+  return readings.length===1?readings[0]:'';
 }

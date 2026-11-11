@@ -19,6 +19,6 @@ Verification:
 
 - Production build, identifier/export/sharing regression tests and new device-splitting tests pass.
 - Generated fixtures test serial-only, IMEI-2-only and mixed multi-device boundaries, neighbour exclusion, duplicate OCR suppression, shared sticker grouping and missing-edge safety. These are not physical camera tests.
-- Local OCR of the supplied real watch photo reads RFGYC2L1PLK with IMEI blank. The supplied real phone-box photo yields IMEI 357126894573692 as one device. A real image crop containing IMEI 2 only yields 357937314573694.
+- Local OCR of the supplied real watch photo reads the serial with IMEI blank. The supplied real phone-box photo yields one IMEI as one device. A real image crop containing IMEI 2 only yields (the second IMEI).
 - Browser phone-width checks verify placement, preference persistence, burst settings and camera-unavailable handling. The computer camera is unavailable; physical ImageCapture, live bursts and a real multi-device phone-camera photo remain unverified.
 - This is a web-only release. No APK build is requested or triggered.

@@ -8,10 +8,12 @@ export function exportModel(model: string) {
 }
 
 /** Use visible, high-coverage edges to separate distinct label groups. */
-export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, height: number, frame?: PixelFrame, anchors?: {key:string;box:OcrLine['bbox']}[]): CropRegion[] {
+export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, height: number, frame?: PixelFrame, anchors?: {key:string;box:OcrLine['bbox'];members?:OcrLine['bbox'][]}[]): CropRegion[] {
+  // A device's area is all of its labels (main label plus tear-off strips), not just one line.
+  const spanOf = (anchor: {box:OcrLine['bbox'];members?:OcrLine['bbox'][]}) => { const boxes = [anchor.box, ...(anchor.members || [])]; return { x0: Math.min(...boxes.map(b => b.x0)), y0: Math.min(...boxes.map(b => b.y0)), x1: Math.max(...boxes.map(b => b.x1)), y1: Math.max(...boxes.map(b => b.y1)) }; };
   if (imeis.length < 2 || width <= 0 || height <= 0 || !frame || frame.width !== width || frame.height !== height) return [];
   const validBox = (box: OcrLine['bbox']) => [box.x0, box.x1, box.y0, box.y1].every(Number.isFinite) && box.x1 > box.x0 && box.y1 > box.y0;
-  const located = anchors ? anchors.map(anchor=>({imei:anchor.key,box:anchor.box,x:(anchor.box.x0+anchor.box.x1)/2,y:(anchor.box.y0+anchor.box.y1)/2})) : imeis.map(imei => {
+  const located = anchors ? anchors.map(anchor=>{const box=spanOf(anchor);return {imei:anchor.key,box,x:(box.x0+box.x1)/2,y:(box.y0+box.y1)/2};}) : imeis.map(imei => {
     let matches = lines.filter(line => line.bbox && validBox(line.bbox) && line.text.replace(/\D/g, '').includes(imei));
     if (!matches.length) {
       // OCR sometimes wraps the number onto the line after "IMEI 1".
