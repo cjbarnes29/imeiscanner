@@ -8,7 +8,7 @@ const options={target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022};
 // Transpile every module the grouping code needs into a temp dir, rewriting
 // relative imports, so new imports never silently break this test again.
 const dir=await mkdtemp(join(tmpdir(),'imei-split-'));
-for(const name of ['serial','scan-layout','product-bands','device-labels','barcode-imei','phone-names']){
+for(const name of ['serial','scan-layout','product-bands','device-labels','barcode-imei','phone-names','samsung-models']){
  const source=(await readFile(`src/${name}.ts`,'utf8')).replace(/from '\.\/([\w-]+)(?:\.ts)?'/g,"from './$1.mjs'");
  await writeFile(join(dir,name+'.mjs'),ts.transpileModule(source,{compilerOptions:options}).outputText);
 }
@@ -119,7 +119,7 @@ try{
    eq('SM-F956B','Galaxy Z Fold6','Fold series');
    eq('SM-F766B','Galaxy Z Flip7','Flip series');
    eq('SM-A077F/DS','Galaxy A07','A07 series');
-   eq('SM-A376B','Galaxy A37','A37 series');
+   eq('SM-A376B','Galaxy A37 5G','A37 series');
    eq('SM-A165F','Galaxy A16','A16 series');
    eq('Samsung Galaxy S25 Ultra','Galaxy S25 Ultra','S25 series');
    eq('Apple iPhone 17 Pro','Apple iPhone 17 Pro','iPhone 17 series');

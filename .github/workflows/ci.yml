@@ -21,4 +21,5 @@ jobs:
       - run: node scripts/test-records.mjs
       - run: node scripts/test-device-splitting.mjs
       - run: node scripts/test-people.mjs
+      - run: node scripts/test-models.mjs
       - run: npm run build

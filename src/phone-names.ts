@@ -1,12 +1,13 @@
 // Friendly phone names for the simple list: "Galaxy S25 Ultra" under "S25 series" instead
 // of a model code like SM-S938B. The Samsung catalog is used first; codes it does not list
 // are decoded with Samsung's numbering rules.
+import { SAMSUNG_MODELS } from './samsung-models';
 export type CatalogEntry = { name: string; modelCode: string };
 export type PhoneInfo = { name: string; series: string };
 
 const S_GENERATION: Record<string, string> = { '90': 'S22', '91': 'S23', '92': 'S24', '93': 'S25', '94': 'S26' };
 const S_FAN_EDITION: Record<string, string> = { '71': 'S23 FE', '72': 'S24 FE', '73': 'S25 FE', '74': 'S26 FE' };
-const FOLDS: Record<string, string> = { F946: 'Z Fold5', F956: 'Z Fold6', F966: 'Z Fold7', F971: 'Z Fold8', F976: 'Z Fold8 Ultra' };
+const FOLDS: Record<string, string> = { F946: 'Z Fold5', F956: 'Z Fold6', F966: 'Z Fold7', F971: 'Z Fold8', F976: 'Z Fold8', F978: 'Z Fold8 Ultra' };
 const FLIPS: Record<string, string> = { F731: 'Z Flip5', F741: 'Z Flip6', F761: 'Z Flip7 FE', F766: 'Z Flip7', F776: 'Z Flip8' };
 
 /** "Galaxy S26 Ultra 512GB (Unlocked)" -> "Galaxy S26 Ultra". */
@@ -60,8 +61,9 @@ export function phoneInfo(model: string, catalog: CatalogEntry[] = []): PhoneInf
   const text = (model || '').trim();
   const code = modelCode4(text);
   if (code) {
-    const entry = catalog.find(item => item.modelCode.toUpperCase().replace(/^SM-?/, '').startsWith(code));
-    const name = entry ? cleanPhoneName(entry.name) : nameFromCode(code);
+    const listed = SAMSUNG_MODELS[code];
+    const entry = listed ? undefined : catalog.find(item => item.modelCode.toUpperCase().replace(/^SM-?/, '').startsWith(code));
+    const name = listed || (entry ? cleanPhoneName(entry.name) : nameFromCode(code));
     if (name) return { name, series: seriesOfName(name) };
     return { name: `Galaxy ${code}`, series: 'Other phones' };
   }

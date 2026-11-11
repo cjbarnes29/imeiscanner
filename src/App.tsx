@@ -1,7 +1,7 @@
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
-import { phoneInfo, type CatalogEntry } from './phone-names';
+import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
 import { planMove, planUnassign, planDeletePerson, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
@@ -3354,7 +3354,7 @@ export default function App() {
                         ? old.filter(id => id !== record.id)
                         : [...old, record.id])}
                     />
-                    <span><strong>#{record.number} · {record.imei || 'No IMEI'}</strong><small>{exportModel(record.model) || 'Unknown model'} · {record.pictureId}</small></span>
+                    <span><strong>#{record.number} · {record.imei || 'No IMEI'}</strong><small>{infoOf(record).series !== 'Unknown phones' ? `${infoOf(record).name} · ${exportModel(record.model)}` : exportModel(record.model) || 'Unknown model'} · {record.pictureId}</small></span>
                   </label>)}
                   {searchedExportRows.length > exportPreviewLimit && <button type="button" className="textbtn" onClick={() => setExportPreviewLimit(count => count + 30)}>Show more records</button>}
                 </div> : <p className="export-preview-empty">No matching records. Try another search or filter.</p>}
@@ -3842,6 +3842,7 @@ export default function App() {
             {!cropEditorOpen && <div className="manual-imei-entry">
               <label className="review-model" htmlFor="manual-model">Device model</label>
               <input id="manual-model" value={manualModel} onChange={event => setManualModel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); document.getElementById('manual-imei')?.focus(); } }} />
+              {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries).name}</small>}
               <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
               <label htmlFor="manual-imei">IMEI 1</label>
               <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
