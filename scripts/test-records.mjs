@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair', 'pictureWebLink'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -19,7 +19,7 @@ helpers += await readFile('src/serial.ts','utf8');
 helpers += await readFile('src/share-package.ts','utf8');
 helpers += await readFile('src/barcode-imei.ts','utf8');
 // Browser-only image decoding is stubbed; the package logic under test is unchanged.
-helpers += '\nasync function workbookImage(r){return {dataUrl:recordPhoto(r),width:120,height:90};}\n';
+helpers += '\nasync function workbookImage(r){return {dataUrl:recordPhoto(r),width:120,height:90};}\nconst androidBridge=undefined;\n';
 const catalogAst=ts.createSourceFile('SamsungCatalog.tsx',await readFile('src/SamsungCatalog.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 helpers += catalogAst.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='catalogModel').getText(catalogAst);
 helpers += `\nexport { ${names.join(',')} };`;
@@ -118,9 +118,16 @@ try {
     assert.deepEqual([1,2,3,4,5,6].map(c=>ws.getRow(1).getCell(c).value),['IMEI 1','IMEI 2','Serial','Picture','Download',null],'IMEI 1, IMEI 2, serial, picture and download only');
     assert.deepEqual(['A2','B2','C2'].map(c=>ws.getCell(c).value),[first,second,'R58M20ABCDE'],'Both IMEIs and the serial');
     assert.deepEqual(['A3','B3','C3'].map(c=>ws.getCell(c).value??''),['','','RFGYC2L1PLK'],'Serial-only unit: blank IMEIs, serial filled');
+    // Off a website (Android app / local file) the link is the picture file beside the workbook.
     const link=ws.getCell('E2').value;assert.equal(link.text,'Download picture');assert.ok(!link.hyperlink.includes('#'),'No # in file links');
     assert.equal(await named(link.hyperlink).blob.text(),'CROPONE','Link points at that row\'s picture file next to the workbook');
     assert.ok(named(ws.getCell('E3').value.hyperlink),'Serial-only row has its picture too');
+    // On the website, Excel phone apps need a web link: it opens the app at that picture.
+    globalThis.location=new URL('https://cjbarnes29.github.io/imeiscanner/');
+    const webFiles=await f.createImeiPhotoFiles([{...row,cropDataUrl:'data:image/jpeg;base64,Q1JPUE9ORQ=='}]);
+    const webBook=new ExcelJS.Workbook();await webBook.xlsx.load(await webFiles[0].blob.arrayBuffer());
+    assert.equal(webBook.getWorksheet('IMEIs').getCell('E2').value.hyperlink,'https://cjbarnes29.github.io/imeiscanner/#picture=PIC-ONE','Web link to the picture viewer');
+    delete globalThis.location;
     assert.equal(ws.getImages().length,2,'Each row shows its picture');
   }
   console.log('PASS: camera/upload IMEI 1 then IMEI 2 priority, positioned barcode matching, unreadable/ambiguous review, serial leading zeros, duplicate flags, unchanged record identity, crop selection, offline HTML entries/copy guard, CSV, Excel round-trip, shared photo/number pairing and batch limits.');

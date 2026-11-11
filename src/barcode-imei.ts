@@ -3,22 +3,35 @@ export type PositionedBarcode={rawValue:string;boundingBox?:{x:number;y:number;w
 function valid(value:string){if(!/^\d{15}$/.test(value))return false;let sum=0;for(let i=0;i<15;i++){let n=Number(value[14-i]);if(i%2){n*=2;if(n>9)n-=9;}sum+=n;}return sum%10===0;}
 /** Pair each "IMEI 1/2" OCR label with the one valid barcode printed directly above it. */
 export function labelledBarcodeLines(codes:PositionedBarcode[],lines:OcrLine[]):OcrLine[] {
-  const matches:{type:string;code:number;label:OcrLine['bbox']}[]=[];
+  const matches:{type:string;code:number;label:OcrLine['bbox'];offset:number}[]=[];
   for(const line of lines){
     const labels=[...line.text.matchAll(/\bIM[E3][I1!|L]\s*(0?[12])\b/gi)];
     if(labels.length!==1)continue;
     const b=line.bbox,h=b.y1-b.y0;
     const nearby=codes.map((code,index)=>({code,index})).filter(({code})=>{
       const r=code.boundingBox;if(!r||!valid(code.rawValue))return false;
-      const gap=b.y0-(r.y+r.height),center=(b.x0+b.x1)/2;
-      return gap>=-h&&gap<=Math.max(h*3,r.height*.6)&&center>=r.x-r.width*.15&&center<=r.x+r.width*1.15;
+      // 1-D decoders report the scan line (a box ~1px tall), not the bars. IMEI
+      // barcodes are roughly 5x wider than tall, so estimate the real bottom edge.
+      const barHeight=Math.max(r.height,r.width*.2),bottom=r.height>=r.width*.2?r.y+r.height:r.y+barHeight/2;
+      const gap=b.y0-bottom,center=(b.x0+b.x1)/2;
+      return gap>=-h&&gap<=Math.max(h*3,barHeight*.6)&&center>=r.x-r.width*.15&&center<=r.x+r.width*1.15;
     });
-    if(nearby.length===1)matches.push({type:String(Number(labels[0][1])),code:nearby[0].index,label:b});
+    // Where the label text itself starts (OCR lines can begin with other text).
+    const labelX=b.x0+(b.x1-b.x0)*(labels[0].index??0)/Math.max(1,line.text.length);
+    if(nearby.length===1)matches.push({type:String(Number(labels[0][1])),code:nearby[0].index,label:b,offset:Math.abs(labelX-codes[nearby[0].index].boundingBox!.x)});
   }
-  return matches.filter(m=>matches.filter(other=>other.code===m.code).length===1).map(m=>{
-    const r=codes[m.code].boundingBox!;
-    return {text:`IMEI ${m.type}: ${codes[m.code].rawValue}`,bbox:{x0:Math.min(r.x,m.label.x0),y0:Math.min(r.y,m.label.y0),x1:Math.max(r.x+r.width,m.label.x1),y1:Math.max(r.y+r.height,m.label.y1)}};
-  });
+  // Two labels may sit under one wide barcode (IMEI 1 and IMEI 2 side by side).
+  // Labels are printed left-aligned under their own barcode, so the label that
+  // starts at the barcode's left edge wins when it is clearly closer; otherwise
+  // the barcode is ambiguous and ignored.
+  const owner=(m:typeof matches[number])=>{
+    const rivals=matches.filter(other=>other.code===m.code).sort((a,b)=>a.offset-b.offset);
+    return rivals.length===1||(rivals[0]===m&&m.offset<rivals[1].offset*.5);
+  };
+  // The anchor sits exactly on the printed label text, like an OCR line. A box
+  // stretched over the barcode samples different sticker areas and could make
+  // one device look like two.
+  return matches.filter(owner).map(m=>({text:`IMEI ${m.type}: ${codes[m.code].rawValue}`,bbox:{...m.label}}));
 }
 export function labelledBarcodeImeis(codes:PositionedBarcode[],lines:OcrLine[]) {
   return labelledBarcodeLines(codes,lines).map(line=>line.text).join('\n');

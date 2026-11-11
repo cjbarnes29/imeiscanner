@@ -48,6 +48,16 @@ try{
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 1: '+C,700)],1000,1000).length,2,'Close-up distinct devices still split');
  // Camera: barcodes under IMEI labels become positioned anchors.
  const {labelledBarcodeLines,resolveImeisFromBarcodes,resolveSerialFromBarcodes,imeiReadingsDisagree,barcodeImei}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+ // Real camera photo: zxing reports a 37px-tall scan box for a wide 1-D barcode, and the
+ // IMEI 2 label beside IMEI 1 also sits under it. The left-aligned IMEI 1 label owns it.
+ {
+   const wide=[{rawValue:'357126894573692',boundingBox:{x:231,y:701,width:521,height:37}}];
+   const paired=labelledBarcodeLines(wide,[{text:'IMEI1:35712689',bbox:{x0:232.5,y0:757.3,x1:412.3,y1:784}},{text:'4573692 IMEI2:357937314573694',bbox:{x0:414.9,y0:742.9,x1:822.4,y1:777}}]);
+   assert.deepEqual(paired.map(l=>l.text),['IMEI 1: 357126894573692'],'Left-aligned label owns a shared wide barcode');
+   const flat=[{rawValue:'357126894573692',boundingBox:{x:231,y:701,width:521,height:1}}];
+   assert.equal(labelledBarcodeLines(flat,[{text:'IMEI1:35712689',bbox:{x0:232.5,y0:757.3,x1:412.3,y1:784}}]).length,1,'1px scan-line box still pairs with the label below');
+   assert.equal(deviceAnchors([{text:'IMEI1:357',bbox:{x0:854,y0:632,x1:960,y1:655}},{text:'IMEI1:35712689',bbox:{x0:232.5,y0:757.3,x1:412.3,y1:784}},...paired],960,1280,{data:new Uint8ClampedArray(960*1280*4).fill(240),width:960,height:1280}).length,1,'Unreadable tear-off IMEI 1 label on the same sticker joins the read one');
+ }
  // Serial from the S/N barcode, confirmed by misread OCR (real case: OCR read RE3L810D0).
  assert.equal(resolveSerialFromBarcodes(['351124072221537','R83L810D0MW','8806099448974'],'S/N - RE3L810D0!'),'S/N (barcode): R83L810D0MW','Serial barcode fixes 8/B and cut-off OCR');
  assert.equal(resolveSerialFromBarcodes(['R83L810D0MW'],'nothing like it'),'','Serial barcode needs OCR evidence');

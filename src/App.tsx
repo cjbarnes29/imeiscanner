@@ -898,7 +898,19 @@ function recordImeiPair(record: RecordItem) {
  * are saved in the same folder as the workbook and each link opens its own copy.
  * Returns the workbook first, then one file per picture (flat: no sub-folders).
  */
-async function createImeiPhotoFiles(rows: RecordItem[]): Promise<ExportFile[]> {
+/**
+ * Excel on phones (Android and iOS) only opens web links; links to files on the
+ * phone fail in Chrome. When the app runs from a website, each "Download picture"
+ * link opens this app at #picture=<id>, which shows that picture from the records
+ * saved in this browser with Download and Share buttons. Inside the Android app
+ * (not a website) the link falls back to the picture file beside the workbook.
+ */
+function pictureWebLink(record: RecordItem) {
+  if (androidBridge || typeof location === 'undefined' || !/^https?:$/.test(location.protocol) || /^(localhost|127\.)/.test(location.hostname)) return '';
+  return `${location.origin}${location.pathname}#picture=${encodeURIComponent(record.pictureId)}`;
+}
+
+async function createImeiPhotoFiles(rows: RecordItem[], webLinks = true): Promise<ExportFile[]> {
   const ExcelJS = await import('exceljs');
   const Workbook = ExcelJS.Workbook || ExcelJS.default?.Workbook;
   if (!Workbook) throw new Error('The Excel exporter could not load. Please reload the app and retry.');
@@ -929,7 +941,8 @@ async function createImeiPhotoFiles(rows: RecordItem[]): Promise<ExportFile[]> {
     const row = sheet.addRow({ imei1, imei2, serial: recordSerial(record) || '', picture: '', download: '' });
     row.height = 150;
     row.alignment = { vertical: 'middle', wrapText: true };
-    row.getCell(5).value = { text: 'Download picture', hyperlink: name, tooltip: `Open or save ${name}` };
+    const webLink = webLinks ? pictureWebLink(record) : '';
+    row.getCell(5).value = { text: 'Download picture', hyperlink: webLink || name, tooltip: webLink ? 'Opens the scanner in your browser with this picture and a Download button' : `Open or save ${name}` };
     row.getCell(5).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
     const image = await workbookImage(record);
     const id = workbook.addImage({ base64: image.dataUrl, extension: 'jpeg' });
@@ -1152,6 +1165,11 @@ export default function App() {
   const hostedScanner = import.meta.env.VITE_HOSTED_SCANNER === 'true' || window.location.hostname.endsWith('.onrender.com');
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
+  // Excel "Download picture" links open the app at #picture=<id>.
+  const readLinkedPicture = () => new URLSearchParams(location.hash.slice(1)).get('picture');
+  const [linkedPictureId, setLinkedPictureId] = useState<string | null>(readLinkedPicture);
+  useEffect(() => { const onHash = () => setLinkedPictureId(readLinkedPicture()); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
+  function closeLinkedPicture() { history.replaceState(null, '', location.pathname + location.search); setLinkedPictureId(null); }
   const [recordPage, setRecordPage] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -1787,7 +1805,10 @@ export default function App() {
         const cropResult = cropDataUrl ? await readCropImei(worker, cropDataUrl, scanMode) : { raw, imei: extractPreferredImei(raw), lines };
         let cropRaw = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
         if (!cropNeedsReview && !extractPreferredImei(cropRaw) && !extractSerial(cropRaw)) { const serialRaw = await readSerialPhoto(worker, cropDataUrl || dataUrl); if (serialRaw) cropRaw = serialRaw; }
-        const imei = cropNeedsReview ? '' : extractPreferredImei(cropRaw);
+        // Possibly several devices but only one IMEI 1 was read: keep it (the
+        // record still asks "1 device or N?"). Several different IMEI 1s stay blank.
+        const readableImei1s = [...new Set([barcodeImei(cropRaw, 1), ...extractImei1s(cropRaw).filter(luhnValid)].filter(Boolean))];
+        const imei = cropNeedsReview ? (readableImei1s.length === 1 ? readableImei1s[0] : '') : extractPreferredImei(cropRaw);
         if (/^\d{15}$/.test(imei)) {
           if (seenImeis.has(imei) || (file.name.startsWith('camera-') && records.some(record => record.imei === imei))) { skippedImeis++; continue; }
           seenImeis.add(imei);
@@ -2285,6 +2306,8 @@ export default function App() {
     void performExport(rows);
   }
 
+  // null = no picture link open; undefined = link opened but this browser has no such record.
+  const linkedPicture: RecordItem | null | undefined = linkedPictureId === null || !inventoryLoaded ? null : records.find(row => row.pictureId === linkedPictureId);
   const shareRows=records.filter(row=>shareIds.includes(row.id));
   const currentShareRow=shareRows[Math.min(shareIndex,Math.max(0,shareRows.length-1))];
   const currentShareText=currentShareRow?shareNumberText({imei:currentShareRow.imei,serial:recordSerial(currentShareRow)},shareMode):'';
@@ -3183,6 +3206,17 @@ export default function App() {
        {currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
+      </section></div>}
+      {linkedPicture !== null && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) closeLinkedPicture(); }}><section className="modal linked-picture" role="dialog" aria-modal="true" aria-label="Picture from Excel link">
+        <div className="modal-head"><h2>{linkedPicture ? 'Picture' : 'Picture not found'}</h2><button className="subtle-btn" onClick={closeLinkedPicture}>Close</button></div>
+        {linkedPicture ? <>
+          <img className="share-preview" src={recordPhoto(linkedPicture)} alt={`Picture for ${linkedPicture.imei || recordSerial(linkedPicture) || linkedPicture.pictureId}`} />
+          <p>{[recordImeiPair(linkedPicture).imei1 && `IMEI 1: ${recordImeiPair(linkedPicture).imei1}`, recordImeiPair(linkedPicture).imei2 && `IMEI 2: ${recordImeiPair(linkedPicture).imei2}`, recordSerial(linkedPicture) && `Serial: ${recordSerial(linkedPicture)}`].filter(Boolean).join(' · ') || linkedPicture.pictureId}</p>
+          <div className="share-toolbar">
+            <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(linkedPicture)), `${(linkedPicture.imei || recordSerial(linkedPicture) || linkedPicture.pictureId).replace(/[^A-Za-z0-9_-]/g, '_')}.jpg`)}><Download size={16} /> Download picture</button>
+            {typeof navigator.share === 'function' && <button className="subtle-btn" onClick={() => { const file = new File([dataUrlBlob(recordPhoto(linkedPicture))], 'picture.jpg', { type: 'image/jpeg' }); const data = { files: [file] }; if (navigator.canShare?.(data)) void navigator.share(data).catch(() => {}); else setToast('Sharing pictures is not available in this browser. Use Download picture.'); }}>Share picture</button>}
+          </div>
+        </> : <p>This picture is saved in the browser that scanned it. Open the Excel link on that phone in the same browser (Chrome) where you scanned, or use the picture file saved next to the Excel file.</p>}
       </section></div>}
       {toast && (
         <div className="toast">
