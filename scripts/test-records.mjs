@@ -90,8 +90,17 @@ try {
   const blob=await f.createInventoryWorkbook([row,serialOnly],new Map(),false,people,'',false,'simple');
   const workbook=new ExcelJS.Workbook(); await workbook.xlsx.load(await blob.arrayBuffer());
   const sheet=workbook.getWorksheet('All IMEIs');
+  assert.deepEqual([1,2,3].map(c=>sheet.getRow(1).getCell(c).value),['IMEI 1','IMEI 2','Serial']);
   assert.equal(sheet.getCell('A2').value,first); assert.equal(sheet.getCell('A3').value,'');
-  assert.equal(sheet.getCell('B3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
+  assert.equal(sheet.getCell('C3').value,'RFGYC2L1PLK'); assert.equal(sheet.getCell('C2').value,''); assert.equal(sheet.rowCount,3);
+  {
+    const pair={...row,serial:'R58M20ABCDE',raw:`IMEI 1: ${first}\nIMEI 2: ${second}`};
+    const minimalCsv=f.recordsCsv([pair,serialOnly],new Map(),people,false,'imei_photo').replace('\uFEFF','').split('\r\n');
+    assert.deepEqual(minimalCsv,['"IMEI 1","IMEI 2","Serial"',`"${first}","${second}","R58M20ABCDE"`,'"","","RFGYC2L1PLK"'],'CSV: IMEI 1, IMEI 2, Serial only');
+    const minimalBook=new ExcelJS.Workbook();await minimalBook.xlsx.load(await (await f.createInventoryWorkbook([pair],new Map(),false,people,'',false,'imei_photo')).arrayBuffer());
+    assert.equal(minimalBook.worksheets.length,1,'Sheets export: one tab');
+    assert.deepEqual([1,2,3,4].map(c=>minimalBook.worksheets[0].getRow(2).getCell(c).value??null),[first,second,'R58M20ABCDE',null]);
+  }
   assert.equal(f.extractPreferredImei('IMEI: 490154203237518'),'490154203237518','Un-indexed IMEI label');
   assert.equal(f.extractPreferredImei('IMEI: 490154203237519'),'','Un-indexed IMEI must pass Luhn');
   assert.equal(f.extractPreferredImei('IMEI 1: 490154203237518\nIMEI: 356938035643809'),'490154203237518','Indexed IMEI wins over un-indexed');

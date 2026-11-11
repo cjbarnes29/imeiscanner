@@ -627,13 +627,13 @@ function recordsCsv(
   photoLinks = new Map<string, string>(),
   people = readPeople(),
   compact = false,
-  layout?: 'simple' | 'person_photo'
+  layout?: ReportLayout
 ) {
   if (layout) {
-    const rich = layout === 'person_photo';
+    const rich = layout === 'person_photo', minimal = layout === 'imei_photo';
     const values = [
-      ['IMEI', 'Serial number', 'Model', 'Review status', ...(rich ? ['Assigned person', 'Download photo'] : [])],
-      ...rows.map(r => [r.imei, recordSerial(r), exportModel(r.model), reviewStatus(r), ...(rich ? [personTitle(r, people), photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download photo")` : ''] : [])])
+      ['IMEI 1', 'IMEI 2', 'Serial', ...(minimal ? [] : ['Model', 'Review status']), ...(rich ? ['Assigned person', 'Download photo'] : [])],
+      ...rows.map(r => { const { imei1, imei2 } = recordImeiPair(r); return [imei1, imei2, recordSerial(r) || '', ...(minimal ? [] : [exportModel(r.model), reviewStatus(r)]), ...(rich ? [personTitle(r, people), photoLinks.has(r.id) ? `=HYPERLINK("${photoLinks.get(r.id)}","Download photo")` : ''] : [])]; })
     ];
     return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n');
   }
@@ -707,7 +707,7 @@ async function createInventoryWorkbook(
   people = readPeople(),
   folderLink = '',
   compact = false,
-  layout?: 'simple' | 'person_photo'
+  layout?: ReportLayout
 ) {
   includePhotos = layout ? layout === 'person_photo' : includePhotos && !compact;
   const ExcelJS = await import('exceljs');
@@ -758,7 +758,9 @@ async function createInventoryWorkbook(
       { header: 'Image filename', key: 'filename', width: 36 },
       { header: 'Model', key: 'model', width: 28 },
       { header: 'IMEI', key: 'imei', width: 20 },
-      { header: 'Serial number', key: 'serial', width: 22 },
+      { header: 'IMEI 1', key: 'imei1', width: 20 },
+      { header: 'IMEI 2', key: 'imei2', width: 20 },
+      { header: 'Serial', key: 'serial', width: 22 },
       { header: 'Review status', key: 'reviewStatus', width: 18 },
       { header: 'Validation', key: 'validation', width: 14 },
       { header: 'Duplicate', key: 'duplicate', width: 12 },
@@ -767,9 +769,11 @@ async function createInventoryWorkbook(
       ...(folderLink ? [{ header: 'Photo folder', key: 'folder', width: 22 }] : [])
     ];
     const columns = layout
-      ? (layout === 'simple'
-        ? ['imei', 'serial', 'model', 'reviewStatus'].map(key => allColumns.find(column => column.key === key)!)
-        : ['imei', 'serial', 'photo', 'model', 'person', 'reviewStatus', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
+      ? (layout === 'imei_photo'
+        ? ['imei1', 'imei2', 'serial'].map(key => allColumns.find(column => column.key === key)!)
+        : layout === 'simple'
+        ? ['imei1', 'imei2', 'serial', 'model', 'reviewStatus'].map(key => allColumns.find(column => column.key === key)!)
+        : ['imei1', 'imei2', 'serial', 'photo', 'model', 'person', 'reviewStatus', 'download'].map(key => allColumns.find(column => column.key === key)!).filter(Boolean))
       : compact
       ? allColumns.filter(column => ['model', 'imei', 'serial', 'reviewStatus', 'duplicate', 'download', 'folder'].includes(column.key))
       : allColumns;
@@ -793,7 +797,8 @@ async function createInventoryWorkbook(
         filename: record.name,
         model: exportModel(record.model),
         imei: record.imei,
-        serial: recordSerial(record),
+        ...recordImeiPair(record),
+        serial: recordSerial(record) || '',
         reviewStatus: reviewStatus(record),
         validation: record.status,
         duplicate: record.duplicate ? 'Yes' : 'No',
@@ -843,9 +848,10 @@ async function createInventoryWorkbook(
   for (const row of rows) {
     byModel.set(row.model, [...(byModel.get(row.model) || []), row]);
   }
-  for (const [model, modelRows] of byModel) addModelSheet(model, modelRows);
+  // The IMEI + picture layout is one sheet only: no per-model or per-person tabs.
+  if (layout !== 'imei_photo') for (const [model, modelRows] of byModel) addModelSheet(model, modelRows);
 
-  for (const person of layout === 'simple' ? [] : people) {
+  for (const person of layout === 'simple' || layout === 'imei_photo' ? [] : people) {
     const personRows = rows.filter(record => record.personId === person.id);
     if (personRows.length) {
       addModelSheet(`${person.label}${person.name ? ` - ${person.name}` : ''}`, personRows);
@@ -859,6 +865,7 @@ async function createInventoryWorkbook(
 }
 
 type ExportFile = { name: string; blob: Blob };
+type ReportLayout = 'imei_photo' | 'simple' | 'person_photo';
 
 /**
  * IMEI 1 and IMEI 2 for export. Only one IMEI is stored per record, so IMEI 2
@@ -1028,7 +1035,7 @@ async function createWordReport(
   includePhotos: boolean,
   photoLinks = new Map<string, string>(),
   people = readPeople(),
-  layout?: 'simple' | 'person_photo'
+  layout?: ReportLayout
 ) {
   const {
     Document, Packer, Paragraph, TextRun, HeadingLevel,
@@ -1042,13 +1049,13 @@ async function createWordReport(
   ];
   const groups = new Map<string, RecordItem[]>();
   for (const record of records) {
-    const group = layout === 'simple' ? record.model : `${record.model} / ${personTitle(record, people)}`;
+    const group = layout === 'imei_photo' ? 'Devices' : layout === 'simple' ? record.model : `${record.model} / ${personTitle(record, people)}`;
     groups.set(group, [...(groups.get(group) || []), record]);
   }
 
   for (const [group, modelRecords] of groups) {
     children.push(new Paragraph({ text: group, heading: HeadingLevel.HEADING_1 }));
-    const headerLabels = layout === 'simple' ? ['IMEI', 'Model', 'Review status'] : layout === 'person_photo' ? ['IMEI', 'Model', 'Review status', 'Assigned person', 'Photo'] : includePhotos
+    const headerLabels = layout === 'imei_photo' ? ['IMEI 1', 'IMEI 2', 'Serial', 'Picture'] : layout === 'simple' ? ['IMEI 1', 'IMEI 2', 'Serial', 'Model', 'Review status'] : layout === 'person_photo' ? ['IMEI 1', 'IMEI 2', 'Serial', 'Model', 'Review status', 'Assigned person', 'Photo'] : includePhotos
       ? ['No.', 'Person', 'Name', 'Photo', 'Image filename', 'IMEI', 'Validation']
       : ['No.', 'Person', 'Name', 'Image filename', 'IMEI', 'Validation'];
     const tableRows = [
@@ -1062,13 +1069,14 @@ async function createWordReport(
 
     for (const record of modelRecords) {
       if (layout) {
-        const cells = [
-          new TableCell({ children: [new Paragraph({ text: record.imei || 'Not detected' })] }),
+        const { imei1, imei2 } = recordImeiPair(record);
+        const cells = [imei1, imei2, recordSerial(record) || ''].map(text => new TableCell({ children: [new Paragraph({ text })] }));
+        if (layout !== 'imei_photo') cells.push(
           new TableCell({ children: [new Paragraph({ text: record.model })] }),
           new TableCell({ children: [new Paragraph({ text: reviewStatus(record) })] })
-        ];
-        if (layout === 'person_photo') {
-          cells.push(new TableCell({ children: [new Paragraph({ text: personTitle(record, people) })] }));
+        );
+        if (layout === 'person_photo' || layout === 'imei_photo') {
+          if (layout === 'person_photo') cells.push(new TableCell({ children: [new Paragraph({ text: personTitle(record, people) })] }));
           const photo = new Uint8Array(await dataUrlBlob((await workbookImage(record, 320)).dataUrl).arrayBuffer());
           const link = photoLinks.get(record.id);
           cells.push(new TableCell({ children: [new Paragraph({ children: [new ImageRun({ data: photo, type: 'jpg', transformation: { width: 90, height: 64 }, ...(link ? { link } : {}) })] })] }));
@@ -1201,10 +1209,8 @@ export default function App() {
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [exportSearch, setExportSearch] = useState('');
   const [exportPreviewLimit, setExportPreviewLimit] = useState(30);
-  const [reportLayout, setReportLayout] = useState<'imei_photo' | 'simple' | 'person_photo'>('imei_photo');
+  const [reportLayout, setReportLayout] = useState<ReportLayout>('imei_photo');
   const includePhotos = reportLayout === 'person_photo';
-  // Word, CSV and Sheets have no picture-download package; they use the IMEI-only layout.
-  const legacyLayout = reportLayout === 'imei_photo' ? 'simple' : reportLayout;
   const compactExport = false;
   const [exportFormat, setExportFormat] = useState<'excel' | 'word' | 'sheets' | 'csv'>('excel');
 
@@ -2082,19 +2088,19 @@ export default function App() {
         setToast(where === 'android' ? 'Choose a folder to save into.' : `Excel + ${rows.length} picture(s) saved.`);
       } else if (exportFormat === 'excel') {
         setGoogleProgress('Building the Excel workbook…');
-        const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, legacyLayout);
+        const file = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.xlsx' : 'imei-scanner-export.xlsx');
         setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Excel export.' : `Excel downloaded with ${rows.length} record(s)${includePhotos ? ' and embedded photos' : ''}.`);
         setToast(androidBridge ? 'Choose where to save the Excel file.' : `Excel downloaded with ${rows.length} record(s)${includePhotos ? ' and embedded photos' : ''}.`);
       } else if (exportFormat === 'word') {
         setGoogleProgress('Building the Word document…');
-        const file = await createWordReport(rows, includePhotos, photoLinks, personGroups, legacyLayout);
+        const file = await createWordReport(rows, includePhotos, photoLinks, personGroups, reportLayout);
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.docx' : 'imei-scanner-export.docx');
         setDownloadStatus(androidBridge ? 'Choose a folder and tap Save to finish the Word export.' : `Word document downloaded with ${rows.length} record(s).`);
         setToast(androidBridge ? 'Choose where to save the Word file.' : `Word document downloaded with ${rows.length} record(s).`);
       } else if (exportFormat === 'csv') {
         const file = new Blob(
-          [recordsCsv(rows, photoLinks, personGroups, compactExport, legacyLayout)],
+          [recordsCsv(rows, photoLinks, personGroups, compactExport, reportLayout)],
           { type: 'text/csv;charset=utf-8' }
         );
         await downloadBlob(file, selectedOnly ? 'imei-scanner-selected.csv' : 'imei-scanner-export.csv');
@@ -2103,7 +2109,7 @@ export default function App() {
       } else {
         if (!token) throw new Error('Google authorization is required for Sheets export.');
         setGoogleProgress('Building the model and person tabs…');
-        const workbook = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, legacyLayout);
+        const workbook = await createInventoryWorkbook(rows, photoLinks, includePhotos, personGroups, folderLink, compactExport, reportLayout);
         const boundary = `imei-lens-${newId()}`;
         const metadata = JSON.stringify({
           name: `IMEI Scanner - ${new Date().toISOString().slice(0, 10)}`,
@@ -2174,13 +2180,13 @@ export default function App() {
       let report: Blob;
       if (exportFormat === 'word') {
         reportName = 'imei-records.docx';
-        report = await createWordReport(rows, true, links, personGroups, legacyLayout);
+        report = await createWordReport(rows, true, links, personGroups, reportLayout);
       } else if (exportFormat === 'csv') {
         reportName = 'imei-records.csv';
-        report = new Blob([recordsCsv(rows, links, personGroups, false, legacyLayout)], { type: 'text/csv;charset=utf-8' });
+        report = new Blob([recordsCsv(rows, links, personGroups, false, reportLayout)], { type: 'text/csv;charset=utf-8' });
       } else {
         reportName = 'imei-records.xlsx';
-        report = await createInventoryWorkbook(rows, links, true, personGroups, '', false, legacyLayout);
+        report = await createInventoryWorkbook(rows, links, true, personGroups, '', false, reportLayout);
       }
 
       if (folder) {
@@ -2246,7 +2252,7 @@ export default function App() {
     }
     if (exportFormat === 'sheets') {
       setSyncing(true);
-      void createInventoryWorkbook(rows, new Map(), includePhotos, personGroups, '', compactExport, legacyLayout)
+      void createInventoryWorkbook(rows, new Map(), includePhotos, personGroups, '', compactExport, reportLayout)
         .then(async file => {
           await downloadBlob(file, 'imei-records-for-google-sheets.xlsx');
           setDownloadStatus(androidBridge ? 'Choose a folder and tap Save. Then import the Excel file into Google Sheets.' : 'Excel file downloaded. In Google Sheets, choose File → Import → Upload.');
@@ -2572,7 +2578,7 @@ export default function App() {
                 ? (androidBridge?.beginFolder || typeof (window as any).showDirectoryPicker === 'function'
                   ? 'Choose a folder: a new folder is created inside it with the Excel file (IMEI, picture, Download picture button) and every picture. No ZIP.'
                   : 'The Excel file (IMEI, picture, Download picture button) and every picture download into your Downloads folder together. Allow multiple downloads if the browser asks. No ZIP.')
-                : 'Pictures with download buttons are available in Excel only. This format exports IMEIs only.'}</div>
+                : exportFormat === 'word' ? 'Word: IMEI 1, IMEI 2, Serial and the picture. Download picture buttons are Excel only.' : 'IMEI 1, IMEI 2 and Serial only. Pictures with download buttons are Excel only.'}</div>
             )}
             {reportLayout === 'person_photo' && (
               <>
