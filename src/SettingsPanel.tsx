@@ -4,6 +4,8 @@ import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
 
 type Props = {
+  modelsToGive: { key: string; label: string; code: string; count: number }[];
+  onGive: (key: string) => void;
   scannedModels: string[];
   catalogEntries: { name: string; modelCode: string }[];
   customModels: CustomModels;
@@ -14,7 +16,7 @@ type Props = {
 };
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
+export function SettingsPanel({ modelsToGive, onGive, scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
@@ -108,6 +110,15 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
+
+    <h3>Give models to people</h3>
+    <p className="settings-help">Choose how many phones of a model each person gets, for example 3 to one person, 4 to another and 2 to a third. Whatever is left stays Unassigned.</p>
+    {modelsToGive.length > 0
+      ? <ul className="settings-list" aria-label="Models to give out">{modelsToGive.map(model => <li key={model.key}>
+          <span><strong>{model.label}</strong> <small>{model.code ? `${model.code} · ` : ''}{model.count} phone{model.count === 1 ? '' : 's'}</small></span>
+          <button className="primary" onClick={() => onGive(model.key)}>Give…</button>
+        </li>)}</ul>
+      : <p className="settings-help"><em>Scan some phones first and their models appear here.</em></p>}
 
     <h3>Devices in my scans</h3>
     <p className="settings-help">{devices.rows.length ? (missingCount ? <><b>{missingCount}</b> scanned model{missingCount === 1 ? ' is' : 's are'} not in any catalog. Add a name so {missingCount === 1 ? 'it shows' : 'they show'} instead of the code.</> : 'Every scanned model is in a catalog or has your name.') : 'No scanned models yet. Scan some phones and they appear here.'}{devices.noCode > 0 && ` ${devices.noCode} phone${devices.noCode === 1 ? ' has' : 's have'} no model code.`}</p>

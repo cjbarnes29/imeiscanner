@@ -2,7 +2,7 @@ import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickIm
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
-import { planMove, planUnassign, planDeletePerson, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
+import { planMove, planUnassign, planDeletePerson, planAllocation, formatModelReview, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
@@ -50,6 +50,8 @@ type RecordItem = {
   raw: string;
 };
 
+/** A name made from a code we could not match to a real model, e.g. "Galaxy Z999". */
+const isGenericName = (name: string) => /^Galaxy [A-Z]\d{3}$/.test(name) || name === 'Unknown phone';
 type PersonGroup = { id: string; label: string; name: string };
 /** People are shown by name only; the "Person 3" label is just an internal id and is never displayed. */
 const personName = (person: PersonGroup) => (person.name || '').trim() || 'Unnamed';
@@ -1558,6 +1560,8 @@ export default function App() {
   const [bulkEditChecked, setBulkEditChecked] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState('');
   const [deletePersonId, setDeletePersonId] = useState('');
+  const [splitModel, setSplitModel] = useState<{ key: string; label: string; ids: string[] } | null>(null);
+  const [splitCounts, setSplitCounts] = useState<Record<string, number>>({});
   const [personUndo, setPersonUndo] = useState<{ people: PersonGroup[]; records: RecordItem[]; text: string; activePersonId: string } | null>(null);
   useEffect(() => { if (!personUndo) return; const timer = setTimeout(() => setPersonUndo(null), 12000); return () => clearTimeout(timer); }, [personUndo]);
   // People whose phones were all moved away (so their empty view can say "All IMEIs moved."); kept across reloads.
@@ -1578,10 +1582,10 @@ export default function App() {
   // same first 8 IMEI digits (that part identifies the model).
   const knownByTac = useMemo(() => {
     const known = new Map<string, ReturnType<typeof phoneInfo>>();
-    for (const record of records) { const info = phoneInfo(record.model, catalogEntries, customModels), tac = (record.imei || '').slice(0, 8); if (tac.length === 8 && info.series !== 'Unknown phones' && !known.has(tac)) known.set(tac, info); }
+    for (const record of records) { const info = phoneInfo(record.model, catalogEntries, customModels), tac = (record.imei || '').slice(0, 8); if (tac.length === 8 && !!modelCode4(record.model) && info.series !== 'Unknown phones' && !isGenericName(info.name) && !known.has(tac)) known.set(tac, info); }
     return known;
   }, [records, catalogEntries, customModels]);
-  const infoOf = (record: RecordItem) => { const own = phoneInfo(record.model, catalogEntries, customModels); return own.series !== 'Unknown phones' ? own : knownByTac.get((record.imei || '').slice(0, 8)) || own; };
+  const infoOf = (record: RecordItem) => { const own = phoneInfo(record.model, catalogEntries, customModels); if (modelCode4(record.model)) return own; return knownByTac.get((record.imei || '').slice(0, 8)) || own; };
   const [splitProgress, setSplitProgress] = useState('');
   const guidedCropWorker = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
   const cropRequestedId = useRef<string | null>(null);
@@ -1776,6 +1780,7 @@ export default function App() {
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
+  useBackLayer(!!splitModel, () => setSplitModel(null), 'split-model');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
 
@@ -1844,21 +1849,65 @@ export default function App() {
   }, [records, catalogEntries, knownByTac]);
 
   /** One group per phone model: the same model code with different endings (SM-A376B, SM-A376B/DS) is one model. */
-  const modelKeyOf = (r: RecordItem) => exportModel(r.model) ? (modelCode4(r.model) || r.model.trim()) : 'unknown';
+  const modelKeyOf = (r: RecordItem) => { const info = infoOf(r); if (info.series === 'Unknown phones') return exportModel(r.model) ? r.model.trim() : 'unknown'; return isGenericName(info.name) ? (modelCode4(r.model) || info.name) : info.name; };
   const modelGroups = useMemo(() => {
-    const groups = new Map<string, { key: string; label: string; code: string; ids: string[] }>();
+    const groups = new Map<string, { key: string; label: string; code: string; ids: string[]; byPerson: Record<string, number> }>();
     for (const record of records) {
       const key = modelKeyOf(record);
       let group = groups.get(key);
       if (!group) {
-        const info = infoOf(record), known = info.series !== 'Unknown phones';
-        group = { key, label: known ? info.name : key === 'unknown' ? 'Unknown model' : key, code: modelCode4(record.model) ? `SM-${modelCode4(record.model)}` : '', ids: [] };
+        const info = infoOf(record), known = info.series !== 'Unknown phones' && !isGenericName(info.name);
+        group = { key, label: known ? info.name : key === 'unknown' ? 'Unknown model' : modelCode4(record.model) ? `SM-${modelCode4(record.model)} (not recognised)` : key, code: '', ids: [], byPerson: {} };
         groups.set(key, group);
       }
+      if (!group.code && modelCode4(record.model)) group.code = `SM-${modelCode4(record.model)}`;
       group.ids.push(record.id);
+      group.byPerson[record.personId] = (group.byPerson[record.personId] || 0) + 1;
     }
     return [...groups.values()].sort((a, b) => (a.key === 'unknown' ? 1 : 0) - (b.key === 'unknown' ? 1 : 0) || b.ids.length - a.ids.length || a.label.localeCompare(b.label));
   }, [records, catalogEntries, customModels, knownByTac]);
+
+  const [overviewOpen, setOverviewOpen] = useState(false);
+  const [overviewNumbers, setOverviewNumbers] = useState(false);
+  useBackLayer(overviewOpen, () => setOverviewOpen(false), 'overview');
+  // Final review is model based: for each model, which people get how many. Filters: one person, or text.
+  const [reviewPerson, setReviewPerson] = useState('');
+  const [reviewQuery, setReviewQuery] = useState('');
+  const review = useMemo(() => {
+    const names = new Map(personGroups.map(person => [person.id, personName(person)]));
+    const order = [...personGroups.map(person => person.id), UNASSIGNED_FILTER];
+    const models = new Map<string, { key: string; label: string; holders: Map<string, { id: string; name: string; count: number; numbers: string[]; ids: string[] }> }>();
+    for (const row of records) {
+      const key = modelKeyOf(row), holderId = names.has(row.personId) ? row.personId : UNASSIGNED_FILTER;
+      const model = models.get(key) || { key, label: modelGroups.find(group => group.key === key)?.label || 'Unknown model', holders: new Map() };
+      const holder = model.holders.get(holderId) || { id: holderId, name: names.get(holderId) || 'Unassigned', count: 0, numbers: [], ids: [] };
+      const pair = recordImeiPair(row), serial = recordSerial(row);
+      holder.count++; holder.ids.push(row.id);
+      holder.numbers.push([pair.imei1 || (serial ? '' : '—'), pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  '));
+      model.holders.set(holderId, holder); models.set(key, model);
+    }
+    return [...models.values()]
+      .map(model => ({ ...model, total: [...model.holders.values()].reduce((sum, holder) => sum + holder.count, 0), holders: [...model.holders.values()].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)) }))
+      .sort((a, b) => (a.key === 'unknown' ? 1 : 0) - (b.key === 'unknown' ? 1 : 0) || b.total - a.total || a.label.localeCompare(b.label));
+  }, [records, personGroups, modelGroups]);
+  const reviewShown = useMemo(() => {
+    const needle = reviewQuery.trim().toLowerCase();
+    return review
+      .map(model => ({ ...model, holders: model.holders.filter(holder => !reviewPerson || holder.id === reviewPerson) }))
+      .filter(model => model.holders.length && (!needle || `${model.label} ${model.holders.map(holder => holder.name).join(' ')}`.toLowerCase().includes(needle)))
+      .map(model => ({ ...model, total: model.holders.reduce((sum, holder) => sum + holder.count, 0) }));
+  }, [review, reviewPerson, reviewQuery]);
+  const reviewText = (models: typeof reviewShown) => formatModelReview(models.map(model => ({ label: model.label, holders: model.holders })), overviewNumbers);
+  /** Models panel: when a person is chosen, only the models that person holds. */
+  const panelGroups = modelGroups.filter(group => !reviewPerson || (reviewPerson === UNASSIGNED_FILTER ? group.ids.length - personGroups.reduce((sum, person) => sum + (group.byPerson[person.id] || 0), 0) > 0 : (group.byPerson[reviewPerson] || 0) > 0));
+  async function shareOrCopyText(text: string, what: string) {
+    if (!text) return;
+    if (typeof navigator.share === 'function') {
+      try { await navigator.share({ text }); setToast(`${what} sent to the share menu.`); return; }
+      catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
+    }
+    setToast((await copyText(text)) ? `${what} copied. Paste it into your chat.` : 'Could not share or copy the list.');
+  }
 
   const visible = records.filter(r =>
     (filter === 'All' ||
@@ -1959,6 +2008,27 @@ export default function App() {
     setFiles([]); setProgress(''); setCompletedFiles(0); setLaptopMessage('');
     setQuery(''); setFilter('All'); setPersonFilter('All'); setSelectedIds([]); setSelectedOnly(false); setRecordPage(1);
     setToast('Ready for new entries. Your saved records were not changed.');
+  }
+
+  /** Open the "give this model to people in amounts" dialog, starting from who holds how many now. */
+  function openSplit(group: { key: string; label: string; ids: string[] }) {
+    const counts: Record<string, number> = {};
+    for (const person of personGroups) counts[person.id] = records.filter(row => row.personId === person.id && group.ids.includes(row.id)).length;
+    setSplitCounts(counts);
+    setSplitModel(group);
+  }
+
+  function applySplit() {
+    if (!splitModel) return;
+    const plan = planAllocation(records, splitModel.ids, personGroups.map(person => ({ personId: person.id, count: splitCounts[person.id] || 0 })));
+    setRecords(plan.records);
+    setSelectedIds(old => old.filter(id => !plan.moved.includes(id)));
+    const receivers = personGroups.filter(person => (plan.given[person.id] || 0) > 0).map(person => person.id);
+    setEmptiedPeople(old => [...old.filter(id => !receivers.includes(id)), ...plan.emptiedSources.filter(id => !old.includes(id))]);
+    const parts = personGroups.filter(person => (plan.given[person.id] || 0) > 0).map(person => `${personName(person)} ${plan.given[person.id]}`);
+    const rest = plan.given[UNASSIGNED] || 0;
+    setToast(`${splitModel.label}: ${parts.length ? parts.join(', ') : 'nobody'}${rest ? `; ${rest} Unassigned` : ''}.${plan.blocked.length ? ` ${plan.blocked.length} stayed where ${plan.blocked.length === 1 ? 'it is' : 'they are'} because the person already has the same IMEI.` : ''}`);
+    setSplitModel(null);
   }
 
   function addPersonGroup() {
@@ -3058,7 +3128,7 @@ export default function App() {
         </div>
       </header>
 
-      {settingsOpen && <SettingsPanel scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel modelsToGive={modelGroups.map(group => ({ key: group.key, label: group.label, code: group.code, count: group.ids.length }))} onGive={key => { const group = modelGroups.find(item => item.key === key); if (group) openSplit(group); }} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
 {!simpleView && (<>
@@ -3526,13 +3596,25 @@ export default function App() {
           </div>}
 
           {!simpleView && modelGroups.length > 0 && <details className="models-panel" open>
-            <summary>Models — move to a person <b>{modelGroups.length}</b></summary>
+            <summary>Models <b>{modelGroups.length}</b><span className="models-summary">{records.length} phone{records.length === 1 ? '' : 's'} · {records.filter(row => personGroups.some(person => person.id === row.personId)).length} with people · {records.filter(row => !personGroups.some(person => person.id === row.personId)).length} unassigned</span></summary>
+            <label className="models-filter">Show models of
+              <select aria-label="Show models of a person" value={reviewPerson} onChange={event => setReviewPerson(event.target.value)}>
+                <option value="">Everyone</option>
+                {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+                <option value={UNASSIGNED_FILTER}>Unassigned</option>
+              </select>
+            </label>
             <ul className="models-list">
-              {modelGroups.map(group => <li key={group.key}>
+              {panelGroups.length === 0 && <li><em>That person holds no models yet.</em></li>}
+              {panelGroups.map(group => <li key={group.key}>
                 <button type="button" className="model-name" onClick={() => setFilter(group.key)} aria-label={`Show ${group.label}`}>
                   <strong>{group.label}</strong>
                   <small>{group.code ? `${group.code} · ` : ''}{group.ids.length} phone{group.ids.length === 1 ? '' : 's'}</small>
                 </button>
+                <div className="model-holders" aria-label={`Who has ${group.label}`}>
+                  {personGroups.filter(person => group.byPerson[person.id]).map(person => <span key={person.id}>{personName(person)} <b>{group.byPerson[person.id]}</b></span>)}
+                  {(() => { const given = personGroups.reduce((sum, person) => sum + (group.byPerson[person.id] || 0), 0), rest = group.ids.length - given; return rest > 0 ? <span className="holder-unassigned">Unassigned <b>{rest}</b></span> : null; })()}
+                </div>
                 <label className="move-to">Move all to
                   <select aria-label={`Move all ${group.label} to`} value="" onChange={event => { if (event.target.value) moveRecords(group.ids, ownerOf(event.target.value)); }}>
                     <option value="">Choose person</option>
@@ -3564,6 +3646,7 @@ export default function App() {
               />
 </>)}
               <button className="subtle-btn" onClick={addPersonGroup}>+ Add person</button>
+              <button className="subtle-btn" disabled={!records.length} onClick={() => setOverviewOpen(true)}>Final review</button>
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
@@ -3752,6 +3835,7 @@ export default function App() {
                             updateRow(r.id, { model: e.target.value })
                           }
                         />
+                        {(() => { const info = infoOf(r); return info.series !== 'Unknown phones' && !isGenericName(info.name) ? <small className="model-cell-name"><strong>{info.name}</strong> · {info.series}</small> : <small className="model-cell-name unknown">{modelCode4(r.model) ? `SM-${modelCode4(r.model)} is not recognised. Add its name in Settings.` : 'Model not recognised. Type the code, or add it in Settings.'}</small>; })()}
                       </td>
 
                       <td data-label="IMEI">
@@ -4031,6 +4115,55 @@ export default function App() {
           {count > 0 && <button className="subtle-btn danger" onClick={() => deletePerson(person.id, true)}>{`Delete person and ${count} phone${count === 1 ? '' : 's'}`}<small>Removes the phones and their pictures permanently.</small></button>}
           <button className="subtle-btn" onClick={() => setDeletePersonId('')}>Cancel</button>
         </div>
+      </section></div>; })()}
+      {overviewOpen && <div className="modal-backdrop"><section className="modal overview-modal" role="dialog" aria-modal="true" aria-label="Final review">
+        <div className="modal-head"><h2>Final review</h2><button className="subtle-btn" onClick={() => setOverviewOpen(false)}>Close</button></div>
+        {review.length === 0 ? <p>No phones yet.</p> : <>
+          <p className="settings-help">Model by model: who gets how many.</p>
+          <div className="review-filters">
+            <label>Person
+              <select aria-label="Filter review by person" value={reviewPerson} onChange={event => setReviewPerson(event.target.value)}>
+                <option value="">Everyone</option>
+                {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+                <option value={UNASSIGNED_FILTER}>Unassigned</option>
+              </select>
+            </label>
+            <label>Model<input aria-label="Filter review by model" placeholder="Search models" value={reviewQuery} onChange={event => setReviewQuery(event.target.value)} /></label>
+          </div>
+          <label className="settings-check"><input type="checkbox" checked={overviewNumbers} onChange={event => setOverviewNumbers(event.target.checked)} /> Include IMEI / serial numbers</label>
+          <p className="settings-help" role="status">{reviewShown.length} model{reviewShown.length === 1 ? '' : 's'} · {reviewShown.reduce((sum, model) => sum + model.total, 0)} phone{reviewShown.reduce((sum, model) => sum + model.total, 0) === 1 ? '' : 's'}{(reviewPerson || reviewQuery) ? ' (filtered)' : ''}</p>
+          <div className="share-toolbar">
+            <button className="primary" disabled={!reviewShown.length} onClick={() => void shareOrCopyText(reviewText(reviewShown), 'The review')}>Share review</button>
+            <button className="subtle-btn" disabled={!reviewShown.length} onClick={() => void copyText(reviewText(reviewShown)).then(ok => setToast(ok ? 'Review copied.' : 'Copy failed.'))}>Copy</button>
+            {(reviewPerson || reviewQuery) && <button className="subtle-btn" onClick={() => { setReviewPerson(''); setReviewQuery(''); }}>Clear filters</button>}
+          </div>
+          {!reviewShown.length && <p><em>Nothing matches these filters.</em></p>}
+          <ul className="overview-list">
+            {reviewShown.map(model => <li key={model.key}>
+              <h3>{model.label} <b>{model.total}</b></h3>
+              <ul>{model.holders.map(holder => <li key={holder.id}>{holder.name} <b>× {holder.count}</b></li>)}</ul>
+              <div className="share-toolbar">
+                <button className="subtle-btn" onClick={() => void shareOrCopyText(reviewText([model]), `${model.label} list`)}>Share list</button>
+                <button className="subtle-btn" onClick={() => { setOverviewOpen(false); openSharing(model.holders.flatMap(holder => holder.ids)); }}>Share phones ({model.total})</button>
+              </div>
+            </li>)}
+          </ul>
+        </>}
+      </section></div>}
+      {splitModel && (() => { const total = splitModel.ids.length, given = personGroups.reduce((sum, person) => sum + (splitCounts[person.id] || 0), 0), rest = total - given, over = rest < 0; return <div className="modal-backdrop"><section className="modal split-modal" role="dialog" aria-modal="true" aria-label={`Give ${splitModel.label} to people`}>
+        <div className="modal-head"><h2>Give {splitModel.label}</h2><button className="subtle-btn" onClick={() => setSplitModel(null)}>Close</button></div>
+        <p>{total} phone{total === 1 ? '' : 's'}. Choose how many each person gets. What is left stays Unassigned.</p>
+        <ul className="split-list">
+          {personGroups.map(person => <li key={person.id}>
+            <span>{personName(person)}</span>
+            <button type="button" className="subtle-btn" aria-label={`One less for ${personName(person)}`} disabled={!(splitCounts[person.id] > 0)} onClick={() => setSplitCounts(old => ({ ...old, [person.id]: Math.max(0, (old[person.id] || 0) - 1) }))}>−</button>
+            <input type="number" inputMode="numeric" min={0} max={total} aria-label={`How many for ${personName(person)}`} value={splitCounts[person.id] || 0} onChange={event => setSplitCounts(old => ({ ...old, [person.id]: Math.max(0, Math.min(total, Math.floor(Number(event.target.value) || 0))) }))} />
+            <button type="button" className="subtle-btn" aria-label={`One more for ${personName(person)}`} disabled={rest <= 0} onClick={() => setSplitCounts(old => ({ ...old, [person.id]: (old[person.id] || 0) + 1 }))}>+</button>
+          </li>)}
+          <li className={`split-rest${over ? ' over' : ''}`}><span>Unassigned (the rest)</span><b>{over ? 0 : rest}</b></li>
+        </ul>
+        {over && <p role="alert" className="split-warning">That is {-rest} more than the {total} phone{total === 1 ? '' : 's'} you have. Lower a number.</p>}
+        <div className="share-toolbar"><button className="primary" disabled={over} onClick={applySplit}>Apply</button><button className="subtle-btn" onClick={() => setSplitCounts(Object.fromEntries(personGroups.map(person => [person.id, 0])))}>Clear all</button><button className="subtle-btn" onClick={() => setSplitModel(null)}>Cancel</button></div>
       </section></div>; })()}
       {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">

@@ -81,3 +81,72 @@ export function planDeletePerson<T extends Owned>(records: T[], personId: string
 export function nextPersonNumber(labels: string[]): number {
   return labels.reduce((highest, label) => Math.max(highest, Number(label.match(/(\d+)\s*$/)?.[1] || 0)), 0) + 1;
 }
+
+export type Allocation = { personId: string; count: number };
+export type AllocationPlan<T> = {
+  records: T[];
+  /** How many phones each person ends up with from this set (UNASSIGNED included). */
+  given: Record<string, number>;
+  /** Phones that changed owner. */
+  moved: string[];
+  /** Phones left where they were because the destination already holds the same IMEI. */
+  blocked: string[];
+  /** People who had phones from this set before and have none left in the whole list. */
+  emptiedSources: string[];
+};
+
+/**
+ * Hand a set of phones (for example every phone of one model) out in amounts: "3 to Carlou, 4 to Raseen,
+ * 2 to Khurram". Whatever is not given to someone becomes UNASSIGNED. A person keeps the phones they
+ * already have first, so unchanged amounts change nothing. A phone is never moved onto a person who
+ * already holds the same IMEI.
+ */
+export function planAllocation<T extends Owned>(records: T[], ids: Iterable<string>, allocations: Allocation[]): AllocationPlan<T> {
+  const wanted = new Set(ids);
+  const ordered = records.filter(record => wanted.has(record.id));
+  const owner = new Map(ordered.map(record => [record.id, record.personId]));
+  const left = ordered.map(record => record.id);
+  const destination = new Map<string, string>();
+  const take = (id: string, person: string) => { destination.set(id, person); left.splice(left.indexOf(id), 1); };
+  const wants = allocations.filter(item => item.count > 0 && item.personId !== UNASSIGNED);
+  for (const { personId, count } of wants) {
+    let remaining = Math.floor(count);
+    for (const id of [...left]) if (remaining > 0 && owner.get(id) === personId) { take(id, personId); remaining--; }
+  }
+  for (const { personId, count } of wants) {
+    const have = [...destination.values()].filter(value => value === personId).length;
+    let remaining = Math.max(0, Math.floor(count) - have);
+    for (const id of [...left]) if (remaining > 0) { take(id, personId); remaining--; }
+  }
+  for (const id of [...left]) take(id, UNASSIGNED);
+
+  let next = records;
+  const moved: string[] = [], blocked: string[] = [], emptied = new Set<string>();
+  const given: Record<string, number> = {};
+  for (const person of new Set(destination.values())) {
+    const group = [...destination].filter(([, value]) => value === person).map(([id]) => id);
+    const plan = planMove(next, group, person);
+    next = plan.records;
+    moved.push(...plan.moved); blocked.push(...plan.blocked);
+    given[person] = group.length - plan.blocked.length;
+    plan.emptiedSources.forEach(id => emptied.add(id));
+  }
+  const emptiedSources = [...emptied].filter(person => !next.some(record => record.personId === person));
+  return { records: next, given, moved, blocked, emptiedSources };
+}
+
+export type ReviewHolder = { name: string; count: number; numbers: string[] };
+export type ReviewModel = { label: string; holders: ReviewHolder[] };
+
+/** Model by model: "Galaxy A37 5G (6)" then "Carlou × 2" per person, optionally with each phone's numbers underneath. */
+export function formatModelReview(models: ReviewModel[], includeNumbers: boolean): string {
+  return models.filter(model => model.holders.length).map(model => {
+    const total = model.holders.reduce((sum, holder) => sum + holder.count, 0);
+    const lines = [`${model.label} (${total})`];
+    for (const holder of model.holders) {
+      lines.push(`${holder.name} × ${holder.count}`);
+      if (includeNumbers) for (const number of holder.numbers) lines.push(`  ${number}`);
+    }
+    return lines.join('\n');
+  }).join('\n\n');
+}
