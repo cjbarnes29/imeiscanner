@@ -1,4 +1,4 @@
-import { labelledBarcodeImeis, labelledBarcodeLines, type PositionedBarcode } from './barcode-imei';
+import { labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
@@ -32,6 +32,9 @@ type RecordItem = {
   imei: string;
   serial?: string;
   serialNeedsReview?: boolean;
+  /** Set when the scanner suspects several devices but could not split them safely. */
+  deviceCount?: number;
+  deviceImeis?: string[];
   status: 'Valid' | 'Invalid' | 'Review';
   duplicate: boolean;
   createdAt: string;
@@ -210,7 +213,7 @@ async function cameraBarcodeText(photo: string, raw: string, lines:OcrLine[] = [
     if(!values.length){const {BrowserMultiFormatReader}=await import('@zxing/browser');try{const result=await new BrowserMultiFormatReader().decodeFromImageElement(image);values=[result.getText()];}catch{}}
     // A bare barcode cannot tell us IMEI 1 versus IMEI 2. Only explicitly
     // labelled payloads supplement OCR; conflicting numbers remain for review.
-    return [raw,labelledBarcodeImeis(positioned,lines),...values.filter(value=>extractPreferredImei(value)||extractSerial(value))].join('\n');
+    return [raw,labelledBarcodeImeis(positioned,lines),resolveImeisFromBarcodes(values,raw),...values.filter(value=>extractPreferredImei(value)||extractSerial(value))].join('\n');
   }catch{return raw;}
 }
 
@@ -225,13 +228,13 @@ function extractPreferredImei(text: string) {
   const first = extractImei1s(text).filter(luhnValid);
   if (first.length === 1) return first[0];
   if (first.length > 1) return '';
+  // A bare "IMEI: …" (Apple/Pixel style, or OCR dropped the 1) ranks above IMEI 2.
+  const plain = unindexedImeis(text).filter(luhnValid);
+  if (plain.length === 1) return plain[0];
+  if (plain.length > 1) return '';
   const second = [...text.matchAll(/\bIM[E3][I1!|l]\s*(?:2|02)\s*[:#-]?\s*((?:\d[\s-]*){15})(?![\s-]*\d)/gi)].map(match => digits(match[1])).filter(luhnValid);
   const unique = [...new Set(second)];
-  if (unique.length === 1) return unique[0];
-  if (unique.length > 1) return '';
-  // Labels with no 1/2 (e.g. "IMEI: …") are accepted only when exactly one passes Luhn.
-  const plain = unindexedImeis(text).filter(luhnValid);
-  return plain.length === 1 ? plain[0] : '';
+  return unique.length === 1 ? unique[0] : '';
 }
 
 function hasMultipleDeviceText(raw:string) {
@@ -1659,6 +1662,7 @@ export default function App() {
           dataUrl,
           cropDataUrl,
           cropNeedsReview: cropNeedsReview || !!region?.needsReview,
+          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
           model,
           ...serialReading(cropRaw),
           imei,
@@ -1852,6 +1856,15 @@ export default function App() {
     }
   }
 
+  /** Answer to "1 device or N?": keep one record and use the first readable IMEI 1. */
+  function confirmSingleDevice() {
+    if (!selected) return;
+    const imei = selected.imei || selected.deviceImeis?.[0] || '';
+    updateRow(selected.id, { cropNeedsReview: false, deviceCount: undefined, deviceImeis: undefined, imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' });
+    setManualImei(imei);
+    setToast(imei ? 'Kept as one device.' : 'Kept as one device. Enter the IMEI or serial.');
+  }
+
   function finishReviewSplit() {
     if (!selected || !reviewSplit || reviewSplit.crops.length !== reviewSplit.target) return;
     if (reviewSplit.crops.some(crop => crop.imei && !/^\d{15}$/.test(crop.imei))) {
@@ -1867,7 +1880,7 @@ export default function App() {
       dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl,
       ...serialReading(crop.raw), imei: crop.imei, model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
       cropNeedsReview: !crop.imei && !serialReading(crop.raw).serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
-      duplicate: false, createdAt: new Date().toISOString()
+      duplicate: false, createdAt: new Date().toISOString(), deviceCount: undefined, deviceImeis: undefined
     }));
     setRecords(old => markDuplicateRecords(old.flatMap(r => r.id === selected.id ? replacements : [r])));
     setSelectedIds(old => old.filter(id => id !== selected.id));
@@ -2922,6 +2935,14 @@ export default function App() {
               </details>
             )}
 
+            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !cropEditorOpen && !reviewSplit && <div className="review-split-prompt device-question" role="group" aria-label="How many devices are in this photo">
+              <strong>Is this 1 device or {selected.deviceCount}?</strong>
+              <p>The scanner found {selected.deviceCount} possible devices{selected.deviceImeis?.length ? ` (IMEI 1: ${selected.deviceImeis.join(', ')})` : ''} but no clear gap between them, so it did not cut the photo.</p>
+              <div className="review-split-start">
+                <button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button>
+                <button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices — crop each</button>
+              </div>
+            </div>}
             {cropEditorOpen && !reviewSplit && <div className="review-split-prompt">
               <label htmlFor="review-crop-count">How many IMEI labels do you see in this photo?</label>
               <p>Choose a number, then draw one box per picture. Review the cropped photos before replacing the original record.</p>

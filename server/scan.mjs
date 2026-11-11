@@ -3,6 +3,25 @@ import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from 
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 import { planImeiCrops } from '../src/scan-layout.ts';
+import { labelledBarcodeLines, resolveImeisFromBarcodes } from '../src/barcode-imei.ts';
+import { readBarcodes } from 'zxing-wasm/reader';
+
+/** All Code 128 barcodes in the frame with their boxes, for pairing with IMEI labels. */
+async function frameBarcodes(frame) {
+  try {
+    const found = await readBarcodes({ data: new Uint8ClampedArray(frame.data.buffer, frame.data.byteOffset, frame.data.length), width: frame.width, height: frame.height, colorSpace: 'srgb' }, { formats: ['Code128'], maxNumberOfSymbols: 32, tryHarder: true });
+    return found.filter(code => code.isValid).map(code => {
+      const p = code.position, xs = [p.topLeft.x, p.topRight.x, p.bottomLeft.x, p.bottomRight.x], ys = [p.topLeft.y, p.topRight.y, p.bottomLeft.y, p.bottomRight.y];
+      return { rawValue: code.text, boundingBox: { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(1, Math.max(...ys) - Math.min(...ys)) } };
+    });
+  } catch (error) { console.error('Barcode reading failed', error); return []; }
+}
+
+/** Barcode values inside one device crop, upscaled so small Code 128 bars decode. */
+async function cropBarcodeValues(photo) {
+  const { data, info } = await sharp(photo).resize({ width: 2400, height: 2400, fit: 'inside' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return (await frameBarcodes({ data, width: info.width, height: info.height })).map(code => code.rawValue);
+}
 
 const digits = value => value.replace(/\D/g, '');
 const labelledNumbers = (text, type) => [...new Set([...text.matchAll(new RegExp(`\\bIMEI\\s*(?:${type}|0${type})\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?![\\s-]*\\d)`, 'gi'))]
@@ -20,12 +39,14 @@ function luhnValid(value) {
 }
 
 function preferredImei(text, firstOnly = false) {
-  for (const type of firstOnly ? [1] : [1, 2]) {
-    const valid = labelledNumbers(text, type).filter(luhnValid);
-    if (valid.length === 1) return valid[0];
-  }
+  const first = labelledNumbers(text, 1).filter(luhnValid);
+  if (first.length === 1) return first[0];
+  // A bare "IMEI: …" (Apple/Pixel style, or OCR dropped the 1) ranks above IMEI 2.
   const plain = unindexedImeis(text).filter(luhnValid);
-  return plain.length === 1 ? plain[0] : '';
+  if (plain.length === 1) return plain[0];
+  if (firstOnly) return '';
+  const second = labelledNumbers(text, 2).filter(luhnValid);
+  return second.length === 1 ? second[0] : '';
 }
 
 function modelFrom(text, filename) {
@@ -97,6 +118,9 @@ export async function createScanner() {
       }
       const {data:frameData,info:frameInfo}=await sharp(color).ensureAlpha().raw().toBuffer({resolveWithObject:true});
       const frame={data:frameData,width:frameInfo.width,height:frameInfo.height};
+      // Same as the browser camera path: barcodes under IMEI labels anchor each device.
+      const barcodeLines=labelledBarcodeLines(await frameBarcodes(frame),lines);
+      if(barcodeLines.length){lines=[...lines,...barcodeLines];raw+='\n'+barcodeLines.map(line=>line.text).join('\n');imeis=labelledNumbers(raw,1);}
       const anchors=deviceAnchors(lines,colorSize.width,colorSize.height,frame);
       const regions=planDeviceCrops(anchors,lines,colorSize.width,colorSize.height,frame);
       const splitFailed=(anchors.length>1&&regions.length<2)||(anchors.length<2&&regions.length<2&&imeis.length>1);
@@ -106,6 +130,7 @@ export async function createScanner() {
       for (const region of selections) {
         const photo = region ? await sharp(color).extract({ left: Math.max(0, Math.floor(region.x)), top: Math.max(0, Math.floor(region.y)), width: Math.min(colorSize.width - Math.floor(region.x), Math.ceil(region.width)), height: Math.min(colorSize.height - Math.floor(region.y), Math.ceil(region.height)) }).jpeg({ quality: 85 }).toBuffer() : color;
         let cropRaw = region ? (await worker.recognize(photo)).data.text || '' : raw;
+        if (region) { const cropCodes = await cropBarcodeValues(photo); const fromBarcodes = resolveImeisFromBarcodes(cropCodes, cropRaw); if (fromBarcodes) cropRaw = `${fromBarcodes}\n${cropRaw}`; }
         let imei = splitFailed ? '' : preferredImei(cropRaw);
         if (region && !labelledNumbers(cropRaw,1).some(luhnValid) && mode !== 'fast') {
           const improved = await sharp(photo).resize({width:2600,height:2600,fit:'inside'}).grayscale().normalise().sharpen().jpeg({quality:96}).toBuffer();
@@ -132,6 +157,7 @@ export async function createScanner() {
           ...serialReading(cropRaw),
           status: imei ? 'Valid' : 'Review',
           cropNeedsReview: splitFailed || !!region?.needsReview,
+          ...(splitFailed ? (() => { const found = labelledNumbers(raw, 1).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
           raw: cropRaw,
           createdAt: new Date().toISOString(),
           photo

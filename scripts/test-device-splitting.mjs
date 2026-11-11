@@ -47,7 +47,13 @@ try{
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 2: '+B,420)],1000,1000).length,1,'Close-up IMEI 1/IMEI 2 with barcode gap stays one device');
  assert.equal(deviceAnchors([big('IMEI 1: '+A,100),big('IMEI 1: '+C,700)],1000,1000).length,2,'Close-up distinct devices still split');
  // Camera: barcodes under IMEI labels become positioned anchors.
- const {labelledBarcodeLines}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+ const {labelledBarcodeLines,resolveImeisFromBarcodes}=await import(pathToFileURL(join(dir,'barcode-imei.mjs')).href);
+ // Real OCR from a 4-box camera photo: digits misread, barcodes exact.
+ assert.equal(resolveImeisFromBarcodes(['351124072221537','351570782221532'],'IMEI 1 : 35112407222I537  IMEI 2 : 3515707822215'),'IMEI 1: 351124072221537\nIMEI 2: 351570782221532','Label picks the barcode sharing its digits');
+ assert.equal(resolveImeisFromBarcodes(['351124072221537'],'IMEI: 351124072221537 IMEI 2 : 351570782221532'),'IMEI 1: 351124072221537','OCR dropped the 1 in IMEI 1');
+ assert.equal(resolveImeisFromBarcodes(['357126893713943'],'Gas IMENR:3! 712689: 2:35793'),'IMEI: 357126893713943','Single barcode with partial digits is un-indexed');
+ assert.equal(resolveImeisFromBarcodes(['357126893713943'],'no digits here'),'','No OCR evidence, no number');
+ assert.equal(resolveImeisFromBarcodes(['8806099448912'],'IMEI 1 : 8806099448912'),'','EAN product barcodes are not IMEIs');
  const labelA=line('IMEI 1',200,160),labelC=line('IMEI 1',200,560);
  const codes=[{rawValue:A,boundingBox:{x:200,y:100,width:240,height:50}},{rawValue:C,boundingBox:{x:200,y:500,width:240,height:50}}];
  const barcodeLines=labelledBarcodeLines(codes,[labelA,labelC]);

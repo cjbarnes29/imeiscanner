@@ -16,3 +16,6 @@ android/app/build/
 android/app/src/main/assets/
 *.traineddata
 *.traineddata.gz
+
+# Real label photos contain IMEIs; never commit them
+test-photos/
