@@ -1178,6 +1178,8 @@ export default function App() {
   const [shareMode,setShareMode]=useState<ShareMode>('imei');
   const [shareIndex,setShareIndex]=useState(0);
   const [shareStep,setShareStep]=useState<'picture'|'text'>('picture');
+  // Several records share in batches (many pictures per message) unless switched to one-by-one.
+  const [shareOneByOne,setShareOneByOne]=useState(false);
   const [sharing,setSharing]=useState(false);
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
@@ -2311,7 +2313,35 @@ export default function App() {
   const shareRows=records.filter(row=>shareIds.includes(row.id));
   const currentShareRow=shareRows[Math.min(shareIndex,Math.max(0,shareRows.length-1))];
   const currentShareText=currentShareRow?shareNumberText({imei:currentShareRow.imei,serial:recordSerial(currentShareRow)},shareMode):'';
-  function openSharing(ids:string[]){setShareIds(ids);setShareIndex(0);setShareStep('picture');setShareStatus('');}
+  function openSharing(ids:string[]){setShareIds(ids);setShareIndex(0);setShareStep('picture');setShareStatus('');setShareOneByOne(false);}
+  const bulkShare=shareRows.length>1&&!shareOneByOne;
+  const SHARE_BATCH=10;
+  const shareBatches=Array.from({length:Math.ceil(shareRows.length/SHARE_BATCH)},(_,i)=>shareRows.slice(i*SHARE_BATCH,(i+1)*SHARE_BATCH));
+  /** One message with every number, numbered in the same order as the pictures. */
+  const bulkShareText=shareRows.map((row,index)=>{
+    const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');
+    return `${index+1}. ${line||'No number detected'}`;
+  }).join('\n');
+  function bulkPictureFiles(batch:RecordItem[]){
+    return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}_${(batch[index].imei||recordSerial(batch[index])||'picture').replace(/[^A-Za-z0-9_-]/g,'_')}.jpg`,{type:entry.file.type}));
+  }
+  function nativeShareBulk(kind:'pictures'|'text',batchIndex=0){
+    if(sharing)return;
+    try{
+      let data:ShareData;
+      if(kind==='pictures'){
+        data={files:bulkPictureFiles(shareBatches[batchIndex])};
+        if(!navigator.canShare?.(data)){setShareStatus('This browser cannot share several pictures at once. Use Download these pictures, then attach them in your chat.');return;}
+      }else data={text:bulkShareText};
+      if(!navigator.share){setShareStatus('Sharing is unavailable in this browser. Use Download or Copy.');return;}
+      setSharing(true);
+      void navigator.share(data).then(()=>setShareStatus(kind==='pictures'?`Pictures ${batchIndex*SHARE_BATCH+1}-${batchIndex*SHARE_BATCH+shareBatches[batchIndex].length} sent to the share menu. Check your chat, then share the next group or the numbers.`:'Numbers sent to the share menu. Check your chat.')).catch(error=>setShareStatus(error?.name==='AbortError'?'Share menu cancelled. Nothing is marked as sent.':'Could not open sharing. Use Download or Copy.')).finally(()=>setSharing(false));
+    }catch(error){setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
+  }
+  async function downloadBulkPictures(batch:RecordItem[]){
+    try{for(const file of bulkPictureFiles(batch)){saveDirectFile(file,file.name);await new Promise(resolve=>setTimeout(resolve,400));}setShareStatus(`${batch.length} picture(s) downloaded. Attach them in your chat.`);}
+    catch(error){setShareStatus(error instanceof Error?error.message:'Could not download the pictures.');}
+  }
   function shareRecord(record:RecordItem){openSharing([record.id]);}
   function nativeShareStep(kind:'picture'|'text'){
     if(sharing||!currentShareRow)return;
@@ -2833,6 +2863,7 @@ export default function App() {
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
               <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{openSharing(selectedRows.map(row=>row.id));}}>Share selected ({selectedRows.length})</button>
+              <button className="primary share-all-btn" disabled={!visible.length} onClick={()=>openSharing(visible.slice(0,200).map(row=>row.id))}>Share all ({Math.min(visible.length,200)}) — pictures + numbers</button>
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
@@ -3200,10 +3231,20 @@ export default function App() {
       )}
 
       {shareIds.length>0&&<div className="modal-backdrop share-backdrop"><section className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share selected records">
-       <div className="modal-head"><h2>Share selected records</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
+       <div className="modal-head"><h2>{shareIds.length>1?`Share ${shareIds.length} records`:"Share record"}</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
        <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI (or serial if no IMEI)</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
-       <p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>
-       {currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
+       {bulkShare?<div className="share-bulk">
+        <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Pictures and numbers use the same 1, 2, 3 order.</p>
+        <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
+        <strong>Step 1 · Pictures</strong>
+        <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareBulk('pictures',index)}>Share pictures {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length}</button>)}</div>
+        <button className="subtle-btn" onClick={()=>void downloadBulkPictures(shareRows)}>Download all {shareRows.length} pictures instead</button>
+        <strong>Step 2 · Numbers (one message)</strong>
+        <textarea aria-label="All numbers to share" readOnly value={bulkShareText}/>
+        <div className="share-toolbar"><button className="primary" disabled={sharing||!bulkShareText} onClick={()=>nativeShareBulk('text')}>Share all numbers</button><button className="subtle-btn" onClick={()=>void copyText(bulkShareText).then(ok=>setShareStatus(ok?'Numbers copied. Paste them as a new message.':'Copy failed. Select and copy the text above.'))}>Copy numbers</button></div>
+        <button className="textbtn" disabled={sharing} onClick={()=>{setShareOneByOne(true);setShareStep('picture');setShareIndex(0);setShareStatus('');}}>Share one record at a time instead</button>
+       </div>:<p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>}
+       {!bulkShare&&currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
       </section></div>}

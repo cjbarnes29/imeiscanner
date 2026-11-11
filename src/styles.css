@@ -87,3 +87,11 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .selection-check{margin:10px}
 /* Toasts sit above the phone's home bar and never cover the last button. */
 .toast{bottom:max(16px,env(safe-area-inset-bottom));max-width:calc(100vw - 32px)}
+
+/* Bulk sharing */
+.share-bulk{display:grid;gap:10px}.share-thumbs{display:flex;gap:6px;overflow-x:auto;padding:4px 0}.share-thumbs img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #35506a;flex:none}.share-thumbs span{align-self:center;color:#b3c4d1}
+.share-bulk textarea{width:100%;min-height:120px;max-height:30dvh;padding:10px;border:1px solid #35506a;border-radius:8px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;resize:vertical}
+.share-bulk .share-toolbar{display:flex;flex-wrap:wrap;gap:8px}.share-bulk .share-toolbar button{min-height:48px}
+.share-all-btn{grid-column:1/-1;min-height:48px;font-weight:700}
+.share-modal select{min-height:44px;padding:8px 10px;border:1px solid #35506a;border-radius:8px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;max-width:100%}
+.share-modal label{display:grid;gap:6px}
