@@ -20,4 +20,5 @@ jobs:
       - run: npm ci
       - run: node scripts/test-records.mjs
       - run: node scripts/test-device-splitting.mjs
+      - run: node scripts/test-people.mjs
       - run: npm run build

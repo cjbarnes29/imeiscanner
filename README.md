@@ -11,17 +11,30 @@ Install the Android APK from the [latest Android release](https://github.com/cjb
 Android may pause and retry queued work when it restricts background activity, and force-stopping the app in phone settings prevents work until the app is opened again. Android 15 also limits `mediaProcessing` foreground services to six hours in a 24-hour period. This APK is a debug-signed preview; later APKs may require uninstalling it before installation, which erases its local records. Export important records first. A phone test is still needed to validate scanning on your device.
 
 ## The screen
-The screen has three steps, all visible, as in earlier versions:
-1. **Upload photos** (Step 01): Scan with camera, the drop zone and photo queue, the scan-speed menu, **Extract IMEI**, laptop / background scanning, the Android background scan, and the Samsung product catalog.
+There are two modes, chosen with the **Simple | Detailed** switch in the top bar. The choice is remembered. Detailed Mode is the full screen and is the default; Simple Mode shows only the essentials. Nothing is removed in either mode: Simple Mode just hides the advanced blocks, and everything works the same in both.
+
+**Detailed Mode** (three steps, all visible):
+1. **Upload photos** (Step 01): Scan with camera (opens the device's own camera app), the drop zone and photo queue, the scan-speed menu, **Extract IMEI**, laptop / background scanning, the Android background scan, and the Samsung product catalog.
 2. **Export inventory** (Step 02): Excel, Word, Google Sheets or CSV, what to include, which records, and the choose-records list. The default is Excel with IMEI 1, IMEI 2, Serial, the picture and a Download picture link.
-3. **Scanned records** (Step 03): model filter chips, the search box, the people controls, and the records in the **detailed table** (the default) or the **Simple view**.
+3. **Scanned records** (Step 03): model filter chips, the search box, the people controls, and the records in the **detailed table** (default) or the **phone list** grouped by series.
 
 Summary cards (scanned records, valid IMEI, needs review, models) and quick navigation sit at the top.
 
-Added on top of that:
-- **Simple view** lists the phones grouped under their series (for example *S26 series*, *S25 series*, *Fold series*) with the phone name, IMEI, IMEI 2 and serial and a Copy button for each, instead of a model code. Phone names come from the Samsung catalog first, then Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits. Every phone also has a **More for this phone** section (edit IMEI, serial and model code, copy, download, share, edit or crop the photo).
-- **People:** a **Rename** button for each person, plus the original name box and **Add person**. Move phones with the person menu on a row, **Move selected to** in the toolbar, or the Person menu in the photo review window.
-- **Bulk tools** (they apply to the ticked phones, or to all shown when none are ticked): **Share selected / Share all** (pictures 10 at a time, then all numbers as one message), **Download all pictures**, **Send numbers** (one numbered message with IMEI, IMEI 2 and serial), **Bulk edit** (model code, person, mark as checked) and **Bulk crop**.
+**Simple Mode** shows: **Take photo** (the device's own camera app) and **Choose photos** (scanning starts by itself), the phones grouped under their series with phone name, IMEI, IMEI 2 and serial and a Copy button for each, search, the people tools, and the essential actions: **Export Excel**, **Download all pictures**, **Share selected**, **Send numbers**, **Move selected to**, **Delete selected**, and **Fix photos** when some photos need it. It hides the summary cards, quick navigation, catalog, scan speed, drop zone and queue, laptop scanning, the Export inventory panel, the model filter, Bulk edit and Share all. Switch to Detailed Mode for those.
+
+**Camera:** Take photo / Scan with camera hands over to the phone's native camera app (a camera-capture file input), and the photo you take is scanned straight away; tap it again for the next one. On a computer it opens the file chooser. The old in-app camera screen is no longer used.
+
+### People: move and delete
+Every phone belongs to exactly one person or to nobody (**Unassigned**), so **Everyone** is simply all phones and never lists one twice.
+- **Person chips** show how many phones each person has: *Everyone*, each person, and *Unassigned* when there are any. Rename a person with their **Rename** button (or the name box); **Add person** adds one.
+- **Move** (the person menu on each row, **Move selected to**, **Move all to** in a person's view, Bulk edit, or the Person menu in the photo review window): the previous person loses the phone automatically and Everyone is updated without duplicates. A phone is **never moved if the destination already has the same IMEI**; it stays where it is and a message says so.
+- **All IMEIs moved.** When the last phone leaves a person, that person's view says *All IMEIs moved.* (remembered across reloads).
+- **Delete:** while viewing **one person**, Delete (row trash, **Delete selected**, **Delete all**, or the review window) takes the phone off that person and leaves it under Everyone as **Unassigned**, with no confirmation. While viewing **Everyone** or **Unassigned**, Delete removes it **permanently**, after an in-app confirmation (*Delete permanently? / Cancel*).
+- Unassigned phones can be given to a person again with any Move control, and appear in exports as *Unassigned*.
+
+Also available (Detailed Mode, or under *More for this phone* in the phone list):
+- **Bulk tools** (they apply to the ticked phones, or to all shown when none are ticked): **Share selected / Share all** (pictures 10 at a time, then all numbers as one message), **Download all pictures**, **Send numbers** (one numbered message with IMEI, IMEI 2 and serial), **Bulk edit** (model code, person, mark as checked) and **Bulk crop** (ticked photos, else the ones that need it, else all shown).
+- The phone list's names come from the Samsung catalog first, then Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits.
 
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
@@ -46,7 +59,7 @@ Added on top of that:
 - **IMEI 2 and serial second reads.** When IMEI 2 is missing, the area right of each IMEI 1 line is re-read enlarged; Samsung prints the same six serial digits (positions 9-14) in IMEI 1 and IMEI 2, so a reading is accepted when it matches that block, corrected when only that block was misread, and left blank otherwise. When the serial is missing, the top-left of the label (where Samsung prints S/N) is re-read on its own.
 - **Test data.** Tests use made-up IMEIs and serials only. Real label photos stay in the git-ignored `test-photos/` folder.
 - **Speed and offline use.** Crops of one photo are read on two workers in parallel (4+ cores); dark labels are read inverted from the start; the reading engine, language data and fonts are bundled with the app (no CDN, works offline once opened; copied at build time by `scripts/copy-ocr-assets.mjs`); the stored original photo is capped at 3200 px.
-- **Navigation.** The Back button / swipe-back (browser and Android app) closes the popup you are in (review, crop editor, share, camera) instead of leaving the app; it closes only the top popup, and the camera still asks before discarding unscanned photos. Popup headers with Close stay pinned while the content scrolls, and a floating **Top** button returns to the start of a long list.
+- **Navigation.** The Back button / swipe-back (browser and Android app) closes the popup you are in (review, crop editor, share, bulk crop, bulk edit, delete confirmation) instead of leaving the app; it closes only the top popup, and the camera still asks before discarding unscanned photos. Popup headers with Close stay pinned while the content scrolls, and a floating **Top** button returns to the start of a long list.
 - Best-effort device model classification from OCR text and filenames; unknown models can be edited.
 - Original photo retained with each record; click the thumbnail to inspect the image and raw OCR text.
 - Scanned records offers detailed and simple views, a model filter, and per-record deletion from the review window. Uploads can be stopped; a browser scan finishes its current photo and leaves unprocessed photos queued.

@@ -2,6 +2,7 @@ import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickIm
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, type CatalogEntry } from './phone-names';
+import { planMove, planUnassign, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
@@ -17,7 +18,6 @@ import {
 import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
 import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
-import { CameraCapture } from './CameraCapture';
 import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 
 type RecordItem = {
@@ -357,7 +357,7 @@ function readPeople(): PersonGroup[] {
 
 function personTitle(record: RecordItem, people: PersonGroup[]) {
   const person = people.find(item => item.id === record.personId);
-  return person ? `${person.label}${person.name ? ` — ${person.name}` : ''}` : 'Person 1';
+  return person ? `${person.label}${person.name ? ` — ${person.name}` : ''}` : record.personId ? 'Person 1' : 'Unassigned';
 }
 
 async function downloadBlob(blob: Blob, filename: string): Promise<void> {
@@ -975,7 +975,7 @@ function recordsCsv(
       return [
         `#${r.number}`,
         r.pictureId,
-        person?.label || 'Person 1',
+        person?.label || (r.personId ? 'Person 1' : 'Unassigned'),
         person?.name || '',
         r.name,
         exportModel(r.model),
@@ -1111,7 +1111,7 @@ async function createInventoryWorkbook(
       const row = sheet.addRow({
         number: `#${record.number}`,
         pictureId: record.pictureId,
-        person: layout === 'person_photo' ? personTitle(record, people) : people.find(person => person.id === record.personId)?.label || 'Person 1',
+        person: layout === 'person_photo' ? personTitle(record, people) : people.find(person => person.id === record.personId)?.label || (record.personId ? 'Person 1' : 'Unassigned'),
         personName: people.find(person => person.id === record.personId)?.name || '',
         ...(includePhotos ? { photo: '' } : {}),
         filename: record.name,
@@ -1423,7 +1423,7 @@ async function createWordReport(
       }
       const cells = [
         new TableCell({ children: [new Paragraph({ text: `#${record.number}` })] }),
-        new TableCell({ children: [new Paragraph({ text: people.find(person => person.id === record.personId)?.label || 'Person 1' })] }),
+        new TableCell({ children: [new Paragraph({ text: people.find(person => person.id === record.personId)?.label || (record.personId ? 'Person 1' : 'Unassigned') })] }),
         new TableCell({ children: [new Paragraph({ text: people.find(person => person.id === record.personId)?.name || '' })] })
       ];
 
@@ -1549,6 +1549,11 @@ export default function App() {
   const [bulkEditPerson, setBulkEditPerson] = useState('');
   const [bulkEditChecked, setBulkEditChecked] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState('');
+  // People whose phones were all moved away (so their empty view can say "All IMEIs moved."); kept across reloads.
+  const [emptiedPeople, setEmptiedPeople] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-lens-emptied-people') || '[]'); } catch { return []; } });
+  useEffect(() => { try { localStorage.setItem('imei-lens-emptied-people', JSON.stringify(emptiedPeople)); } catch { /* storage full: the message just falls back */ } }, [emptiedPeople]);
+  // Permanent delete waits for an in-app confirmation.
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; fromReview: boolean } | null>(null);
   const [detailedView, setDetailedView] = useState(false);
   const queueInputRef = useRef<HTMLInputElement>(null);
   const [personDraft, setPersonDraft] = useState('');
@@ -1755,6 +1760,7 @@ export default function App() {
   // Back button / swipe-back closes the top popup instead of leaving the app.
   useBackLayer(!!selected, closePhotoReview, 'review');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
+  useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
 
@@ -1830,7 +1836,7 @@ export default function App() {
     (`${r.name} ${r.model} ${infoOf(r).name} ${r.imei} ${recordSerial(r)}`)
       .toLowerCase()
       .includes(query.toLowerCase()) &&
-    (personFilter === 'All' || r.personId === personFilter)
+    (personFilter === 'All' || (personFilter === UNASSIGNED_FILTER ? r.personId === UNASSIGNED : r.personId === personFilter))
   );
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
@@ -1876,14 +1882,42 @@ export default function App() {
     setReviewIds(visible.map(item => item.id));
     setSelected(record);
   }
-  function deleteRecord(record: RecordItem, fromReview = false, confirmed = false) {
-    if (!confirmed && !window.confirm(`Delete record #${record.number} and its saved picture?`)) return;
+  /** Permanently remove phones (only reached after the confirmation, or from the review window's own confirmation). */
+  function removeRecords(ids: string[], fromReview = false) {
+    const set = new Set(ids);
     const next = fromReview ? reviewRecords[reviewIndex + 1] || reviewRecords[reviewIndex - 1] : null;
-    setRecords(old => markDuplicateRecords(old.filter(item => item.id !== record.id)));
-    setSelectedIds(old => old.filter(id => id !== record.id));
-    setReviewIds(old => old.filter(id => id !== record.id));
-    if (fromReview) { closeCropEditor(); setSelected(next || null); }
-    setToast(`Record #${record.number} deleted.`);
+    setRecords(old => markDuplicateRecords(old.filter(item => !set.has(item.id))));
+    setSelectedIds(old => old.filter(id => !set.has(id)));
+    setReviewIds(old => old.filter(id => !set.has(id)));
+    setSelectedOnly(false);
+    if (fromReview) { closeCropEditor(); setSelected(next && !set.has(next.id) ? next : null); }
+    else if (selected && set.has(selected.id)) setSelected(null);
+    setToast(`${ids.length} IMEI record${ids.length === 1 ? '' : 's'} deleted permanently.`);
+  }
+
+  /**
+   * Delete. Under one person it only takes the phones off that person: they stay under Everyone as
+   * unassigned. Under Everyone (or Unassigned) it removes them permanently, after a confirmation.
+   */
+  function requestDelete(rows: RecordItem[], fromReview = false) {
+    if (!rows.length) return;
+    if (isPersonView(personFilter)) {
+      const next = fromReview ? reviewRecords[reviewIndex + 1] || reviewRecords[reviewIndex - 1] : null;
+      const plan = planUnassign(records, rows.map(row => row.id), personFilter);
+      if (!plan.moved.length) { setToast('Nothing to remove from this person.'); return; }
+      setRecords(plan.records);
+      setSelectedIds(old => old.filter(id => !plan.moved.includes(id)));
+      setEmptiedPeople(old => old.filter(id => id !== personFilter));
+      if (fromReview) { closeCropEditor(); setSelected(next && !plan.moved.includes(next.id) ? next : null); }
+      setToast(`${plan.moved.length} IMEI${plan.moved.length === 1 ? '' : 's'} moved to Everyone as unassigned.`);
+      return;
+    }
+    setConfirmDelete({ ids: rows.map(row => row.id), fromReview });
+  }
+
+  function deleteRecord(record: RecordItem, fromReview = false, confirmed = false) {
+    if (confirmed && !isPersonView(personFilter)) { removeRecords([record.id], fromReview); return; }
+    requestDelete([record], fromReview);
   }
   const allVisibleSelected = visible.length > 0 &&
     visible.every(r => selectedIdSet.has(r.id));
@@ -1903,6 +1937,8 @@ export default function App() {
 
   /** The phones a bulk action applies to: the ticked ones, or everything shown when none are ticked. */
   const bulkTargets = () => (selectedRows.length ? selectedRows : visible);
+  const bulkCropRows = () => selectedRows.length ? selectedRows : records.some(needsCropping) ? records.filter(needsCropping) : visible;
+  const bulkCropLabel = selectedRows.length ? `${selectedRows.length} ticked` : records.some(needsCropping) ? `${records.filter(needsCropping).length} need cropping` : `all ${visible.length} shown`;
 
   /** Send all the numbers as one numbered message (share sheet, or copied when sharing is unavailable). */
   async function sendNumbers() {
@@ -1918,26 +1954,54 @@ export default function App() {
 
   /** Apply the Bulk edit form to every target phone. */
   function applyBulkEdit() {
-    const ids = new Set(bulkTargets().map(row => row.id));
-    if (!ids.size) return;
-    const model = bulkEditModel.trim();
+    const ids = bulkTargets().map(row => row.id);
+    if (!ids.length) return;
+    const set = new Set(ids), model = bulkEditModel.trim();
     if (!model && !bulkEditPerson && !bulkEditChecked) { setToast('Choose something to change first.'); return; }
-    setRecords(old => markDuplicateRecords(old.map(record => !ids.has(record.id) ? record : {
+    const edited = records.map(record => !set.has(record.id) ? record : {
       ...record,
       ...(model ? { model } : {}),
-      ...(bulkEditPerson ? { personId: bulkEditPerson } : {}),
       ...(bulkEditChecked ? { cropNeedsReview: false, serialNeedsReview: false, deviceCount: undefined, deviceImeis: undefined } : {})
-    })));
-    setToast(`Updated ${ids.size} phone${ids.size === 1 ? '' : 's'}.`);
+    });
+    if (bulkEditPerson) moveRecords(ids, ownerOf(bulkEditPerson), edited);
+    else { setRecords(markDuplicateRecords(edited)); setToast(`Updated ${ids.length} phone${ids.length === 1 ? '' : 's'}.`); }
     setBulkEditOpen(false); setBulkEditModel(''); setBulkEditPerson(''); setBulkEditChecked(false);
   }
 
-  function moveSelected(personId: string) {
-    const ids = new Set(selectedIds);
-    if (!ids.size) return;
-    const person = personGroups.find(item => item.id === personId);
-    setRecords(old => old.map(record => ids.has(record.id) ? { ...record, personId } : record));
-    setToast(`Moved ${ids.size} phone${ids.size === 1 ? '' : 's'} to ${person?.name || person?.label || 'that person'}.`);
+  const nativeCameraRef = useRef<HTMLInputElement>(null);
+  const simpleChooseRef = useRef<HTMLInputElement>(null);
+  /** Open the device's native camera app (photos are named camera-* so scanning treats them as camera shots). */
+  function openNativeCamera() {
+    if (busy || !inventoryLoaded) return;
+    nativeCameraRef.current?.click();
+  }
+
+  /** Select value "unassigned" means no person (an empty string cannot be a select option next to the placeholder). */
+  function ownerOf(value: string) { return value === 'unassigned' ? UNASSIGNED : value; }
+  function personNameOf(id: string) { const person = personGroups.find(item => item.id === id); return id === UNASSIGNED ? 'Unassigned' : person?.name || person?.label || 'that person'; }
+
+  /**
+   * Move phones to a person (or to Unassigned). The previous owner loses them automatically,
+   * Everyone keeps listing each phone once, and a phone is never moved when the destination
+   * already holds the same IMEI (so a move cannot create a duplicate).
+   */
+  function moveRecords(ids: string[], destination: string, base: RecordItem[] = records) {
+    const plan = planMove(base, ids, destination);
+    setRecords(plan.records);
+    setSelectedIds(old => old.filter(id => !plan.moved.includes(id)));
+    setEmptiedPeople(old => [...old.filter(id => id !== destination), ...plan.emptiedSources.filter(id => !old.includes(id))]);
+    const to = personNameOf(destination), parts: string[] = [];
+    if (plan.moved.length) parts.push(`Moved ${plan.moved.length} IMEI${plan.moved.length === 1 ? '' : 's'} to ${to}.`);
+    if (plan.blocked.length) parts.push(`${plan.blocked.length} stayed where ${plan.blocked.length === 1 ? 'it is' : 'they are'} because ${to} already has the same IMEI.`);
+    if (!plan.moved.length && !plan.blocked.length) parts.push(plan.alreadyThere.length ? `Already under ${to}.` : 'Nothing to move.');
+    if (plan.emptiedSources.length) parts.push('All IMEIs moved.');
+    setToast(parts.join(' '));
+    return plan;
+  }
+
+  function moveSelected(value: string) {
+    if (!selectedIds.length) return;
+    moveRecords(selectedIds, ownerOf(value));
   }
 
   /** One-tap export: the ticked phones, or every phone when none are ticked. Excel + pictures. */
@@ -1960,8 +2024,8 @@ export default function App() {
     setPersonGroups(old => old.map(person => person.id === id ? { ...person, name } : person));
   }
 
-  function assignPerson(recordId: string, personId: string) {
-    setRecords(old => old.map(record => record.id === recordId ? { ...record, personId } : record));
+  function assignPerson(recordId: string, value: string) {
+    return moveRecords([recordId], ownerOf(value));
   }
 
   function toggleSelected(id: string) {
@@ -2885,16 +2949,7 @@ export default function App() {
   }
 
   function deleteSelected() {
-    if (!selectedRows.length || !window.confirm(`Delete ${selectedRows.length} selected record(s)? This removes their saved photos and IMEIs from this browser.`)) return;
-    const ids = new Set(selectedRows.map(record => record.id));
-    setRecords(old => {
-      const remaining = old.filter(record => !ids.has(record.id));
-      return markDuplicateRecords(remaining);
-    });
-    setSelectedIds([]);
-    setSelectedOnly(false);
-    setSelected(null);
-    setToast('Selected records deleted.');
+    requestDelete(selectedRows);
   }
 
   return (
@@ -2911,16 +2966,36 @@ export default function App() {
         </div>
 
         <div className="top-actions">
+          <div className="mode-toggle" role="group" aria-label="Interface mode">
+            <button aria-pressed={simpleView} onClick={() => setSimpleView(true)}>Simple</button>
+            <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
+          </div>
           <span className="local-pill">
             <span /> {storageWarning ? 'Some records not saved' : 'Stored on this device'}
           </span>
         </div>
       </header>
 
-      {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
+      {/* The device's own camera app: `capture` makes a phone open its native camera directly. On a computer it opens the file chooser. */}
+      <input
+        ref={nativeCameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        aria-label="Take a photo with the device camera"
+        onChange={event => {
+          const taken = Array.from(event.target.files || []).filter(file => file.type.startsWith('image/')).map(file => new File([file], `camera-${newId()}.${(file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'}`, { type: file.type || 'image/jpeg' }));
+          event.target.value = '';
+          if (taken.length) void scan(taken);
+        }}
+      />
       <main className={collapsedPanels.length ? 'compact-page' : ''}>
-        <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button><button disabled={busy || !inventoryLoaded} onClick={() => setCameraOpen(true)}>📷 Camera</button></nav>
+{!simpleView && (<>
+        <nav className="quick-navigation" aria-label="Quick navigation"><button onClick={() => setCollapsedPanels(collapsedPanels.length === 3 ? [] : ['upload','export','records'])}>{collapsedPanels.length === 3 ? 'Expand all' : 'Minimize all'}</button><button onClick={() => goToPanel('upload')}>Upload</button><button onClick={() => goToPanel('export')}>Export</button><button onClick={() => goToPanel('records')}>Records</button><button disabled={busy || !inventoryLoaded} onClick={openNativeCamera}>📷 Camera</button></nav>
+</>)}
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
+{!simpleView && (<>
         <section className="hero">
           <div>
             <div className="eyebrow">DEVICE INVENTORY TOOL</div>
@@ -2940,7 +3015,9 @@ export default function App() {
             <ScanLine size={30} />
           </div>
         </section>
+</>)}
 
+{!simpleView && (<>
         <section className="stats">
           <div className="stat">
             <span>SCANNED RECORDS</span>
@@ -2966,6 +3043,7 @@ export default function App() {
             <small><Smartphone size={13} /> Identified model groups</small>
           </div>
         </section>
+</>)}
 
         <section className="workspace">
           <div id="upload" className={`panel upload-panel ${collapsedPanels.includes('upload') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('upload')} onClick={() => togglePanel('upload')}>{collapsedPanels.includes('upload') ? '▸' : '▾'} Upload photos {collapsedPanels.includes('upload') ? '— expand' : '— minimize'}</button>
@@ -2977,6 +3055,7 @@ export default function App() {
               <span className="tag">BULK UPLOAD</span>
             </div>
 
+{!simpleView && (<>
             {androidBridge && <div className="android-scan">
               <strong>Scan on this phone in the background</strong>
               <p>Choose photos here. Android keeps scanning with a progress notification when you minimize or close this screen. Your photos and results stay on this phone.</p>
@@ -2993,7 +3072,9 @@ export default function App() {
             {androidBridge && <p className="micro">The browser upload below runs only while this screen is open. Use the button above for background scans.</p>}
 
             <SamsungCatalog />
-            <button className="subtle-btn" disabled={busy || !inventoryLoaded} onClick={() => setCameraOpen(true)}>Scan with camera</button>
+</>)}
+{!simpleView && (<>
+            <button className="subtle-btn" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}>Scan with camera</button>
 
             <div
               className="dropzone"
@@ -3092,6 +3173,12 @@ export default function App() {
               )}
             </button>
 
+</>)}
+            {simpleView && <div className="simple-scan-buttons">
+              <button type="button" className="primary big" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}><Camera size={22} /> Take photo</button>
+              <button type="button" className="primary big alt" disabled={busy || !inventoryLoaded} onClick={() => simpleChooseRef.current?.click()}><UploadCloud size={22} /> Choose photos</button>
+              <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const picked = Array.from(event.target.files || []).filter(file => file.type.startsWith('image/')); event.target.value = ''; if (picked.length) void scan(picked); }} />
+            </div>}
             {(busy || laptopUploading) && <button type="button" className="subtle-btn stop-upload-button" disabled={stoppingScan} onClick={stopCurrentUpload}>
               <X size={16} /> {laptopUploading ? 'Stop uploading' : stoppingScan ? 'Stopping after this photo…' : 'Stop scanning'}
             </button>}
@@ -3105,6 +3192,7 @@ export default function App() {
               </div>
             )}
 
+{!simpleView && (<>
             {!androidBridge && <details className="laptop-scan" open={useBackgroundByDefault}>
               <summary>{hostedScanner ? 'Keep scanning after closing the browser' : 'Advanced: scan on your laptop (needs the laptop scanner app)'}</summary>
               <p>{hostedScanner ? 'Wait for Upload finished; then you may minimize or close the phone app. The online scanner continues until completion or you press Stop. Reopen this address to see the results.' : 'On a phone, use the laptop address below while both devices are on the same private Wi-Fi. Wait for Upload finished; then you may minimize or close the phone app. Your laptop keeps scanning until completion or you press Stop. Reopen this same address on the phone to see the results.'}</p>
@@ -3128,8 +3216,10 @@ export default function App() {
               <CheckCircle2 size={15} />
               {androidBridge ? 'Android background scans and photos stay on this phone.' : hostedScanner ? 'Background scans and photos are saved on your online scanner.' : 'Browser scans stay in this browser. Background scans are saved on your laptop.'}
             </div>
+</>)}
           </div>
 
+{!simpleView && (<>
           <div id="export" className={`panel export-panel ${collapsedPanels.includes('export') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('export')} onClick={() => togglePanel('export')}>{collapsedPanels.includes('export') ? '▸' : '▾'} Export inventory {collapsedPanels.includes('export') ? '— expand' : '— minimize'}</button>
             <div className="section-head">
               <div>
@@ -3289,6 +3379,7 @@ export default function App() {
               </span>
             </div>
           </div>
+</>)}
         </section>
 
         <section id="records" className={`results panel ${collapsedPanels.includes('records') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('records')} onClick={() => togglePanel('records')}>{collapsedPanels.includes('records') ? '▸' : '▾'} Scanned records {collapsedPanels.includes('records') ? '— expand' : '— minimize'}</button>
@@ -3301,11 +3392,13 @@ export default function App() {
             </div>
 
             <div className="result-actions">
+{!simpleView && (<>
               <select className="model-filter" aria-label="Filter scanned records by model" value={filter} onChange={event => setFilter(event.target.value)}>
                 <option value="All">All models</option>
                 {models.map(([model]) => <option key={model} value={model}>{model}</option>)}
                 <option value="Review">Needs review</option>
               </select>
+</>)}
               <label className="search">
                 <Search size={15} />
                 <input
@@ -3316,6 +3409,7 @@ export default function App() {
                 />
               </label>
 
+{!simpleView && (<>
               <button
                 className="subtle-btn"
                 onClick={() => {
@@ -3325,8 +3419,9 @@ export default function App() {
               >
                 <RefreshCw size={15} /> Add more
               </button>
+</>)}
               <button className="subtle-btn view-toggle" aria-pressed={simpleView} onClick={() => setSimpleView(old => !old)}>
-                {simpleView ? 'Detailed view' : 'Simple view'}
+                {simpleView ? 'Switch to Detailed mode' : 'Switch to Simple mode'}
               </button>
             </div>
           </div>
@@ -3361,6 +3456,7 @@ export default function App() {
           <div className="people-controls">
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
+{!simpleView && (<>
               <label>
                 New scans go to
                 <select value={activePersonId} onChange={e => setActivePersonId(e.target.value)}>
@@ -3375,22 +3471,32 @@ export default function App() {
                 value={personGroups.find(person => person.id === activePersonId)?.name || ''}
                 onChange={e => renamePerson(activePersonId, e.target.value)}
               />
+</>)}
               <button className="subtle-btn" onClick={addPersonGroup}>+ Add person</button>
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
               <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{openSharing(selectedRows.map(row=>row.id));}}>Share selected ({selectedRows.length})</button>
-              <button className="subtle-btn share-all-btn" disabled={!records.length} onClick={() => setBulkCropOpen(true)}>Bulk crop ({selectedRows.length ? `${selectedRows.length} ticked` : `${records.filter(needsCropping).length} need cropping`})</button>
+{!simpleView && (<>
+              <button className="subtle-btn share-all-btn" disabled={!records.length} onClick={() => setBulkCropOpen(true)}>Bulk crop ({bulkCropLabel})</button>
+</>)}
               <button className="subtle-btn share-all-btn" disabled={!visible.length} onClick={() => void sendNumbers()}>Send numbers ({selectedRows.length || visible.length})</button>
+{!simpleView && (<>
               <button className="subtle-btn share-all-btn" disabled={!visible.length} onClick={() => setBulkEditOpen(true)}>Bulk edit ({selectedRows.length || visible.length})</button>
+</>)}
               <label className="move-to share-all-btn">Move selected to
                 <select aria-label="Move selected phones to a person" value="" disabled={!selectedRows.length} onChange={event => { if (event.target.value) moveSelected(event.target.value); }}>
                   <option value="">{selectedRows.length ? `Choose person (${selectedRows.length})` : 'Select phones first'}</option>
                   {personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}
+                  <option value="unassigned">Unassigned</option>
                 </select>
               </label>
               <button className="primary share-all-btn bulk-download-btn" disabled={!visible.length || bulkBusy} onClick={bulkDownloadPictures}><Download size={16} /> {bulkBusy ? 'Saving pictures…' : `Download all pictures (${Math.min(selectedRows.length || visible.length, 500)})`}</button>
+{!simpleView && (<>
               <button className="primary share-all-btn" disabled={!visible.length} onClick={()=>openSharing(visible.slice(0,200).map(row=>row.id))}>Share all ({Math.min(visible.length,200)}) — pictures + numbers</button>
+</>)}
+              {simpleView && <button className="primary share-all-btn" disabled={syncing || !records.length} onClick={exportSimple}>{syncing ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />} Export Excel ({selectedRows.length || records.length})</button>}
+              {simpleView && records.some(needsCropping) && <button className="subtle-btn share-all-btn" onClick={() => setBulkCropOpen(true)}>Fix photos ({records.filter(needsCropping).length})</button>}
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
@@ -3406,20 +3512,26 @@ export default function App() {
               <button className="subtle-btn" onClick={() => setEditingPersonId('')}>Cancel</button>
             </div> : null; })()}
             <div className="person-filters">
-              <button
-                className={personFilter === 'All' ? 'active' : ''}
-                onClick={() => setPersonFilter('All')}
-              >All people</button>
+              <button className={personFilter === 'All' ? 'active' : ''} onClick={() => setPersonFilter('All')}>Everyone <b>{records.length}</b></button>
               {personGroups.map(person => (
-                <button
-                  key={person.id}
-                  className={personFilter === person.id ? 'active' : ''}
-                  onClick={() => setPersonFilter(person.id)}
-                >
-                  {person.label}{person.name ? ` · ${person.name}` : ''}
+                <button key={person.id} className={personFilter === person.id ? 'active' : ''} onClick={() => setPersonFilter(person.id)}>
+                  {person.label}{person.name ? ` · ${person.name}` : ''} <b>{records.filter(r => r.personId === person.id).length}</b>
                 </button>
               ))}
+              {(records.some(r => r.personId === UNASSIGNED) || personFilter === UNASSIGNED_FILTER) && <button className={personFilter === UNASSIGNED_FILTER ? 'active' : ''} onClick={() => setPersonFilter(UNASSIGNED_FILTER)}>Unassigned <b>{records.filter(r => r.personId === UNASSIGNED).length}</b></button>}
             </div>
+            {personFilter !== 'All' && <div className="person-actions" role="group" aria-label="This person's IMEIs">
+              <strong>{personFilter === UNASSIGNED_FILTER ? 'Unassigned' : personNameOf(personFilter)}: {visible.length} IMEI{visible.length === 1 ? '' : 's'}</strong>
+              <span>{isPersonView(personFilter) ? 'Delete here moves phones to Everyone as unassigned.' : 'Delete here removes phones permanently, after you confirm.'}</span>
+              <label className="move-to">Move all to
+                <select aria-label="Move all shown IMEIs to" value="" disabled={!visible.length} onChange={event => { if (event.target.value) moveRecords(visible.map(row => row.id), ownerOf(event.target.value)); }}>
+                  <option value="">{visible.length ? `Choose (${visible.length})` : 'Nothing to move'}</option>
+                  {personGroups.filter(person => person.id !== personFilter).map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}
+                  {personFilter !== UNASSIGNED_FILTER && <option value="unassigned">Unassigned</option>}
+                </select>
+              </label>
+              <button className="subtle-btn danger" disabled={!visible.length} onClick={() => requestDelete(visible)}><Trash2 size={14} /> Delete all ({visible.length})</button>
+            </div>}
           </div>
 
           {visible.length === 0 ? (
@@ -3427,7 +3539,9 @@ export default function App() {
               <div><ScanLine size={28} /></div>
               <strong>
                 {records.length
-                  ? 'No matching records'
+                  ? (personFilter !== 'All' && !query && filter === 'All'
+                    ? (isPersonView(personFilter) && emptiedPeople.includes(personFilter) ? 'All IMEIs moved.' : personFilter === UNASSIGNED_FILTER ? 'No unassigned IMEIs.' : 'No IMEIs for this person yet.')
+                    : 'No matching records')
                   : 'Your scanned devices will appear here'}
               </strong>
               <span>
@@ -3451,7 +3565,7 @@ export default function App() {
                     {reviewStatus(record) !== 'Valid' && reviewStatus(record) !== 'Serial only' && <button className="check-flag" onClick={() => openReview(record)}>{reviewStatus(record)} — tap to check</button>}
                   </div>
                   <div className="simple-record-actions">
-                    <select aria-label={`Person for ${info.name}`} value={record.personId} onChange={event => assignPerson(record.id, event.target.value)}>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}</select>
+                    <select aria-label={`Move ${info.name} to`} value={record.personId || 'unassigned'} onChange={event => assignPerson(record.id, event.target.value)}>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}<option value="unassigned">Unassigned</option></select>
                     <button className="subtle-btn" onClick={() => openReview(record)}>Open</button>
                     <button className="subtle-btn danger" aria-label={`Delete ${info.name}`} onClick={() => deleteRecord(record)}><Trash2 size={16} /></button>
                   </div>
@@ -3524,8 +3638,8 @@ export default function App() {
                       <td data-label="Person">
                         <select
                           className="inline-edit person-edit"
-                          aria-label={`Assign record #${r.number} to a person`}
-                          value={r.personId}
+                          aria-label={`Move record #${r.number} to a person`}
+                          value={r.personId || 'unassigned'}
                           onChange={e => assignPerson(r.id, e.target.value)}
                         >
                           {personGroups.map(person => (
@@ -3533,6 +3647,7 @@ export default function App() {
                               {person.label}{person.name ? ` — ${person.name}` : ''}
                             </option>
                           ))}
+                          <option value="unassigned">Unassigned</option>
                         </select>
                       </td>
 
@@ -3661,7 +3776,7 @@ export default function App() {
               </div>
 
               <div className="review-header-actions">
-                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
+                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
                 <button className="iconbtn" aria-label="Close photo review" onClick={closePhotoReview}><X /></button>
               </div>
             </div>
@@ -3697,7 +3812,7 @@ export default function App() {
               <label htmlFor="manual-imei">IMEI 1</label>
               <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
               <label htmlFor="review-person">Person</label>
-              <select id="review-person" value={selected.personId} onChange={event => { assignPerson(selected.id, event.target.value); setSelected({ ...selected, personId: event.target.value }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}</select>
+              <select id="review-person" value={selected.personId || 'unassigned'} onChange={event => { const plan = assignPerson(selected.id, event.target.value); if (plan.moved.length) setSelected({ ...selected, personId: ownerOf(event.target.value) }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}<option value="unassigned">Unassigned</option></select>
               <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
               <input id="manual-imei2" inputMode="numeric" maxLength={15} value={manualImei2} onChange={event => setManualImei2(digits(event.target.value).slice(0, 15))} />
               <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
@@ -3807,16 +3922,21 @@ export default function App() {
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
       </section></div>}
+      {confirmDelete && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Confirm delete">
+        <h2>Delete permanently?</h2>
+        <p>{confirmDelete.ids.length} IMEI record{confirmDelete.ids.length === 1 ? '' : 's'} and {confirmDelete.ids.length === 1 ? 'its' : 'their'} saved picture{confirmDelete.ids.length === 1 ? '' : 's'} will be removed from this device. This cannot be undone.</p>
+        <div className="share-toolbar"><button className="subtle-btn danger" onClick={() => { removeRecords(confirmDelete.ids, confirmDelete.fromReview); setConfirmDelete(null); }}>Delete permanently</button><button className="subtle-btn" onClick={() => setConfirmDelete(null)}>Cancel</button></div>
+      </section></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
         <div className="modal-head"><h2>Bulk edit</h2><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Close</button></div>
         <p className="copy-hint">Changes {selectedRows.length ? `${selectedRows.length} ticked phone${selectedRows.length === 1 ? '' : 's'}` : `all ${visible.length} phones shown`}. Leave a field empty to keep it as it is.</p>
         <label>Phone model code<input value={bulkEditModel} placeholder="for example SM-S938B" onChange={event => setBulkEditModel(event.target.value)} /></label>
-        <label>Move to person<select value={bulkEditPerson} onChange={event => setBulkEditPerson(event.target.value)}><option value="">Keep as it is</option>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}</select></label>
+        <label>Move to person<select value={bulkEditPerson} onChange={event => setBulkEditPerson(event.target.value)}><option value="">Keep as it is</option>{personGroups.map(person => <option key={person.id} value={person.id}>{person.name || person.label}</option>)}<option value="unassigned">Unassigned</option></select></label>
         <label className="check-row"><input type="checkbox" checked={bulkEditChecked} onChange={event => setBulkEditChecked(event.target.checked)} /> Mark as checked (clears the review flags)</label>
         <div className="share-toolbar"><button className="primary" onClick={applyBulkEdit}>Apply to {selectedRows.length || visible.length}</button><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Cancel</button></div>
       </section></div>}
       {bulkCropOpen && <BulkCropDialog
-        items={(selectedRows.length ? selectedRows : records.filter(needsCropping)).map(r => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model }))}
+        items={bulkCropRows().map(r => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model }))}
         onClose={() => setBulkCropOpen(false)}
         onApply={results => {
           setRecords(old => { let top = Math.max(2, ...old.map(r => r.number)); return markDuplicateRecords(old.flatMap(r => { const done = results.find(result => result.id === r.id); if (!done) return [r]; const made = splitRecords(r, done.crops, done.source, top + 1); top += made.length - 1; return made; })); });

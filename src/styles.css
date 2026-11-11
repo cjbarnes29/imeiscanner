@@ -206,3 +206,19 @@ input[type=checkbox]{width:24px;height:24px;accent-color:#4fd1a5;cursor:pointer}
 .bulk-edit label{display:grid;gap:4px;color:#b3c4d1;font-size:14px}
 .bulk-edit input:not([type=checkbox]),.bulk-edit select{min-height:48px;padding:8px 12px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px}
 .bulk-edit .check-row{display:flex;align-items:center;gap:10px}
+
+/* People: counts on the filter chips, per-person Move / Delete bar, delete confirmation */
+.person-filters button b{margin-left:6px;padding:1px 7px;border-radius:10px;background:#0b1625;color:#9ff0d3;font-size:12px}
+.person-actions{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:10px 0;padding:10px 12px;border:1px solid #4fd1a5;border-radius:12px;background:#0e2a2a}
+.person-actions>strong{color:#9ff0d3}.person-actions>span{flex:1 1 220px;color:#b3c4d1;font-size:13px}
+.person-actions .move-to{display:flex;align-items:center;gap:6px;color:#b3c4d1;font-size:14px}
+.person-actions select{min-height:44px;padding:6px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;max-width:100%}
+.person-actions button{min-height:44px}
+.confirm-delete{display:grid;gap:12px;width:min(460px,100%)}
+.confirm-delete h2{margin:0;color:#ff9a9a}
+
+/* Simple / Detailed mode switch */
+.mode-toggle{display:inline-flex;border:1px solid #35506a;border-radius:22px;overflow:hidden;margin-right:10px}
+.mode-toggle button{min-height:40px;min-width:76px;padding:0 14px;border:0;background:#162638;color:#b3c4d1;font:inherit;cursor:pointer}
+.mode-toggle button[aria-pressed="true"]{background:#123b34;color:#9ff0d3;font-weight:700}
+@media(max-width:480px){.local-pill{display:none}.mode-toggle button{min-width:64px;padding:0 10px}}

@@ -8,9 +8,15 @@ Changes since 1.5. The web app (GitHub Pages) has all of them; the Android app 1
 - **Barcode confirmation** in every browser: exact IMEI and serial values replace OCR misreads; IMEI readings that disagree by 1-2 digits go to review.
 - **Photo orientation.** Upside-down, sideways and mirrored photos are detected and read automatically: when nothing label-like is read, the scanner tries each orientation on a smaller copy and scans the best one. Tested on all four on a real two-box photo (the server scanner reads every number; the browser scanner reads both devices, IMEI 1 and serials). Costs about 6 to 8 extra seconds only for photos where nothing was read.
 
-## Screen
-- The full screen is as before (Upload photos, Export inventory and Scanned records, all visible, with the summary cards and quick navigation).
-- Added: a Simple view that groups phones by series with phone name, IMEI, IMEI 2 and serial; a Rename button for each person; Move selected to; and the bulk tools Send numbers, Bulk edit and an always-available Bulk crop next to Share and Download all pictures.
+## Screen and people
+- **Simple and Detailed modes** (switch in the top bar, remembered): Detailed is the full screen as before; Simple shows Take photo / Choose photos, the phone list grouped by series, search, the people tools and the essential actions (Export Excel, Download all pictures, Share selected, Send numbers, Move selected to, Delete selected). Nothing is removed; Simple only hides the advanced blocks.
+- **Camera:** the device's native camera app is used (capture input) instead of the in-app camera; the photo is scanned straight away.
+- **Move:** moving phones to another person removes them from the previous person and updates Everyone without duplicates; a phone is never moved when the destination already has the same IMEI.
+- **All IMEIs moved.** is shown when a person's last phone is moved away.
+- **Delete:** under one person it moves the phone to Everyone as Unassigned; under Everyone/Unassigned it removes it permanently after an in-app confirmation.
+- Chips show counts (Everyone, each person, Unassigned); Unassigned is a choice in every Move menu and Bulk edit.
+- Fixed: Bulk crop with nothing ticked and nothing needing a fix opened an empty dialog (it now uses all phones shown).
+- Rules are in src/people.ts with unit tests (scripts/test-people.mjs, run by npm test and CI).
 
 ## Speed
 - **Parallel reading:** the crops of a photo are read on two workers at once (when the device has 4+ cores), in the browser and in the laptop scanner. Photos with several devices are 25-35% faster.
@@ -38,7 +44,7 @@ Changes since 1.5. The web app (GitHub Pages) has all of them; the Android app 1
 - `npm test` plus a local real-photo check (`scripts/scan-real-photos.mjs`, photos kept in the git-ignored `test-photos/`). Tests use made-up IMEIs and serials only.
 
 ## Android
-- App 1.6.0 includes the reading, export, sharing and Back-button changes above. The crop changes (draw all boxes first, Auto-detect, Bulk crop) and photo-orientation detection are in the web app and need a new APK.
+- No new APK has been built for the changes above (camera, modes, people). App 1.6.0 includes the reading, export, sharing and Back-button changes above. The crop changes (draw all boxes first, Auto-detect, Bulk crop) and photo-orientation detection are in the web app and need a new APK.
 
 ## Known limits
 - Small barcodes on photos near 1000 px wide are often unreadable; use full-resolution photos.
