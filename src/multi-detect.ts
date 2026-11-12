@@ -11,11 +11,11 @@ export type Rect = { x: number; y: number; width: number; height: number };
  * Projection profile: dark "ink" pixels are shifted by each trial angle and counted per row;
  * the angle where the rows are most sharply separated is the angle of the text lines.
  */
-export function estimateSkewFromGray(gray: ArrayLike<number>, width: number, height: number, maxAngle = 15): { angle: number; gain: number } {
+export function estimateSkewFromGray(gray: ArrayLike<number>, width: number, height: number, maxAngle = 15, inkRatio = 0.78): { angle: number; gain: number } {
   if (width < 20 || height < 20) return { angle: 0, gain: 1 };
   let total = 0;
   for (let i = 0; i < width * height; i++) total += gray[i];
-  const threshold = (total / (width * height)) * 0.78;
+  const threshold = (total / (width * height)) * inkRatio;
   const xs: number[] = [], ys: number[] = [];
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (gray[y * width + x] < threshold) { xs.push(x - width / 2); ys.push(y); }
   if (xs.length < 200) return { angle: 0, gain: 1 };
@@ -126,7 +126,7 @@ export function countModelLabels(lines: OcrLine[]): number {
 }
 
 /** Tilt of a whole canvas (degrees, positive: text runs downward to the right) and how sure the estimate is. */
-export function skewOfCanvas(canvas: HTMLCanvasElement): { angle: number; gain: number } {
+export function skewOfCanvas(canvas: HTMLCanvasElement, inkRatio = 0.78): { angle: number; gain: number } {
   const scale = Math.min(1, 480 / Math.max(canvas.width, canvas.height));
   const w = Math.max(1, Math.round(canvas.width * scale)), h = Math.max(1, Math.round(canvas.height * scale));
   const small = document.createElement('canvas'); small.width = w; small.height = h;
@@ -134,5 +134,38 @@ export function skewOfCanvas(canvas: HTMLCanvasElement): { angle: number; gain: 
   context.drawImage(canvas, 0, 0, w, h);
   const pixels = context.getImageData(0, 0, w, h).data, gray = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) gray[i] = (pixels[i * 4] * 0.299 + pixels[i * 4 + 1] * 0.587 + pixels[i * 4 + 2] * 0.114) | 0;
-  return estimateSkewFromGray(gray, w, h);
+  return estimateSkewFromGray(gray, w, h, 15, inkRatio);
+}
+
+/** Where a point of the original picture lands after `straightenCanvas(picture, skew)` (pixels). */
+export function levelledPoint(point: { x: number; y: number }, skewDegrees: number, width: number, height: number) {
+  const radians = -skewDegrees * Math.PI / 180, cos = Math.cos(radians), sin = Math.sin(radians);
+  const newW = width * Math.abs(cos) + height * Math.abs(sin), newH = width * Math.abs(sin) + height * Math.abs(cos);
+  const dx = point.x - width / 2, dy = point.y - height / 2;
+  return { x: newW / 2 + dx * cos - dy * sin, y: newH / 2 + dx * sin + dy * cos };
+}
+
+/** The reverse: a point of the levelled picture back in the original picture's pixels. */
+export function originalPoint(point: { x: number; y: number }, skewDegrees: number, width: number, height: number) {
+  const radians = -skewDegrees * Math.PI / 180, cos = Math.cos(radians), sin = Math.sin(radians);
+  const newW = width * Math.abs(cos) + height * Math.abs(sin), newH = width * Math.abs(sin) + height * Math.abs(cos);
+  const dx = point.x - newW / 2, dy = point.y - newH / 2;
+  return { x: width / 2 + dx * cos + dy * sin, y: height / 2 - dx * sin + dy * cos };
+}
+
+/**
+ * A box found on the levelled copy of a tilted photo (in % of that copy), as the smallest upright box on the
+ * ORIGINAL photo (in % of it) that holds it. Each crop is levelled again when it is cut, so the extra
+ * background in the corners does no harm.
+ */
+export function unlevelBox(box: Rect, skewDegrees: number, originalWidth: number, originalHeight: number): Rect {
+  const radians = skewDegrees * Math.PI / 180;
+  const cos = Math.abs(Math.cos(radians)), sin = Math.abs(Math.sin(radians));
+  const levelW = originalWidth * cos + originalHeight * sin, levelH = originalWidth * sin + originalHeight * cos;
+  const corners = [[box.x, box.y], [box.x + box.width, box.y], [box.x, box.y + box.height], [box.x + box.width, box.y + box.height]]
+    .map(([x, y]) => originalPoint({ x: x / 100 * levelW, y: y / 100 * levelH }, skewDegrees, originalWidth, originalHeight));
+  const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+  const x0 = clamp(Math.min(...corners.map(c => c.x)), originalWidth), x1 = clamp(Math.max(...corners.map(c => c.x)), originalWidth);
+  const y0 = clamp(Math.min(...corners.map(c => c.y)), originalHeight), y1 = clamp(Math.max(...corners.map(c => c.y)), originalHeight);
+  return { x: x0 / originalWidth * 100, y: y0 / originalHeight * 100, width: (x1 - x0) / originalWidth * 100, height: (y1 - y0) / originalHeight * 100 };
 }

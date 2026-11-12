@@ -2,7 +2,7 @@ import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickIm
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { scoreConfidence } from './confidence';
 import { learnCorrection, readLearned, refineModel, writeLearned } from './learning';
-import { countModelLabels, mergeOcrLines, needsOrientationCheck, shouldTurn, skewOfCanvas, straightenCanvas, straightenDataUrl, tileRects } from './multi-detect';
+import { countModelLabels, mergeOcrLines, needsOrientationCheck, shouldTurn, skewOfCanvas, straightenCanvas, straightenDataUrl, tileRects, unlevelBox } from './multi-detect';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
 import { SAMSUNG_MODELS } from './samsung-models';
@@ -11,6 +11,12 @@ import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
+import { CropStudio, type StudioPlan } from './CropStudio';
+import { clampBox, sortReadingOrder, type Box } from './crop-boxes';
+import { clearDraft, draftSummary, readDraft, writeDraft, type CropDraft } from './crop-draft';
+import { imeiReadings, judgeImei, repeatedAcrossBoxes, type Judgement } from './imei-validate';
+import { canvasStats, planPasses, renderVariant } from './ocr-preprocess';
+import { retryLowConfidence } from './ocr-retry';
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
@@ -891,10 +897,20 @@ async function refineCropText(worker: Awaited<ReturnType<typeof createWorker>>, 
 
 /** Records that may hold several devices or nothing readable: candidates for bulk cropping. */
 const needsCropping = (record: RecordItem) => !!record.cropNeedsReview || (!record.imei && !recordSerial(record));
-type DrawnBox = { x: number; y: number; width: number; height: number };
-type SplitCrop = { cropDataUrl: string; imei: string; model: string; raw: string };
-type BulkItem = { id: string; name: string; source: string; deviceCount?: number; model: string };
-const FULL_BOX: DrawnBox = { x: 0, y: 0, width: 100, height: 100 };
+type DrawnBox = Box;
+type SplitCrop = {
+  cropDataUrl: string; imei: string; model: string; raw: string;
+  /** 0-100, how sure the reading is. */
+  confidence?: number; reason?: string;
+  /** Other numbers worth a "did you mean". */
+  suggestions?: string[];
+  /** The OCR reading a checksum repair started from. */
+  fixedFrom?: string;
+  /** True when a person should look at this one. */
+  review?: boolean;
+};
+type BulkItem = { id: string; name: string; source: string; deviceCount?: number; model: string; single?: boolean };
+type CropGroup = { id: string; name: string; source: string; crops: SplitCrop[] };
 
 /**
  * Text-reading worker using the engine and language data served by this app itself
@@ -903,182 +919,215 @@ const FULL_BOX: DrawnBox = { x: 0, y: 0, width: 100, height: 100 };
 const OCR_BASE = new URL('ocr', document.baseURI).href;
 const newOcrWorker = () => createWorker('eng', 1, { workerPath: `${OCR_BASE}/worker.min.js`, corePath: OCR_BASE, langPath: OCR_BASE });
 
-/** True when a new box covers most of an existing one (the same label drawn twice). */
-function overlapsBox(boxes: DrawnBox[], box: DrawnBox) {
-  const overlap = (a: DrawnBox, b: DrawnBox) => { const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x), h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y); return w > 0 && h > 0 ? (w * h) / Math.min(a.width * a.height, b.width * b.height) : 0; };
-  return boxes.findIndex(existing => overlap(existing, box) > 0.6);
-}
-
 /**
  * Auto option: find how many devices a photo holds and where their labels sit,
  * using the same label grouping as scanning. Boxes are in % of the photo.
  * devices counts what was seen even when boxes could not be placed.
  */
 async function autoDetectBoxes(worker: Awaited<ReturnType<typeof createWorker>>, source: string): Promise<{ boxes: DrawnBox[]; devices: number }> {
-  const file = new File([dataUrlBlob(source)], 'auto.jpg', { type: 'image/jpeg' });
-  const { color, enhanced } = await createScanImages(file, 2400);
+  const original = new File([dataUrlBlob(source)], 'auto.jpg', { type: 'image/jpeg' });
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
-  let lines = scaleOcrLines(ocrLines((await worker.recognize(enhanced)).data), enhanced, color);
-  const W = color.width, H = color.height;
-  lines = [...lines, ...labelledBarcodeLines(await frameBarcodes(color), lines)];
-  const frame = color.getContext('2d')?.getImageData(0, 0, W, H);
-  const anchors = deviceAnchors(lines, W, H, frame);
-  const regions = anchors.length >= 2 ? planDeviceCrops(anchors, lines, W, H, frame) : [];
-  const boxes = regions.map(region => ({ x: region.x / W * 100, y: region.y / H * 100, width: region.width / W * 100, height: region.height / H * 100 }));
-  return { boxes, devices: anchors.length };
+  // One pass over a picture (optionally levelled first). Boxes come back in % of the picture it was given.
+  const look = async (file: File) => {
+    const { color, enhanced } = await createScanImages(file, 2400);
+    let lines = scaleOcrLines(ocrLines((await worker.recognize(enhanced)).data), enhanced, color);
+    const W = color.width, H = color.height;
+    lines = [...lines, ...labelledBarcodeLines(await frameBarcodes(color), lines)];
+    const frame = color.getContext('2d')?.getImageData(0, 0, W, H);
+    const anchors = deviceAnchors(lines, W, H, frame);
+    const regions = anchors.length >= 2 ? planDeviceCrops(anchors, lines, W, H, frame) : [];
+    return { color, devices: anchors.length, boxes: regions.map(region => clampBox({ x: region.x / W * 100, y: region.y / H * 100, width: region.width / W * 100, height: region.height / H * 100 })) };
+  };
+  const first = await look(original);
+  if (first.boxes.length >= 2) return { boxes: sortReadingOrder(first.boxes), devices: first.devices };
+  // Labels may be hidden by a tilted photo: level a copy and map any boxes back onto the photo.
+  // The strict ink threshold ignores a dark background that would hide the tilt of the text.
+  try {
+    for (const ink of [0.78, 0.5]) {
+      const skew = skewOfCanvas(first.color, ink);
+      if (Math.abs(skew.angle) < 2.5 || skew.gain < 1.08) continue;
+      const blob = await new Promise<Blob | null>(resolve => straightenCanvas(first.color, skew.angle).toBlob(resolve, 'image/jpeg', 0.92));
+      if (!blob) continue;
+      const levelled = await look(new File([blob], 'level.jpg', { type: 'image/jpeg' }));
+      if (levelled.boxes.length >= 2) {
+        const boxes = levelled.boxes.map(box => clampBox(unlevelBox(box, skew.angle, first.color.width, first.color.height)));
+        return { boxes: sortReadingOrder(boxes), devices: levelled.devices };
+      }
+    }
+  } catch (error) { console.warn('Could not level the photo for detection', error); }
+  return { boxes: sortReadingOrder(first.boxes), devices: first.devices };
 }
 
-/** Cut every drawn box and read each one (barcodes + OCR + second reads). */
-async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | null, source: string, boxes: DrawnBox[], modelFor: (raw: string) => string, onProgress?: (index: number) => void): Promise<SplitCrop[]> {
+/**
+ * A label that gave no usable IMEI is read again with other image treatments (sharper, evener light,
+ * inverted, enlarged...), a few at a time, until the readings agree. Returns the extra text and the verdict.
+ */
+async function rereadIfUncertain(worker: Awaited<ReturnType<typeof createWorker>>, photo: string, raw: string, knownTacs: ReadonlySet<string>) {
+  const verdict = (text: string) => judgeImei({ readings: imeiReadings(text), barcode: barcodeImei(text, 1), knownTacs });
+  if (extractPreferredImei(raw)) return { raw, judgement: verdict(raw) };
+  const source = await pictureCanvas(photo);
+  await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
+  const result = await retryLowConfidence<HTMLCanvasElement>({
+    text: raw, knownTacs, plan: planPasses(canvasStats(source)), maxPasses: 4,
+    prepare: variant => renderVariant(source, variant),
+    read: async canvas => (await worker.recognize(canvas)).data.text || ''
+  });
+  return { raw: result.text, judgement: result.judgement };
+}
+
+/** Cut every drawn box and read each one (barcodes, OCR, second reads, extra passes when unsure). */
+async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | null, source: string, boxes: DrawnBox[], modelFor: (raw: string, boxCount: number) => string, onProgress?: (index: number) => void, knownTacs: ReadonlySet<string> = new Set()): Promise<SplitCrop[]> {
   const photos = await createCroppedPhotos(source, boxes.map((box, index) => ({ imei: `box-${index}`, ...box })), 100, 100);
   const crops: SplitCrop[] = [];
   for (let index = 0; index < boxes.length; index++) {
     const cropDataUrl = photos.get(`box-${index}`)!;
     let raw = '', imei = '';
+    let judgement: Judgement | null = null;
     onProgress?.(index + 1);
     try {
       if (worker) {
         let lines: OcrLine[] = [];
-        ({ raw, imei, lines } = await readCropImei(worker, cropDataUrl));
+        ({ raw, lines } = await readCropImei(worker, cropDataUrl));
         raw = await cameraBarcodeText(cropDataUrl, raw, lines);
         raw = await refineCropText(worker, cropDataUrl, raw, lines);
+        ({ raw, judgement } = await rereadIfUncertain(worker, cropDataUrl, raw, knownTacs));
         imei = cameraImei(raw);
+        // Votes across passes or a checksum repair fill in only when the normal rules found nothing.
+        if (!imei && judgement.imei) imei = judgement.imei;
       }
     } catch (error) { console.warn('Crop kept without automatic text reading', error); }
-    crops.push({ cropDataUrl, imei, model: modelFor(raw), raw });
+    const fixed = judgement?.method === 'repair' && judgement.imei === imei;
+    crops.push({
+      cropDataUrl, imei, model: modelFor(raw, boxes.length), raw,
+      confidence: imei ? Math.max(judgement?.confidence ?? 0, luhnValid(imei) ? 70 : 20) : judgement?.confidence ?? 0,
+      reason: judgement?.reason, suggestions: judgement?.alternatives.filter(value => value !== imei).slice(0, 3),
+      fixedFrom: fixed ? judgement?.repairedFrom : undefined,
+      review: !imei || !luhnValid(imei) || fixed || !!(judgement?.needsReview && !extractPreferredImei(raw))
+    });
   }
+  // The same number read for two boxes of one photo: a box sits on the wrong label, or two boxes cover one label.
+  const repeated = repeatedAcrossBoxes(crops.map(crop => crop.imei));
+  crops.forEach((crop, index) => { if (repeated.has(index)) { crop.review = true; crop.reason = 'The same IMEI was read in two boxes'; } });
   return crops;
 }
 
-/** Records that replace `original` after it was split into crops. The first keeps its number. */
-function splitRecords(original: RecordItem, crops: SplitCrop[], source: string, firstNumber: number): RecordItem[] {
-  const sourcePictureId = original.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
+/**
+ * The model of one crop. It comes from that crop's own text. The old record's model is only inherited
+ * when the photo was a single product cropped once, so a multi-product photo never copies one model onto every label.
+ */
+function modelForCrop(entry: BulkItem, raw: string, boxCount: number) {
+  const own = identifyModel(raw, '');
+  if (exportModel(own)) return own;
+  return boxCount === 1 && entry.single ? exportModel(entry.model) || own : own;
+}
+
+/**
+ * Records that replace `original` once it is cut into crops. The original photo is not kept:
+ * each crop is its own picture (stored once) with the IMEI, serial and model read from it, and the person
+ * of the original. A single crop of a single product keeps the original's numbers where the crop shows none.
+ * The first crop keeps the original's number. The crops form a new picture group, so the original photo's
+ * stored copy is released as soon as nothing refers to it.
+ */
+function splitRecords(original: RecordItem, crops: SplitCrop[], firstNumber: number): RecordItem[] {
+  const sourcePictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
+  const inherit = crops.length === 1 && !((original.deviceCount || 0) > 1);
   return crops.map((crop, index) => {
-    const serial = serialReading(crop.raw);
+    const read = serialReading(crop.raw);
+    const imei = crop.imei || (inherit ? original.imei : '');
+    const pair = recordImeiPair({ imei, raw: crop.raw } as RecordItem);
+    const serial = !read.serial && inherit && original.serial ? { serial: original.serial, serialNeedsReview: original.serialNeedsReview } : read;
     return {
       ...original, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
       sourcePictureId, number: index === 0 ? original.number : firstNumber + index - 1,
-      dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl,
-      ...serial, imei: crop.imei, imei2: recordImeiPair({ imei: crop.imei, raw: crop.raw } as RecordItem).imei2,
+      dataUrl: crop.cropDataUrl, cropDataUrl: crop.cropDataUrl, originalDataUrl: undefined, focus: undefined,
+      ...serial, imei, imei2: pair.imei2 || (inherit ? original.imei2 : undefined),
       model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
-      cropNeedsReview: !crop.imei && !serial.serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
+      cropNeedsReview: !!crop.review || (!imei && !serial.serial), status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review',
       duplicate: false, createdAt: new Date().toISOString(), deviceCount: undefined, deviceImeis: undefined
     } as RecordItem;
   });
 }
 
-/** Photo with numbered boxes already drawn and one live box to drag. */
-function BoxPad({ src, done, cur, setCur, locked }: { src: string; done: DrawnBox[]; cur: DrawnBox; setCur: (box: DrawnBox) => void; locked: boolean }) {
-  const start = useRef<{ x: number; y: number; edge?: string; initial?: DrawnBox } | null>(null);
-  const point = (event: ReactPointerEvent<HTMLDivElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)), y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)) }; };
-  const draw = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!start.current || locked) return;
-    const p = point(event), s = start.current;
-    if (s.edge && s.initial) {
-      const right = s.initial.x + s.initial.width, bottom = s.initial.y + s.initial.height;
-      const left = s.edge.includes('w') ? Math.min(p.x, right - 1) : s.initial.x, top = s.edge.includes('n') ? Math.min(p.y, bottom - 1) : s.initial.y;
-      const newRight = s.edge.includes('e') ? Math.max(p.x, left + 1) : right, newBottom = s.edge.includes('s') ? Math.max(p.y, top + 1) : bottom;
-      setCur({ x: left, y: top, width: newRight - left, height: newBottom - top });
-      return;
-    }
-    setCur({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), width: Math.abs(p.x - s.x), height: Math.abs(p.y - s.y) });
-  };
-  return <div className="crop-viewport"><div className="crop-editor" style={{ maxWidth: '100%' }}
-    onPointerDown={event => { if (locked) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const p = point(event); start.current = { ...p, edge: (event.target as HTMLElement).dataset.edge, initial: { ...cur } }; if (!start.current.edge) draw(event); }}
-    onPointerMove={draw} onPointerUp={event => { draw(event); start.current = null; }} onPointerCancel={() => { start.current = null; }}>
-    <img src={src} alt="Photo: drag a box around each label" draggable={false} style={{ maxHeight: '44dvh', maxWidth: '100%' }} />
-    {done.map((box, index) => <div key={index} className="crop-box-done" style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.width}%`, height: `${box.height}%` }}><span>{index + 1}</span></div>)}
-    {!locked && <div className="crop-selection" style={{ left: `${cur.x}%`, top: `${cur.y}%`, width: `${cur.width}%`, height: `${cur.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
-  </div></div>;
+/** Step 2 of cropping: every crop with its reading, to check before the original photo is replaced. */
+function CropResults({ groups, setGroups, busy, onBack, onApply }: { groups: CropGroup[]; setGroups: (groups: CropGroup[]) => void; busy: boolean; onBack: () => void; onApply: () => void }) {
+  const total = groups.reduce((sum, group) => sum + group.crops.length, 0);
+  const uncertain = groups.reduce((sum, group) => sum + group.crops.filter(crop => crop.review).length, 0);
+  const edit = (groupId: string, index: number, patch: Partial<SplitCrop>) => setGroups(groups.map(group => group.id !== groupId ? group : { ...group, crops: group.crops.map((crop, i) => i === index ? { ...crop, ...patch } : crop) }));
+  const badFormat = groups.some(group => group.crops.some(crop => crop.imei && !/^\d{15}$/.test(crop.imei)));
+  useBackLayer(true, () => { if (!busy) onBack(); }, 'crop-results');
+  return <div className="modal-backdrop studio-backdrop"><section className="modal studio results-studio" role="dialog" aria-modal="true" aria-label="Check the cropped pictures">
+    <header className="studio-head">
+      <div className="studio-title"><strong>Check {total} picture{total === 1 ? '' : 's'}</strong><span>{uncertain ? `${uncertain} need a look` : 'All read with confidence'}</span></div>
+      <button className="iconbtn" aria-label="Back to the boxes" disabled={busy} onClick={onBack}><X size={18} /></button>
+    </header>
+    <div className="results-scroll">
+      {groups.map(group => <div key={group.id} className="results-group">
+        <p className="results-photo"><img src={group.source} alt="" /><span><strong>{group.name}</strong><small>{group.crops.length} picture{group.crops.length === 1 ? '' : 's'} from this photo</small></span></p>
+        <div className="review-crop-list">{group.crops.map((crop, index) => <div key={index} className={`saved-crop-card${crop.review ? ' needs-look' : ''}`}>
+          <img src={crop.cropDataUrl} alt={`Picture ${index + 1}`} />
+          <strong>Picture {index + 1} <small className={crop.review ? 'amber' : 'green'}>{crop.review ? '⚠ check' : '✓ ready'}{crop.confidence !== undefined ? ` · ${crop.confidence}%` : ''}</small></strong>
+          <label>IMEI 1<input inputMode="numeric" maxLength={15} value={crop.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); edit(group.id, index, { imei, review: imei.length === 15 && luhnValid(imei) ? false : crop.review, suggestions: crop.suggestions }); }} /></label>
+          {crop.fixedFrom && <p className="autofix-note">One digit was fixed using the checksum (the label read …{crop.fixedFrom.slice(-6)}). Compare with the label.</p>}
+          {!crop.imei && !!crop.suggestions?.length && <div className="suggest-row">Did you mean{crop.suggestions.map(value => <button key={value} type="button" onClick={() => edit(group.id, index, { imei: value })}>{value}</button>)}</div>}
+          <label>Model<input value={crop.model} onChange={event => edit(group.id, index, { model: event.target.value })} /></label>
+          <small>{crop.imei ? (luhnValid(crop.imei) ? (crop.reason || 'Checksum valid') : 'Checksum failed — check the digits') : (crop.reason || 'No IMEI read — enter it or leave empty to review later')}</small>
+        </div>)}</div>
+      </div>)}
+    </div>
+    {badFormat && <p role="status" className="studio-message">Enter all 15 IMEI digits, or empty the field to review it later.</p>}
+    <footer className="studio-actions">
+      <button className="primary" disabled={busy || badFormat} onClick={onApply}>Replace original{groups.length === 1 ? '' : 's'} with {total} picture{total === 1 ? '' : 's'}</button>
+      <button className="subtle-btn" disabled={busy} onClick={onBack}>← Back to the boxes</button>
+    </footer>
+    <p className="studio-hint">The original photo is deleted for good. Each picture keeps its own IMEI, serial, model and person.</p>
+  </section></div>;
 }
 
 /**
- * Bulk cropping, in two stages: first go photo by photo drawing boxes (nothing is
- * read), then process every photo at once and apply the results.
+ * Cropping from start to finish, for one photo (from the review window) or many (bulk crop):
+ * draw the boxes in the Crop Studio, read the crops, check them, replace the originals.
  */
-function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClose: () => void; onApply: (results: { id: string; source: string; crops: SplitCrop[] }[]) => void }) {
-  const [index, setIndex] = useState(0);
-  const [plans, setPlans] = useState<Record<string, DrawnBox[]>>({});
-  const [count, setCount] = useState(items[0]?.deviceCount || 2);
-  const [boxes, setBoxes] = useState<DrawnBox[]>([]);
-  const [cur, setCur] = useState<DrawnBox>(FULL_BOX);
-  const [phase, setPhase] = useState<'draw' | 'summary'>('draw');
-  const [busy, setBusy] = useState('');
-  const [message, setMessage] = useState('');
+function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose, onLater }: {
+  items: BulkItem[]; initialPlans?: Record<string, Box[]>; startIndex?: number; knownTacs: ReadonlySet<string>;
+  onApply: (groups: CropGroup[]) => void; onClose: () => void; onLater: (boxes: number, photos: number) => void;
+}) {
+  const [stage, setStage] = useState<'draw' | 'results'>('draw');
+  const [plans, setPlans] = useState<Record<string, Box[]>>(initialPlans || {});
+  const [groups, setGroups] = useState<CropGroup[]>([]);
+  const [progress, setProgress] = useState('');
+  const [notice, setNotice] = useState('');
   const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
-  useBackLayer(true, () => { if (!busy) onClose(); }, 'bulk-crop');
   useEffect(() => () => { void workerRef.current?.terminate(); workerRef.current = null; }, []);
-  const item = items[index];
-  const planned = items.filter(entry => plans[entry.id]?.length);
-  const plannedBoxes = planned.reduce((sum, entry) => sum + plans[entry.id].length, 0);
   const worker = async () => workerRef.current ||= await newOcrWorker();
-  function open(next: number) {
-    const target = items[next], plan = plans[target.id] || [];
-    setIndex(next); setBoxes(plan); setCount(plan.length || target.deviceCount || 2); setCur(FULL_BOX); setPhase('draw'); setMessage('');
-  }
-  function remember(list: DrawnBox[]) { setPlans(old => { const copy = { ...old }; if (list.length) copy[item.id] = list; else delete copy[item.id]; return copy; }); }
-  function next(list: DrawnBox[]) { remember(list); if (index < items.length - 1) open(index + 1); else setPhase('summary'); }
-  function addBox() {
-    if (boxes.length >= count) return;
-    if (cur.width <= 0 || cur.height <= 0 || cur.x + cur.width > 100.001 || cur.y + cur.height > 100.001) { setMessage('Draw a box inside the photo first.'); return; }
-    if (cur.width >= 99.99 && cur.height >= 99.99) { setMessage('Draw a box around one label first.'); return; }
-    const clash = overlapsBox(boxes, cur);
-    if (clash >= 0) { setMessage(`This box covers the same area as box ${clash + 1}. Draw it around a different label.`); return; }
-    setBoxes([...boxes, cur]); setCur(FULL_BOX); setMessage('');
-  }
-  async function auto() {
-    setBusy('Detecting labels…'); setMessage('');
+  const asDraft = (list: StudioPlan[]) => list.map(plan => ({ recordId: plan.id, boxes: plan.boxes }));
+  const discard = () => { clearDraft(localStorage); onClose(); };
+
+  async function process(list: StudioPlan[]) {
+    const planned = list.filter(plan => plan.boxes.length);
+    setPlans(Object.fromEntries(list.map(plan => [plan.id, plan.boxes]))); setNotice('');
+    const out: CropGroup[] = [];
     try {
-      const found = await autoDetectBoxes(await worker(), item.source);
-      if (found.boxes.length >= 2) { setCount(found.boxes.length); setBoxes(found.boxes); setCur(FULL_BOX); setMessage(`Found ${found.boxes.length} labels. Check the numbered boxes, use Undo to redraw one, or go on.`); }
-      else if (found.devices >= 2) { setCount(found.devices); setMessage(`Found ${found.devices} labels but could not place the boxes. Draw them yourself.`); }
-      else setMessage('Found only one label. If you see more, enter the number and draw the boxes.');
-    } catch (error) { console.error(error); setMessage('Auto-detect did not work on this photo. Draw the boxes yourself.'); }
-    finally { setBusy(''); }
-  }
-  async function processAll() {
-    if (!planned.length || busy) return;
-    const results: { id: string; source: string; crops: SplitCrop[] }[] = [];
-    try {
+      setProgress('Preparing…');
       const w = await worker().catch(() => null);
-      for (const [position, entry] of planned.entries()) {
-        const crops = await readBoxCrops(w, entry.source, plans[entry.id], raw => exportModel(entry.model) || identifyModel(raw, entry.name),
-          box => setBusy(`Photo ${position + 1} of ${planned.length} · reading box ${box} of ${plans[entry.id].length}…`));
-        results.push({ id: entry.id, source: entry.source, crops });
+      for (const [position, plan] of planned.entries()) {
+        const entry = items.find(item => item.id === plan.id)!;
+        const crops = await readBoxCrops(w, entry.source, plan.boxes, (raw, count) => modelForCrop(entry, raw, count),
+          box => setProgress(`Photo ${position + 1} of ${planned.length} · reading label ${box} of ${plan.boxes.length}…`), knownTacs);
+        out.push({ id: entry.id, name: entry.name, source: entry.source, crops });
       }
-      onApply(results);
-    } catch (error) { console.error(error); setMessage('Could not process every photo. Nothing was changed.'); setBusy(''); }
+      setGroups(out); setStage('results');
+    } catch (error) { console.error(error); setNotice('Could not read every photo. Nothing was changed. Try again.'); }
+    finally { setProgress(''); }
   }
-  const complete = boxes.length === count;
-  return <div className="modal-backdrop bulk-backdrop"><section className="modal bulk-modal" role="dialog" aria-modal="true" aria-label="Bulk cropping">
-    <div className="modal-head"><h2>Bulk crop</h2><button className="subtle-btn" disabled={!!busy} onClick={onClose}>Close</button></div>
-    {phase === 'draw' && item && <>
-      <p className="bulk-step"><strong>Photo {index + 1} of {items.length}</strong> · {item.name}</p>
-      <p className="copy-hint">Step 1: draw the boxes for every photo. Nothing is read until you tap Process all at the end.</p>
-      <div className="review-split-start">
-        <label>Labels in this photo <input type="number" inputMode="numeric" min={1} max={20} value={count} disabled={!!busy} onChange={event => { const value = Math.max(1, Math.min(20, Number(event.target.value) || 1)); setCount(value); setBoxes(old => old.slice(0, value)); }} /></label>
-        <button className="subtle-btn" disabled={!!busy} onClick={() => void auto()}>{busy || 'Auto-detect'}</button>
-      </div>
-      <BoxPad src={item.source} done={boxes} cur={cur} setCur={setCur} locked={complete || !!busy} />
-      {message && <p role="status" className="bulk-message">{message}</p>}
-      <div className="share-toolbar bulk-actions">
-        {!complete ? <button className="primary" disabled={!!busy} onClick={addBox}>Add box {boxes.length + 1} of {count}</button>
-          : <button className="primary" disabled={!!busy} onClick={() => next(boxes)}>{index < items.length - 1 ? 'Save · next photo' : 'Save · review all'}</button>}
-        {boxes.length > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { setCur(boxes[boxes.length - 1]); setBoxes(boxes.slice(0, -1)); }}>Undo box {boxes.length}</button>}
-        <button className="subtle-btn" disabled={!!busy} onClick={() => next([])}>Skip this photo</button>
-        {index > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { remember(complete ? boxes : plans[item.id] || []); open(index - 1); }}>← Previous photo</button>}
-      </div>
-    </>}
-    {phase === 'summary' && <>
-      <p className="copy-hint">Step 2: check the plan, then process everything together.</p>
-      <ol className="bulk-summary">{items.map((entry, position) => <li key={entry.id}><img src={entry.source} alt="" /><div><strong>{entry.name}</strong><small>{plans[entry.id]?.length ? `${plans[entry.id].length} box${plans[entry.id].length === 1 ? '' : 'es'} drawn` : 'Skipped — stays as it is'}</small></div><button className="subtle-btn" disabled={!!busy} onClick={() => open(position)}>Edit</button></li>)}</ol>
-      {message && <p role="status" className="bulk-message">{message}</p>}
-      <div className="share-toolbar bulk-actions">
-        <button className="primary" disabled={!planned.length || !!busy} onClick={() => void processAll()}>{busy || `Process all (${planned.length} photo${planned.length === 1 ? '' : 's'}, ${plannedBoxes} boxes)`}</button>
-        <button className="subtle-btn" disabled={!!busy} onClick={() => open(items.length - 1)}>← Back</button>
-      </div>
-    </>}
-  </section></div>;
+
+  if (stage === 'results') return <CropResults groups={groups} setGroups={setGroups} busy={false} onBack={() => setStage('draw')} onApply={() => { clearDraft(localStorage); onApply(groups); }} />;
+  return <CropStudio items={items} initialPlans={plans} startIndex={startIndex} progress={progress} notice={notice}
+    title={items.length > 1 ? 'Bulk crop' : 'Crop photo'}
+    detect={async source => ({ ...(await autoDetectBoxes(await worker(), source)) })}
+    onSaveAll={list => void process(list)}
+    onAutosave={(list, index) => { writeDraft(localStorage, asDraft(list), index); }}
+    onSaveLater={(list, index) => { writeDraft(localStorage, asDraft(list), index); onLater(list.reduce((sum, plan) => sum + plan.boxes.length, 0), list.filter(plan => plan.boxes.length).length); }}
+    onClose={onClose} onDiscard={discard} />;
 }
 
 /** A copy of the photo turned (or mirrored) so label text reads upright. */
@@ -1716,18 +1765,11 @@ export default function App() {
   /** A warning that must be seen: shown as a pop-up with OK instead of a small message. */
   const [warning, setWarning] = useState('');
   const [manualModel, setManualModel] = useState('');
-  const [manualCrop, setManualCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
   const [reviewSource, setReviewSource] = useState('');
   const [focusPreview, setFocusPreview] = useState('');
   const [showFullPhoto, setShowFullPhoto] = useState(false);
   const [cropEditorOpen, setCropEditorOpen] = useState(false);
-  const [cropZoom, setCropZoom] = useState(1);
-  const [cropDraftPreview, setCropDraftPreview] = useState('');
-  const [adjustingCrop, setAdjustingCrop] = useState(false);
   const [rotatingPhoto, setRotatingPhoto] = useState(false);
-  const [reviewCountInput, setReviewCountInput] = useState(2);
-  // boxes: the areas drawn so far (nothing is read yet). crops: filled only after "Process all".
-  const [reviewSplit, setReviewSplit] = useState<{ recordId: string; target: number; boxes: DrawnBox[]; crops: SplitCrop[] } | null>(null);
   const [bulkCropOpen, setBulkCropOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkEditModel, setBulkEditModel] = useState('');
@@ -1782,9 +1824,14 @@ export default function App() {
     for (const record of records) { const info = phoneInfo(record.model, catalogEntries, customModels), tac = (record.imei || '').slice(0, 8); if (tac.length === 8 && !!modelCode4(record.model) && info.series !== 'Unknown phones' && !isGenericName(info.name) && !known.has(tac)) known.set(tac, info); }
     return known;
   }, [records, catalogEntries, customModels]);
+  /** First 8 IMEI digits of phones already scanned with a known model: lets a one-digit checksum repair be accepted safely. */
+  const knownTacs = useMemo(() => new Set(knownByTac.keys()), [knownByTac]);
+  // Unfinished crop work ("Save for later"). Only the boxes are kept.
+  const [pendingDraft, setPendingDraft] = useState<CropDraft | null>(null);
+  const [bulkDraft, setBulkDraft] = useState<CropDraft | null>(null);
+  const refreshDraft = (rows: RecordItem[] = records) => setPendingDraft(readDraft(localStorage, new Set(rows.map(row => row.id))));
+  useEffect(() => { if (inventoryLoaded) refreshDraft(); }, [inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const infoOf = (record: RecordItem) => { const own = phoneInfo(record.model, catalogEntries, customModels); if (modelCode4(record.model)) return own; return knownByTac.get((record.imei || '').slice(0, 8)) || own; };
-  const [splitProgress, setSplitProgress] = useState('');
-  const guidedCropWorker = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
   const cropRequestedId = useRef<string | null>(null);
   const [toast, setToast] = useState('');
   const [showTop, setShowTop] = useState(false);
@@ -1808,7 +1855,6 @@ export default function App() {
   const [exportFormat, setExportFormat] = useState<'excel' | 'word' | 'sheets' | 'csv'>('excel');
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const cropStart = useRef<{ x: number; y: number; edge?: string; initial?: typeof manualCrop } | null>(null);
   const reviewModalRef = useRef<HTMLDivElement | null>(null);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
 
@@ -1949,10 +1995,7 @@ export default function App() {
 
   useEffect(() => {
     setDeleteReviewConfirm(false);
-    setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
     if (reviewModalRef.current) reviewModalRef.current.scrollTop = 0;
-    setCropZoom(1);
-    setReviewSplit(null);
     const draft = selected ? draftsRef.current[selected.id] : undefined;
     setManualImei(draft ? draft.imei : selected?.imei || '');
     setManualSerial(draft ? draft.serial : selected ? recordSerial(selected) : '');
@@ -1976,27 +2019,6 @@ export default function App() {
     return () => { current = false; };
   }, [selected?.id, selected?.dataUrl, selected?.focus, selected?.cropDataUrl]);
 
-  function cropPoint(event: ReactPointerEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)), y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)) };
-  }
-
-  function drawCrop(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!cropStart.current) return;
-    const point = cropPoint(event), start = cropStart.current;
-    if (start.edge && start.initial) {
-      const right = start.initial.x + start.initial.width;
-      const bottom = start.initial.y + start.initial.height;
-      const left = start.edge.includes('w') ? Math.min(point.x, right - 1) : start.initial.x;
-      const top = start.edge.includes('n') ? Math.min(point.y, bottom - 1) : start.initial.y;
-      const newRight = start.edge.includes('e') ? Math.max(point.x, left + 1) : right;
-      const newBottom = start.edge.includes('s') ? Math.max(point.y, top + 1) : bottom;
-      setManualCrop({ x: left, y: top, width: newRight - left, height: newBottom - top });
-      return;
-    }
-    setManualCrop({ x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
-  }
-
   function openCropReview(record: RecordItem) {
     cropRequestedId.current = record.id;
     openReview(record);
@@ -2004,12 +2026,7 @@ export default function App() {
   }
 
   function closeCropEditor() {
-    if (adjustingCrop) return;
     setCropEditorOpen(false);
-    if (reviewSplit) {
-      setReviewSplit(null);
-      if (guidedCropWorker.current) { void guidedCropWorker.current.terminate(); guidedCropWorker.current = null; }
-    }
   }
 
   function closePhotoReviewNow() {
@@ -2017,7 +2034,7 @@ export default function App() {
     setSelected(null);
   }
   function closePhotoReview() {
-    if (adjustingCrop || rotatingPhoto) return;
+    if (rotatingPhoto) return;
     finishReview();
   }
 
@@ -2029,23 +2046,7 @@ export default function App() {
   useBackLayer(!!confirmDupes, () => setConfirmDupes(null), 'confirm-dupes');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
-  useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
-
-  useEffect(() => {
-    if (!cropEditorOpen || !selected || manualCrop.width < 1 || manualCrop.height < 1 || manualCrop.width >= 100 && manualCrop.height >= 100) {
-      setCropDraftPreview('');
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void createCroppedPhotos(reviewSource || selected.originalDataUrl || selected.dataUrl,
-        [{ imei: 'preview', ...manualCrop }], 100, 100)
-        .then(photos => { if (!cancelled) setCropDraftPreview(photos.get('preview') || ''); })
-        .catch(() => { if (!cancelled) setCropDraftPreview(''); });
-    }, 350);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [cropEditorOpen, selected?.id, reviewSource, manualCrop.x, manualCrop.y, manualCrop.width, manualCrop.height]);
 
   useEffect(() => {
     try { localStorage.setItem(PEOPLE_STORE, JSON.stringify(personGroups)); }
@@ -2782,13 +2783,13 @@ export default function App() {
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName || '')) return;
       const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
-      if (!direction || reviewIndex < 0 || adjustingCrop || rotatingPhoto || reviewSplit) return;
+      if (!direction || reviewIndex < 0 || rotatingPhoto) return;
       event.preventDefault();
       goReview(direction > 0 ? 1 : -1);
     }
     document.addEventListener('keydown', handleReviewKeys);
     return () => document.removeEventListener('keydown', handleReviewKeys);
-  }, [selected, reviewIndex, reviewRecords, adjustingCrop, rotatingPhoto, reviewSplit, manualModel, manualImei]);
+  }, [selected, reviewIndex, reviewRecords, rotatingPhoto, manualModel, manualImei]);
   function openReview(record: RecordItem) {
     setReviewIds(visible.map(item => item.id));
     setSelected(record);
@@ -3343,6 +3344,10 @@ export default function App() {
           let text = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
           if (scanMode !== 'fast' && !cropNeedsReview) text = await refineCropText(w, cropDataUrl || dataUrl, text, cropResult.lines);
           if (!cropNeedsReview && !extractPreferredImei(text) && !extractSerial(text)) { const serialRaw = await readSerialPhoto(w, cropDataUrl || dataUrl); if (serialRaw) text = serialRaw; }
+          // Still no usable IMEI (blurry, tilted, dark, tiny print): try other image treatments before giving up.
+          if (scanMode !== 'fast' && !cropNeedsReview && cropDataUrl && !extractPreferredImei(text)) {
+            try { text = (await rereadIfUncertain(w, cropDataUrl, text, knownTacs)).raw; } catch (error) { console.warn('Extra reading passes skipped', error); }
+          }
           return text;
         };
         const cropTexts = new Map<string, string>();
@@ -3356,7 +3361,10 @@ export default function App() {
         // Possibly several devices but only one IMEI 1 was read: keep it (the
         // record still asks "1 device or N?"). Several different IMEI 1s stay blank.
         const readableImei1s = [...new Set([barcodeImei(cropRaw, 1), ...extractImei1s(cropRaw).filter(luhnValid)].filter(Boolean))];
-        const imei = cropNeedsReview ? (readableImei1s.length === 1 ? readableImei1s[0] : '') : extractPreferredImei(cropRaw);
+        let imei = cropNeedsReview ? (readableImei1s.length === 1 ? readableImei1s[0] : '') : extractPreferredImei(cropRaw);
+        // Several passes may agree where no single pass was clean; a checksum repair is kept but flagged for a look.
+        let repairedImei = false;
+        if (!imei && !cropNeedsReview) { const verdict = judgeImei({ readings: imeiReadings(cropRaw), barcode: barcodeImei(cropRaw, 1), knownTacs }); if (verdict.imei) { imei = verdict.imei; repairedImei = verdict.method === 'repair'; } }
         if (/^\d{15}$/.test(imei)) {
           if (seenImeis.has(imei) || (file.name.startsWith('camera-') && records.some(record => record.imei === imei))) { skippedImeis++; continue; }
           seenImeis.add(imei);
@@ -3380,7 +3388,7 @@ export default function App() {
           cropDataUrl,
           // Flag OCR that disagrees with itself about this IMEI, even if Luhn passes.
           // A crop whose IMEI is barcode-confirmed is trusted even if a box edge was unclear.
-          cropNeedsReview: cropNeedsReview || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
+          cropNeedsReview: cropNeedsReview || repairedImei || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
           imei2: recordImeiPair({ imei, raw: cropRaw } as RecordItem).imei2,
           ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length, expectedProducts), deviceImeis: found }; })() : {}),
           model,
@@ -3474,14 +3482,14 @@ export default function App() {
     return next;
   }
   function goReview(direction: 1 | -1) {
-    if (reviewIndex < 0 || adjustingCrop || rotatingPhoto || reviewSplit) return;
+    if (reviewIndex < 0 || rotatingPhoto) return;
     stashDraft();
     const next = reviewRecords[reviewIndex + direction];
     if (next) setSelected(next);
   }
   /** After the last picture, or when closing: ask what to do with unsaved changes. */
   function finishReview() {
-    if (adjustingCrop || rotatingPhoto || reviewSplit) return;
+    if (rotatingPhoto) return;
     if (Object.keys(stashDraft()).length) setFinishOpen(true); else closePhotoReviewNow();
   }
   function buildReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem> } | { error: string } {
@@ -3492,7 +3500,7 @@ export default function App() {
     return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
   }
   function saveReviewFields(advance = false) {
-    if (!selected || adjustingCrop || rotatingPhoto || reviewSplit) return;
+    if (!selected || rotatingPhoto) return;
     const built = buildReviewPatch(selected, currentFields());
     if ('error' in built) { setWarning(built.error); return; }
     const { patch } = built;
@@ -3531,53 +3539,9 @@ export default function App() {
   }
   const pendingChanges = Object.keys(reviewDrafts).filter(id => id !== selected?.id).length + (selected && fieldsDiffer(selected, currentFields()) ? 1 : 0);
 
-  async function applyManualCrop(addAnother = false) {
-    if (!selected || adjustingCrop) return;
-    const { x, y, width, height } = manualCrop;
-    if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100 || y + height > 100) {
-      setToast('Crop values must fit within the picture.');
-      return;
-    }
-    setAdjustingCrop(true);
-    let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
-    try {
-      const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
-      const photos = await createCroppedPhotos(source, [{ imei: 'manual', x, y, width, height }], 100, 100);
-      const cropDataUrl = photos.get('manual')!;
-      let raw = '', imei = '';let barcodeLines:OcrLine[]=[];
-      try {
-        worker = await newOcrWorker();
-        ({ raw, imei, lines:barcodeLines } = await readCropImei(worker, cropDataUrl));
-        raw = await cameraBarcodeText(cropDataUrl, raw, barcodeLines); imei = cameraImei(raw);
-      } catch (error) { console.warn('Crop saved without automatic text reading', error); }
-      const patch: Partial<RecordItem> = { dataUrl: source, originalDataUrl: source, cropDataUrl, imei, raw, ...serialReading(raw), cropNeedsReview: !imei && !serialReading(raw).serial, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' };
-      if (addAnother) {
-        const sourcePictureId = selected.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
-        const added: RecordItem = { ...selected, ...patch, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`, sourcePictureId, number: Math.max(2, ...records.map(r => r.number)) + 1, duplicate: false, createdAt: new Date().toISOString() };
-        setRecords(old => markDuplicateRecords([...old.map(r => r.id === selected.id ? { ...r, sourcePictureId } : r), added]));
-        setReviewIds(old => { const index = old.indexOf(selected.id); return index < 0 ? [...old, added.id] : [...old.slice(0, index + 1), added.id, ...old.slice(index + 1)]; });
-        setSelected(added);
-        setCropEditorOpen(false);
-        setToast(imei ? 'Another crop added as a new record.' : 'Another crop added. Its IMEI needs review.');
-      } else {
-        updateRow(selected.id, patch);
-      setSelected({ ...selected, ...patch });
-      setManualImei(imei);
-      setCropEditorOpen(false);
-        setToast(imei ? 'Crop saved. Draw another box and choose Add another crop if needed.' : 'Crop saved. Its IMEI needs review.');
-      }
-    } catch (error) {
-      console.error(error);
-      setToast('Could not adjust the crop. Please try again.');
-    } finally {
-      if (worker) await worker.terminate();
-      setAdjustingCrop(false);
-    }
-  }
-
   /** Level the picture (and its crop) when the text runs at a slant. */
   async function straightenSelectedPhoto() {
-    if (!selected || rotatingPhoto || adjustingCrop) return;
+    if (!selected || rotatingPhoto) return;
     setRotatingPhoto(true);
     try {
       const [whole, crop] = await Promise.all([
@@ -3589,8 +3553,6 @@ export default function App() {
       setRecords(old => old.map(r => r.id === selected.id ? { ...r, ...patch } : r));
       setSelected({ ...selected, ...patch });
       setReviewSource(whole.dataUrl);
-      setReviewSplit(null);
-      setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
       setToast(`Straightened by about ${Math.abs(Math.round(crop?.angle || whole.angle))}°.`);
     } catch (error) {
       console.error(error);
@@ -3598,7 +3560,7 @@ export default function App() {
     } finally { setRotatingPhoto(false); }
   }
   async function rotateSelectedPhoto(direction: 'left' | 'right') {
-    if (!selected || rotatingPhoto || adjustingCrop) return;
+    if (!selected || rotatingPhoto) return;
     setRotatingPhoto(true);
     try {
       const [dataUrl, cropDataUrl] = await Promise.all([
@@ -3609,72 +3571,11 @@ export default function App() {
       setRecords(old => old.map(r => r.id === selected.id ? { ...r, ...patch } : r));
       setSelected({ ...selected, ...patch });
       setReviewSource(dataUrl);
-      setReviewSplit(null);
-      setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
       setToast('Photo rotated. Adjust the crop and read the IMEI again if needed.');
     } catch (error) {
       console.error(error);
       setToast('Could not rotate the photo. Please try again.');
     } finally { setRotatingPhoto(false); }
-  }
-
-  /** Step 1: remember the box just drawn. Nothing is read yet. */
-  function addDrawnBox() {
-    if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length >= reviewSplit.target) return;
-    const { x, y, width, height } = manualCrop;
-    if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100.001 || y + height > 100.001) { setToast('Draw a box inside the photo first.'); return; }
-    if (width >= 99.99 && height >= 99.99) { setToast('Draw a box around one label first.'); return; }
-    const clash = overlapsBox(reviewSplit.boxes, { x, y, width, height });
-    if (clash >= 0) { setToast(`This box covers the same area as box ${clash + 1}. Draw it around a different label.`); return; }
-    const boxes = [...reviewSplit.boxes, { x, y, width, height }];
-    setReviewSplit({ ...reviewSplit, boxes });
-    setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
-    setToast(boxes.length < reviewSplit.target ? `Box ${boxes.length} drawn. Draw box ${boxes.length + 1} of ${reviewSplit.target}.` : `All ${reviewSplit.target} boxes drawn. Tap Process all.`);
-  }
-
-  function undoDrawnBox() {
-    if (!reviewSplit || adjustingCrop || !reviewSplit.boxes.length) return;
-    const last = reviewSplit.boxes[reviewSplit.boxes.length - 1];
-    setReviewSplit({ ...reviewSplit, boxes: reviewSplit.boxes.slice(0, -1) });
-    setManualCrop(last);
-  }
-
-  /** Step 2: cut every drawn box and read them all, then show the results together. */
-  async function processDrawnBoxes() {
-    if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length !== reviewSplit.target) return;
-    setAdjustingCrop(true);
-    try {
-      const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
-      setSplitProgress('Preparing…');
-      if (!guidedCropWorker.current) { try { guidedCropWorker.current = await newOcrWorker(); } catch (error) { console.warn('Text reading unavailable', error); } }
-      const crops = await readBoxCrops(guidedCropWorker.current, source, reviewSplit.boxes, () => manualModel.trim() || selected.model, box => setSplitProgress(`Reading box ${box} of ${reviewSplit.boxes.length}…`));
-      setReviewSplit({ ...reviewSplit, crops });
-      setToast('All boxes read. Check each IMEI and model, then save.');
-    } catch (error) {
-      console.error(error);
-      setToast('Could not process the boxes. Please try again.');
-    } finally {
-      if (guidedCropWorker.current) { await guidedCropWorker.current.terminate(); guidedCropWorker.current = null; }
-      setSplitProgress('');
-      setAdjustingCrop(false);
-    }
-  }
-
-  /** Auto option: let the scanner count the labels in this photo and draw the boxes. */
-  async function autoDetectInReview() {
-    if (!selected || adjustingCrop) return;
-    setAdjustingCrop(true); setSplitProgress('Detecting labels…');
-    try {
-      if (!guidedCropWorker.current) guidedCropWorker.current = await newOcrWorker();
-      const found = await autoDetectBoxes(guidedCropWorker.current, reviewSource || selected.originalDataUrl || selected.dataUrl);
-      if (found.boxes.length >= 2) {
-        setReviewCountInput(found.boxes.length);
-        setReviewSplit({ recordId: selected.id, target: found.boxes.length, boxes: found.boxes, crops: [] });
-        setToast(`Found ${found.boxes.length} labels. Check the numbered boxes (Undo redraws the last), then tap Process all.`);
-      } else if (found.devices >= 2) { setReviewCountInput(found.devices); setToast(`Found ${found.devices} labels but could not place the boxes. Draw them yourself.`); }
-      else setToast('Found only one label. If you see more, enter the number and draw the boxes.');
-    } catch (error) { console.error(error); setToast('Auto-detect did not work on this photo. Draw the boxes yourself.'); }
-    finally { if (guidedCropWorker.current) { await guidedCropWorker.current.terminate(); guidedCropWorker.current = null; } setSplitProgress(''); setAdjustingCrop(false); }
   }
 
   /** Answer to "1 device or N?": keep one record and use the first readable IMEI 1. */
@@ -3686,22 +3587,36 @@ export default function App() {
     setToast(imei ? 'Kept as one device.' : 'Kept as one device. Enter the IMEI or serial.');
   }
 
-  function finishReviewSplit() {
-    if (!selected || !reviewSplit || reviewSplit.crops.length !== reviewSplit.target) return;
-    if (reviewSplit.crops.some(crop => crop.imei && !/^\d{15}$/.test(crop.imei))) {
-      setToast('Enter all 15 IMEI digits, or leave the field empty for review.');
-      return;
+  /**
+   * Replace the cropped photos' records with one record per crop. The original photo is released
+   * (its stored copy goes when nothing refers to it any more) and the crops keep the person of the original.
+   */
+  function applyCropGroups(groups: CropGroup[], fromReview: boolean) {
+    let top = Math.max(2, ...records.map(r => r.number));
+    const made = new Map<string, RecordItem[]>();
+    const next = records.flatMap(r => {
+      const done = groups.find(group => group.id === r.id);
+      if (!done) return [r];
+      const rows = splitRecords(r, done.crops, top + 1);
+      top += rows.length - 1; made.set(r.id, rows);
+      return rows;
+    });
+    const marked = markDuplicateRecords(next);
+    setRecords(marked);
+    setSelectedIds(old => old.filter(id => !made.has(id)));
+    const count = [...made.values()].reduce((sum, rows) => sum + rows.length, 0);
+    const unsure = marked.filter(row => [...made.values()].some(rows => rows.some(made_ => made_.id === row.id)) && reviewStatus(row).includes('Needs review')).length;
+    if (fromReview) {
+      setReviewIds(old => old.flatMap(id => made.has(id) ? made.get(id)!.map(row => row.id) : [id]));
+      const firstId = [...made.values()][0]?.[0]?.id;
+      setSelected(marked.find(row => row.id === firstId) || null);
     }
-    const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
-    const nextNumber = Math.max(2, ...records.map(r => r.number)) + 1;
-    const replacements = splitRecords(selected, reviewSplit.crops, source, nextNumber);
-    setRecords(old => markDuplicateRecords(old.flatMap(r => r.id === selected.id ? replacements : [r])));
-    setSelectedIds(old => old.filter(id => id !== selected.id));
-    setReviewSplit(null);
-    setCropEditorOpen(false);
-    setSelected(null);
-    setToast(`${replacements.length} cropped records saved. The original record was replaced.`);
+    setCropEditorOpen(false); setBulkCropOpen(false); setBulkDraft(null); refreshDraft(marked);
+    setToast(`${count} picture${count === 1 ? '' : 's'} saved from ${made.size} photo${made.size === 1 ? '' : 's'}; the original${made.size === 1 ? '' : 's'} replaced.${unsure ? ` ${unsure} need${unsure === 1 ? 's' : ''} a look.` : ''}`);
   }
+  function finishCropFlow() { setCropEditorOpen(false); setBulkCropOpen(false); setBulkDraft(null); refreshDraft(); }
+  function cropFlowLater(boxes: number, photos: number) { finishCropFlow(); setToast(`Saved for later: ${boxes} box${boxes === 1 ? '' : 'es'} on ${photos} photo${photos === 1 ? '' : 's'}. Resume from the banner at the top.`); }
+  const cropItem = (r: RecordItem): BulkItem => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model, single: !((r.deviceCount || 0) > 1) });
 
   async function performExport(rows: RecordItem[], token?: string, folderChoice?: Promise<any>) {
     if (!rows.length) {
@@ -4068,6 +3983,10 @@ export default function App() {
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}`}>
+        {pendingDraft && !cropEditorOpen && !bulkCropOpen && !bulkDraft && (() => { const { photos, boxes } = draftSummary(pendingDraft); return <div className="draft-banner" role="status">
+          <span><strong>Unfinished crop saved.</strong> {boxes} box{boxes === 1 ? '' : 'es'} on {photos} photo{photos === 1 ? '' : 's'} (saved {new Date(pendingDraft.savedAt).toLocaleString()}).</span>
+          <div><button className="primary" onClick={() => setBulkDraft(pendingDraft)}>Resume</button><button className="subtle-btn" onClick={() => { clearDraft(localStorage); setPendingDraft(null); setToast('Saved crop boxes discarded.'); }}>Discard</button></div>
+        </div>; })()}
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
 {!simpleView && mainView === 'scan' && (<>
         <section className="hero">
@@ -4822,10 +4741,10 @@ export default function App() {
         >
           <div
             ref={reviewModalRef}
-            className={`modal ${cropEditorOpen ? 'crop-mode' : ''}`}
+            className="modal"
             onClick={e => e.stopPropagation()}
           >
-            <div className={cropEditorOpen ? undefined : 'review-sticky'}>
+            <div className="review-sticky">
             <div className="modal-head">
               <div>
                 {(() => { const sure = recordConfidence(selected); return <div className="eyebrow" title={sure.reasons.join('; ')}>IMAGE REVIEW · {sure.score}% sure ({sure.level})</div>; })()}
@@ -4833,7 +4752,7 @@ export default function App() {
               </div>
 
               <div className="review-header-actions">
-                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
+                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={rotatingPhoto} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
                 <button className="iconbtn" aria-label="Close photo review" onClick={closePhotoReview}><X /></button>
               </div>
             </div>
@@ -4844,14 +4763,14 @@ export default function App() {
             </div>}
 
 
-            {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} /></div>}
-            {!cropEditorOpen && focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}
+            {<div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} /></div>}
+            {focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}
             </div>
 
 
 
 
-            {!cropEditorOpen && <div className="manual-imei-entry">
+            {<div className="manual-imei-entry">
               <details className="review-edit" open><summary>Type: model, serial, IMEI 1</summary>
               <label className="review-model" htmlFor="manual-model">Device model</label>
               <ModelPicker id="manual-model" value={manualModel} onChange={setManualModel} customModels={customModels} catalogEntries={catalogEntries} scannedModels={records.map(row => row.model)} onAddModel={(code, name) => { const next = { ...customModels, [code]: name }; if (!writeCustomModels(next)) return false; setCustomModels(next); return true; }} onEnter={() => document.getElementById('manual-imei')?.focus()} />
@@ -4869,29 +4788,29 @@ export default function App() {
               <small>Enter moves to the next field, then saves and opens the next record. Use arrow keys to navigate when not typing.</small>
             </div>}
 
-            {!cropEditorOpen && <div className="review-float">
+            {<div className="review-float">
               {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
-                <button className="subtle-btn" disabled={reviewIndex === 0 || adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => goReview(-1)}>← Previous</button>
+                <button className="subtle-btn" disabled={reviewIndex === 0 || rotatingPhoto} onClick={() => goReview(-1)}>← Previous</button>
                 <span>{reviewIndex + 1} of {reviewRecords.length}</span>
                 {reviewIndex === reviewRecords.length - 1
-                  ? <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={finishReview}>Finish ✓</button>
-                  : <button className="subtle-btn" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => goReview(1)}>Next →</button>}
+                  ? <button className="primary" disabled={rotatingPhoto} onClick={finishReview}>Finish ✓</button>
+                  : <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => goReview(1)}>Next →</button>}
               </div>}
               <div className="review-tools">
                 <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
                 <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Photo</button>
                 <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
-                <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶</button>
-                <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷</button>
-                <button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+                <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶</button>
+                <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷</button>
+                <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
               </div>
-{selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !reviewSplit && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices: crop each</button></div></div>}{selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && !reviewSplit && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}<div className="review-save-bar" role="group" aria-label="Save this record">
-              <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
-              {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
+{selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" onClick={() => setCropEditorOpen(true)}>{selected.deviceCount} devices: crop each</button></div></div>}{selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}<div className="review-save-bar" role="group" aria-label="Save this record">
+              <button className="primary" disabled={rotatingPhoto} onClick={() => saveReviewFields()}>Save</button>
+              {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
               <span className="review-save-state" role="status">{pendingChanges ? `${pendingChanges} unsaved` : 'All saved'}</span>
             </div></div>}
 
-            {!cropEditorOpen && <details className="review-details"><summary>More details: status, serial, catalog, share</summary>
+            {<details className="review-details"><summary>More details: status, serial, catalog, share</summary>
             <div className="modal-meta">
               <span>Picture ID: {selected.pictureId}</span>
               <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button>
@@ -4907,51 +4826,13 @@ export default function App() {
             </div>
             </details>}
 
-            {selected.cropDataUrl && (
+            {selected.cropDataUrl && selected.cropDataUrl !== (reviewSource || selected.dataUrl) && (
               <details>
                 <summary>View full original photo</summary>
                 <img className="preview" src={reviewSource || selected.dataUrl} alt="Full original photo" />
               </details>
             )}
 
-            {cropEditorOpen && !reviewSplit && <div className="review-split-prompt">
-              <label htmlFor="review-crop-count">How many IMEI labels do you see in this photo?</label>
-              <p>Choose a number, then draw one box per picture. Review the cropped photos before replacing the original record.</p>
-              <div className="review-split-start"><input id="review-crop-count" type="number" inputMode="numeric" min="1" max="20" value={reviewCountInput} onChange={event => setReviewCountInput(Number(event.target.value))} />
-                <button className="primary" disabled={adjustingCrop} onClick={() => {
-                  if (!Number.isInteger(reviewCountInput) || reviewCountInput < 1 || reviewCountInput > 20) { setToast('Enter a number from 1 to 20.'); return; }
-                  setReviewSplit({ recordId: selected.id, target: reviewCountInput, boxes: [], crops: [] });
-                  setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
-                }}>Start cropping</button>
-                <button className="subtle-btn" disabled={adjustingCrop} onClick={() => void autoDetectInReview()}>{adjustingCrop && splitProgress ? splitProgress : 'Auto-detect'}</button></div>
-              <p className="copy-hint">Not sure how many? Tap Auto-detect: the scanner counts the labels and draws the boxes for you to check.</p>
-            </div>}
-            <details id="crop-editor-panel" className="crop-workspace" open={cropEditorOpen}>
-              <summary onClick={event => { if (cropEditorOpen) event.preventDefault(); else setCropEditorOpen(true); }}>Adjust crop</summary>
-              <button className="subtle-btn crop-back" onClick={closeCropEditor}>← Back to record</button>
-              <p>{reviewSplit ? reviewSplit.crops.length === reviewSplit.target ? 'Review each picture and its IMEI and model, then save the set.' : reviewSplit.boxes.length === reviewSplit.target ? `All ${reviewSplit.target} boxes are drawn. Check them on the photo, then tap Process all ${reviewSplit.target}.` : `Draw box ${reviewSplit.boxes.length + 1} of ${reviewSplit.target}: drag around the whole sticker or box face, including the IMEI and barcode. Draw all ${reviewSplit.target} boxes first; they are read together afterwards.` : 'Drag around the whole sticker or box face, including the IMEI and barcode. Save this crop, or add another.'}</p>
-              {selected.cropDataUrl && <div className="crop-saved-preview"><strong>Saved crop for this record</strong><img src={selected.cropDataUrl} alt="Saved crop for this record" /></div>}
-              {(!reviewSplit || reviewSplit.crops.length < reviewSplit.target) && <><div className="crop-zoom-controls"><button className="subtle-btn" onClick={() => setCropZoom(old => Math.max(1, old - 0.5))} disabled={cropZoom <= 1}>− Zoom</button><span>{Math.round(cropZoom * 100)}%</span><button className="subtle-btn" onClick={() => setCropZoom(old => Math.min(3, old + 0.5))} disabled={cropZoom >= 3}>+ Zoom</button><button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶ Rotate</button><button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷ Rotate</button></div>
-              <div className="crop-viewport"><div className="crop-editor" style={{ maxWidth: cropZoom > 1 ? 'none' : '100%' }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const point = cropPoint(event); const edge = (event.target as HTMLElement).dataset.edge; cropStart.current = { ...point, edge, initial: { ...manualCrop } }; if (!edge) drawCrop(event); }} onPointerMove={drawCrop} onPointerUp={event => { drawCrop(event); cropStart.current = null; }} onPointerCancel={() => { cropStart.current = null; }}>
-                <img src={reviewSource || selected.dataUrl} alt="Original photo: drag to select the whole sticker or box" draggable={false} style={{ maxHeight: `${cropZoom * 44}dvh`, maxWidth: cropZoom > 1 ? 'none' : '100%' }} />
-                {reviewSplit?.boxes.map((box, index) => <div key={index} className="crop-box-done" style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.width}%`, height: `${box.height}%` }}><span>{index + 1}</span></div>)}
-                {(!reviewSplit || reviewSplit.boxes.length < reviewSplit.target) && <div className="crop-selection" style={{ left: `${manualCrop.x}%`, top: `${manualCrop.y}%`, width: `${manualCrop.width}%`, height: `${manualCrop.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
-              </div></div>
-              {cropDraftPreview && <div className="crop-draft-preview"><strong>Selected picture</strong><img src={cropDraftPreview} alt="Preview of selected crop" /></div>}
-              <button className="subtle-btn" onClick={() => setManualCrop({ x: 0, y: 0, width: 100, height: 100 })}>Reset selection</button>
-              <details><summary>Fine-tune selection</summary><div className="manual-crop-controls">
-                {(['x', 'y', 'width', 'height'] as const).map(key => (
-                  <label key={key}>{key} (%)<input type="number" min="0" max="100" value={Math.round(manualCrop[key] * 10) / 10} onChange={event => setManualCrop(old => ({ ...old, [key]: Number(event.target.value) }))} /></label>
-                ))}
-              </div></details>
-              </>}
-              {reviewSplit && reviewSplit.crops.length > 0 && <div className="review-crop-list">{reviewSplit.crops.map((crop, index) => <div key={index} className="saved-crop-card"><img src={crop.cropDataUrl} alt={`Saved crop ${index + 1}`} /><strong>Crop {index + 1}</strong><label>IMEI<input inputMode="numeric" maxLength={15} value={crop.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); setReviewSplit(old => old ? { ...old, crops: old.crops.map((item, cropIndex) => cropIndex === index ? { ...item, imei } : item) } : old); }} /></label><label>Device model<input value={crop.model} onChange={event => { const model = event.target.value; setReviewSplit(old => old ? { ...old, crops: old.crops.map((item, cropIndex) => cropIndex === index ? { ...item, model } : item) } : old); }} /></label><small>{crop.imei ? luhnValid(crop.imei) ? 'Ready' : 'Check IMEI' : 'Needs review'}</small></div>)}</div>}
-              <div className="crop-actions crop-sticky-actions">
-                {reviewSplit ? <><button className="primary" disabled={adjustingCrop} onClick={() => reviewSplit.crops.length === reviewSplit.target ? finishReviewSplit() : reviewSplit.boxes.length === reviewSplit.target ? void processDrawnBoxes() : addDrawnBox()}>{adjustingCrop ? (splitProgress || 'Reading…') : reviewSplit.crops.length === reviewSplit.target ? `Save ${reviewSplit.target} pictures` : reviewSplit.boxes.length === reviewSplit.target ? `Process all ${reviewSplit.target}` : `Add box ${reviewSplit.boxes.length + 1} of ${reviewSplit.target}`}</button>{reviewSplit.crops.length < reviewSplit.target && reviewSplit.boxes.length > 0 && <button className="subtle-btn" disabled={adjustingCrop} onClick={undoDrawnBox}>Undo box {reviewSplit.boxes.length}</button>}<button className="subtle-btn" disabled={adjustingCrop} onClick={closeCropEditor}>Cancel</button></> : <><button className="primary" disabled={adjustingCrop} onClick={() => void applyManualCrop(false)}>{adjustingCrop ? 'Reading crop…' : selected.cropDataUrl ? 'Save crop' : 'Save first crop'}</button>
-                {selected.cropDataUrl && <button className="subtle-btn" disabled={adjustingCrop} onClick={() => void applyManualCrop(true)}>Add another crop</button>}</>}
-                {!reviewSplit && <button className="subtle-btn" onClick={closeCropEditor}>Cancel</button>}
-              </div>
-            </details>
 
             <details>
               <summary>Raw OCR text</summary>
@@ -5131,14 +5012,14 @@ export default function App() {
         <label className="check-row"><input type="checkbox" checked={bulkEditChecked} onChange={event => setBulkEditChecked(event.target.checked)} /> Mark as checked (clears the review flags)</label>
         <div className="share-toolbar"><button className="primary" onClick={applyBulkEdit}>Apply to {selectedRows.length || visible.length}</button><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Cancel</button></div>
       </section></div>}
-      {bulkCropOpen && <BulkCropDialog
-        items={bulkCropRows().map(r => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model }))}
-        onClose={() => setBulkCropOpen(false)}
-        onApply={results => {
-          setRecords(old => { let top = Math.max(2, ...old.map(r => r.number)); return markDuplicateRecords(old.flatMap(r => { const done = results.find(result => result.id === r.id); if (!done) return [r]; const made = splitRecords(r, done.crops, done.source, top + 1); top += made.length - 1; return made; })); });
-          setBulkCropOpen(false);
-          setToast(`${results.reduce((sum, result) => sum + result.crops.length, 0)} cropped records saved from ${results.length} photo${results.length === 1 ? '' : 's'}.`);
-        }} />}
+      {cropEditorOpen && selected && <CropFlow key={`review-${selected.id}`} items={[{ ...cropItem(selected), source: reviewSource || selected.originalDataUrl || selected.dataUrl }]} knownTacs={knownTacs}
+        onApply={groups => applyCropGroups(groups, true)} onClose={finishCropFlow} onLater={cropFlowLater} />}
+      {(bulkCropOpen || bulkDraft) && !cropEditorOpen && (() => {
+        const rows = bulkDraft ? bulkDraft.items.map(item => records.find(r => r.id === item.recordId)).filter((r): r is RecordItem => !!r) : bulkCropRows();
+        return <CropFlow key="bulk" items={rows.map(cropItem)} knownTacs={knownTacs}
+          initialPlans={bulkDraft ? Object.fromEntries(bulkDraft.items.map(item => [item.recordId, item.boxes])) : undefined} startIndex={bulkDraft?.index}
+          onApply={groups => applyCropGroups(groups, false)} onClose={finishCropFlow} onLater={cropFlowLater} />;
+      })()}
       {linkedPicture !== null && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) closeLinkedPicture(); }}><section className="modal linked-picture" role="dialog" aria-modal="true" aria-label="Picture from Excel link">
         <div className="modal-head"><h2>{linkedPicture ? 'Picture' : 'Picture not found'}</h2><button className="subtle-btn" onClick={closeLinkedPicture}>Close</button></div>
         {linkedPicture ? <>

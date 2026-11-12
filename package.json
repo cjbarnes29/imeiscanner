@@ -1,16 +1,16 @@
 {
   "name": "imei-photo-scanner",
   "private": true,
-  "version": "1.19.1",
+  "version": "1.20.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/write-version.mjs",
+    "predev": "node scripts/write-version.mjs && node scripts/copy-ocr-assets.mjs",
     "dev": "vite --host 0.0.0.0",
-    "prebuild": "node scripts/write-version.mjs",
+    "prebuild": "node scripts/write-version.mjs && node scripts/copy-ocr-assets.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "laptop": "node server/index.mjs",
-    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs && node scripts/test-learning.mjs",
+    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs && node scripts/test-learning.mjs && node scripts/test-crop-engine.mjs && node scripts/test-crop-apply.mjs",
     "laptop:build": "npm run build && npm run laptop"
   },
   "dependencies": {

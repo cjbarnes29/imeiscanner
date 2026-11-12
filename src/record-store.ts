@@ -40,12 +40,21 @@ export async function loadInventory<T extends { id: string }>(): Promise<T[] | u
   }
 }
 
+/**
+ * Stored original photos to delete: the source photo of every removed record that no remaining
+ * record refers to. A photo that was cut into crops is released this way once its record is replaced
+ * (the crops get a new picture group), while a photo that other records still use is kept.
+ */
+export function orphanedSources(removed: ({ sourcePictureId?: string } | undefined)[], remaining: { sourcePictureId?: string }[]): Set<string> {
+  const stillUsed = new Set(remaining.map(row => row.sourcePictureId).filter(Boolean));
+  return new Set(removed.map(row => row?.sourcePictureId).filter((id): id is string => !!id && !stillUsed.has(id)));
+}
+
 export async function saveInventory<T extends { id: string; sourcePictureId?: string }>(records: T[]): Promise<void> {
   const current = new Map(records.map(row => [row.id, row]));
   const changed = records.filter(row => lastSaved.get(row.id) !== row);
   const removed = [...lastSaved.keys()].filter(id => !current.has(id));
-  const currentSources = new Set(records.map(row => row.sourcePictureId).filter(Boolean));
-  const unusedSources = new Set(removed.map(id => (lastSaved.get(id) as T | undefined)?.sourcePictureId).filter((id): id is string => !!id && !currentSources.has(id)));
+  const unusedSources = orphanedSources(removed.map(id => lastSaved.get(id) as T | undefined), records);
   if (!changed.length && !removed.length) return;
   const database = await openDatabase();
   try {

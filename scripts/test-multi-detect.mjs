@@ -38,3 +38,22 @@ assert.equal(m.needsOrientationCheck(8),false,'a clear read is not turned');
 const M=(t,x,y)=>({text:t,bbox:{x0:x,y0:y,x1:x+300,y1:y+40}});
 assert.equal(m.countModelLabels([M('Model : SM-A165F/DS',50,50),M('Model : SM-A165F/DS',52,52),M('Model : SM-A165F/DS',50,900),M('SM-A165FZADMEA',50,130)]),2,'two labels (repeat of the same line counts once)');
 console.log('PASS: tilt estimation (0, 6, -9, 12 degrees), blank picture, overlapping tile plans for 2-6 products, merging repeated lines from tiles.');
+
+// Boxes found on a levelled copy map back onto the tilted original (auto-detect on tilted photos)
+for(const deg of [9,-6,14]){
+  const W0=1300,H0=520;
+  // a label rectangle on the ORIGINAL photo, upright; where does it land on the levelled copy?
+  const rect={x:40,y:90,w:520,h:330};
+  const pts=[[rect.x,rect.y],[rect.x+rect.w,rect.y],[rect.x,rect.y+rect.h],[rect.x+rect.w,rect.y+rect.h]].map(([x,y])=>m.levelledPoint({x,y},deg,W0,H0));
+  const r=Math.abs(deg)*Math.PI/180,LW=W0*Math.cos(r)+H0*Math.sin(r),LH=W0*Math.sin(r)+H0*Math.cos(r);
+  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  const levelled={x:Math.min(...xs)/LW*100,y:Math.min(...ys)/LH*100,width:(Math.max(...xs)-Math.min(...xs))/LW*100,height:(Math.max(...ys)-Math.min(...ys))/LH*100};
+  const back=m.unlevelBox(levelled,deg,W0,H0);
+  const want={x:rect.x/W0*100,y:rect.y/H0*100,width:rect.w/W0*100,height:rect.h/H0*100};
+  assert.ok(back.x<=want.x+0.5&&back.y<=want.y+0.5&&back.x+back.width>=want.x+want.width-0.5&&back.y+back.height>=want.y+want.height-0.5,`box on the levelled copy (${deg}°) covers the label on the original`);
+  assert.ok(back.x>=0&&back.y>=0&&back.x+back.width<=100.001&&back.y+back.height<=100.001,'mapped box stays inside the photo');
+  const p0={x:123,y:77},q=m.levelledPoint(p0,deg,W0,H0),p1=m.originalPoint(q,deg,W0,H0);
+  assert.ok(Math.hypot(p1.x-p0.x,p1.y-p0.y)<1e-6,`point round trip at ${deg}°`);
+}
+console.log('PASS: boxes found on a levelled copy of a tilted photo map back onto the original (9, -6, 14 degrees).');
+
