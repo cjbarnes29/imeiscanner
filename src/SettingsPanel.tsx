@@ -4,6 +4,7 @@ import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
 import { CatalogDialog } from './CatalogDialog';
 import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
+import { APP_COMMIT, APP_VERSION } from './version';
 
 type Props = {
   scannedModels: string[];
@@ -301,6 +302,6 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     </div>
     <small className="settings-help">Deleting the catalog does not touch your models, your scanned phones or the built-in list.</small>
     {catalogOpen && <CatalogDialog onClose={() => setCatalogOpen(false)} onChanged={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />}
-    <p className="settings-about">IMEI Lens · by CJB</p>
+    <p className="settings-about">IMEI Lens · by CJB<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
   </section></div>;
 }
