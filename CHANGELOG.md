@@ -2,6 +2,13 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.17.0 — better detection of several products in one photo
+- **Scan → Products in each photo** (Auto, 1–6). When fewer products are found than you chose, the photo is read again in overlapping, enlarged tiles (text and barcodes) and the results are merged, then split again. Photos that still come up short are counted in the finished message; ones that cannot be split are marked for review with the expected count.
+- **Automatic straightening:** every crop is levelled (tilt of about 1–15° is detected from the text lines and undone) before it is read and saved.
+- **Review → Straighten** button levels the whole photo and its crop.
+- **Camera check:** after each shot the camera says how many IMEI barcodes were readable and warns when fewer than the expected products are readable.
+- New automated test for tilt estimation, tile plans and merging.
+
 ## 1.16.0 — welcome, tutorials, steadier review
 - **First launch / new version:** a dialog shows the features and improvements once. It is also in **Settings → Help → What’s new**.
 - **Tutorials** for everything (scanning, camera, review, crop, people, unknown models, WhatsApp/Bluetooth, One by one, save and export, duplicates, settings, reset) in **Settings → Help → Tutorials**.

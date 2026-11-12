@@ -1,7 +1,7 @@
 {
   "name": "imei-photo-scanner",
   "private": true,
-  "version": "1.16.0",
+  "version": "1.17.0",
   "type": "module",
   "scripts": {
     "predev": "node scripts/write-version.mjs",
@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "laptop": "node server/index.mjs",
-    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs",
+    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs",
     "laptop:build": "npm run build && npm run laptop"
   },
   "dependencies": {

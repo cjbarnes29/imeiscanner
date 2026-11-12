@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useBackLayer } from './back-layer';
+import { readImageBarcodes } from './barcode-reader';
 
 function CameraThumbnail({file}: {file:File}) {
   const [url,setUrl]=useState('');
@@ -7,7 +8,20 @@ function CameraThumbnail({file}: {file:File}) {
   return <img src={url} alt={file.name} />;
 }
 
-export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[]) => void; onClose: () => void }) {
+/** After a shot: how many IMEI barcodes can be read in it, compared with the products you expect. */
+async function checkShot(blob: Blob, expected: number): Promise<string> {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const codes = await readImageBarcodes(bitmap, bitmap.width, bitmap.height, [0, 1600]);
+    bitmap.close();
+    const imeis = new Set(codes.map(code => code.rawValue).filter(value => /^\d{15}$/.test(value)));
+    if (!imeis.size) return 'Check: no IMEI barcode could be read in this shot. Move closer, reduce glare, or retake.';
+    if (expected > 1 && imeis.size < expected) return `Check: only ${imeis.size} IMEI barcode${imeis.size === 1 ? '' : 's'} readable, but you expect ${expected} products. Move closer, keep a gap between boxes, or retake.`;
+    return `Check: ${imeis.size} IMEI barcode${imeis.size === 1 ? '' : 's'} readable in this shot.`;
+  } catch { return ''; }
+}
+
+export function CameraCapture({ onCapture, onClose, expectedProducts = 0 }: { onCapture: (files: File[]) => void; onClose: () => void; expectedProducts?: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream>();
   const [error, setError] = useState('');
@@ -108,7 +122,7 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (files: File[
         if(!alive.current)return;
         createImageBitmap(blob).then(bitmap=>{if(alive.current)setFrameInfo(`Last photo ${bitmap.width}×${bitmap.height}`);bitmap.close();}).catch(()=>{});
         if(blob.size>20*1024*1024)throw new Error('This photo is too large. Use a lower resolution in Phone camera.');
-        if(burst===1)setPhoto(blob);
+        if(burst===1){setPhoto(blob);void checkShot(blob,expectedProducts).then(message=>{if(alive.current&&message)setBarcodeStatus(message);});}
         else {const file=new File([blob],`camera-${crypto.randomUUID()}.jpg`,{type:blob.type||'image/jpeg'});setPhotos(old=>[...old,file]);setBarcodeStatus(`Burst: ${i+1} of ${burst} saved. Review the thumbnails before scanning.`);}
         if(burst>1)await new Promise(resolve=>setTimeout(resolve,700));
       }

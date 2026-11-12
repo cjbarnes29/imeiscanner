@@ -1,5 +1,6 @@
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
+import { mergeOcrLines, straightenDataUrl, tileRects } from './multi-detect';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
 import { SAMSUNG_MODELS } from './samsung-models';
@@ -298,6 +299,34 @@ async function cameraBarcodeText(photo: string, raw: string, lines:OcrLine[] = [
 async function frameBarcodes(canvas: HTMLCanvasElement): Promise<PositionedBarcode[]> {
   // Small S/N bars only decode at some sizes on compressed photos: sweep several.
   try { return await readImageBarcodes(canvas, canvas.width, canvas.height, [0, 1200, 1400, 1600, 2000, 2600]); } catch { return []; }
+}
+
+/**
+ * Reads a photo again in overlapping, enlarged tiles. Used when the whole-photo read finds fewer products than
+ * the person said are in the photo: small labels at the edges are read at a useful size this way.
+ */
+async function tiledRead(worker: Awaited<ReturnType<typeof createWorker>>, color: HTMLCanvasElement, products: number): Promise<{ lines: OcrLine[]; codes: PositionedBarcode[] }> {
+  let lines: OcrLine[] = [];
+  const codes: PositionedBarcode[] = [];
+  for (const tile of tileRects(color.width, color.height, products)) {
+    const scale = Math.min(2.5, 1800 / Math.max(tile.width, tile.height));
+    const width = Math.max(1, Math.round(tile.width * scale)), height = Math.max(1, Math.round(tile.height * scale));
+    const plain = document.createElement('canvas'); plain.width = width; plain.height = height;
+    const context = plain.getContext('2d')!;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(color, tile.x, tile.y, tile.width, tile.height, 0, 0, width, height);
+    const enhanced = document.createElement('canvas'); enhanced.width = width; enhanced.height = height;
+    const ec = enhanced.getContext('2d')!; ec.filter = 'grayscale(1) contrast(1.45)'; ec.drawImage(plain, 0, 0);
+    try {
+      const read = ocrLines((await worker.recognize(enhanced)).data).map(line => ({ ...line, bbox: { x0: tile.x + line.bbox.x0 / scale, x1: tile.x + line.bbox.x1 / scale, y0: tile.y + line.bbox.y0 / scale, y1: tile.y + line.bbox.y1 / scale } }));
+      lines = mergeOcrLines(lines, read);
+    } catch (error) { console.warn('A tile could not be read', error); }
+    for (const code of await readImageBarcodes(plain, width, height, [0, 1600])) {
+      if (!code.boundingBox || codes.some(known => known.rawValue === code.rawValue)) continue;
+      codes.push({ rawValue: code.rawValue, boundingBox: { x: tile.x + code.boundingBox.x / scale, y: tile.y + code.boundingBox.y / scale, width: code.boundingBox.width / scale, height: code.boundingBox.height / scale } });
+    }
+  }
+  return { lines, codes };
 }
 
 function extractPreferredImei(text: string) {
@@ -654,7 +683,9 @@ async function createCroppedPhotos(image: HTMLCanvasElement | string, regions: C
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Could not create the separated photos.');
     context.drawImage(source, x, y, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
-    result.set(region.imei, canvas.toDataURL('image/jpeg', 0.9));
+    const cut = canvas.toDataURL('image/jpeg', 0.9);
+    // Tilted label? Level it so the text reads straight (and the second read is more accurate).
+    result.set(region.imei, (await straightenDataUrl(cut)).dataUrl);
   }
   return result;
 }
@@ -1664,6 +1695,7 @@ export default function App() {
   const [stoppingScan, setStoppingScan] = useState(false);
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
+  const [expectedProducts, setExpectedProducts] = useState(0);
   const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
   const [laptopUrl, setLaptopUrl] = useState(() => hostedScanner ? window.location.origin : localStorage.getItem('imei-lens-laptop-url') || (window.location.hostname === 'cjbarnes29.github.io' ? 'http://127.0.0.1:8787' : window.location.origin));
   const [laptopKey, setLaptopKey] = useState(() => localStorage.getItem('imei-lens-laptop-key') || '');
@@ -3197,6 +3229,7 @@ export default function App() {
       let failedFiles = 0;
       let lastFailure = '';
       let skippedImeis = 0;
+      let shortPhotos = 0;
       let skippedSerials = 0;
       const seenSerials = new Set<string>();
       const seenImeis = new Set<string>();
@@ -3289,6 +3322,21 @@ export default function App() {
           const barcodeLines = labelledBarcodeLines(fullPhotoCodes, lines);
           if (barcodeLines.length) { lines = [...lines, ...barcodeLines]; raw += '\n' + barcodeLines.map(line => line.text).join('\n'); }
         }
+        // The person said there are several products but fewer were found: look closer, tile by tile.
+        let shortOfExpected = false;
+        if (expectedProducts > 1 && scanMode !== 'fast') {
+          const known = deviceAnchors(lines, sourceWidth, sourceHeight, color.getContext('2d')?.getImageData(0, 0, sourceWidth, sourceHeight)).length;
+          if (known < expectedProducts) {
+            setProgress(`Looking closer for ${expectedProducts} products: ${file.name}`);
+            const before = lines.length;
+            const more = await tiledRead(worker, color, expectedProducts);
+            lines = mergeOcrLines(lines, more.lines);
+            for (const code of more.codes) if (!fullPhotoCodes.some(known => known.rawValue === code.rawValue)) fullPhotoCodes = [...fullPhotoCodes, code];
+            lines = mergeOcrLines(lines, labelledBarcodeLines(fullPhotoCodes, lines));
+            if (lines.length > before) raw += '\n' + lines.slice(before).map(line => line.text).join('\n');
+            imeis = extractImei1s(raw);
+          }
+        }
         const mostlyWhite = looksMostlyWhite(color);
         const codesInside = (region?: { x: number; y: number; width: number; height: number }) => fullPhotoCodes.filter(code => { const b = code.boundingBox; if (!b) return false; if (!region) return true; const cx = b.x + b.width / 2, cy = b.y + b.height / 2; return cx >= region.x && cx <= region.x + region.width && cy >= region.y && cy <= region.y + region.height; }).map(code => code.rawValue);
         let anchors=deviceAnchors(lines,sourceWidth,sourceHeight);
@@ -3298,7 +3346,8 @@ export default function App() {
         const regions=planDeviceCrops(anchors,lines,sourceWidth,sourceHeight,frame);
         let croppedPhotos=new Map<string,string>();
         if(regions.length>1){try{croppedPhotos=await createCroppedPhotos(color,regions,sourceWidth,sourceHeight);}catch(error){console.error('Unable to split labels',error);}}
-        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&multiText);
+        if (expectedProducts > 1 && regions.length > 1 && regions.length < expectedProducts) shortPhotos++;
+        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&(multiText||expectedProducts>1));
         const cropKeys=croppedPhotos.size?[...croppedPhotos.keys()]:[''];
 
         const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
@@ -3355,7 +3404,7 @@ export default function App() {
           // A crop whose IMEI is barcode-confirmed is trusted even if a box edge was unclear.
           cropNeedsReview: cropNeedsReview || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
           imei2: recordImeiPair({ imei, raw: cropRaw } as RecordItem).imei2,
-          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length), deviceImeis: found }; })() : {}),
+          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length, expectedProducts), deviceImeis: found }; })() : {}),
           model,
           ...serialReading(cropRaw),
           imei,
@@ -3409,7 +3458,7 @@ export default function App() {
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
         : '';
 
-      setToast(`${failedFiles ? `${failedFiles} photo(s) could not be read${lastFailure ? ` (${lastFailure.slice(0, 120)})` : ''}. ` : ''}${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${skippedSerials ? ` Removed ${skippedSerials} repeated serial row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
+      setToast(`${failedFiles ? `${failedFiles} photo(s) could not be read${lastFailure ? ` (${lastFailure.slice(0, 120)})` : ''}. ` : ''}${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${shortPhotos ? ` ${shortPhotos} photo(s) showed fewer than ${expectedProducts} products: check them or retake closer.` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${skippedSerials ? ` Removed ${skippedSerials} repeated serial row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {
       console.error(e);
       if(capturedFiles)setFiles(old=>[...old,...capturedFiles]);
@@ -3548,6 +3597,28 @@ export default function App() {
     }
   }
 
+  /** Level the picture (and its crop) when the text runs at a slant. */
+  async function straightenSelectedPhoto() {
+    if (!selected || rotatingPhoto || adjustingCrop) return;
+    setRotatingPhoto(true);
+    try {
+      const [whole, crop] = await Promise.all([
+        straightenDataUrl(reviewSource || selected.dataUrl, 0.95),
+        selected.cropDataUrl ? straightenDataUrl(selected.cropDataUrl, 0.95) : Promise.resolve(undefined)
+      ]);
+      if (!whole.angle && !crop?.angle) { setToast('This picture already looks level.'); return; }
+      const patch = { dataUrl: whole.dataUrl, cropDataUrl: crop?.dataUrl, originalDataUrl: whole.dataUrl, focus: undefined };
+      setRecords(old => old.map(r => r.id === selected.id ? { ...r, ...patch } : r));
+      setSelected({ ...selected, ...patch });
+      setReviewSource(whole.dataUrl);
+      setReviewSplit(null);
+      setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
+      setToast(`Straightened by about ${Math.abs(Math.round(crop?.angle || whole.angle))}°.`);
+    } catch (error) {
+      console.error(error);
+      setToast('Could not straighten the photo.');
+    } finally { setRotatingPhoto(false); }
+  }
   async function rotateSelectedPhoto(direction: 'left' | 'right') {
     if (!selected || rotatingPhoto || adjustingCrop) return;
     setRotatingPhoto(true);
@@ -4045,7 +4116,7 @@ export default function App() {
           <button type="button" className="subtle-btn danger" onClick={resetEverything}>Delete everything</button>
         </div>
       </section></div>}
-      {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
+      {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}`}>
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
 {!simpleView && mainView === 'scan' && (<>
@@ -4202,6 +4273,14 @@ export default function App() {
                 <option value="detailed">Detailed · multiple boxes or difficult labels</option>
               </select>
             </label>
+            <label className="export-format-picker">
+              <span>Products in each photo</span>
+              <select value={expectedProducts} disabled={busy} onChange={event => setExpectedProducts(Number(event.target.value))}>
+                <option value={0}>Auto · find them myself</option>
+                {[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
+              </select>
+            </label>
+            {expectedProducts > 1 && <p className="scan-mode-note">If fewer than {expectedProducts} are found the first time, the app reads the photo again in enlarged pieces to find the rest, then straightens each crop. Photos that still cannot be split are marked for review.</p>}
             <p className="scan-mode-note">
               {scanMode === 'fast' ? 'One OCR pass per photo. Review missed or unclear IMEIs manually.' :
                 scanMode === 'standard' ? 'Runs another pass only when the first result needs it.' :
@@ -4846,6 +4925,7 @@ export default function App() {
                 <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
                 <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶</button>
                 <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷</button>
+                <button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
               </div>
 {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !reviewSplit && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices: crop each</button></div></div>}{selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && !reviewSplit && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}<div className="review-save-bar" role="group" aria-label="Save this record">
               <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
