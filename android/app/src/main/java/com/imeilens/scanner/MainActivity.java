@@ -435,7 +435,9 @@ public final class MainActivity extends Activity {
 
         @JavascriptInterface public String beginFile(String filename) {
             synchronized (MainActivity.this) {
-                if (stagingExport != null || pendingExport != null) return "";
+                if (pendingExport != null) return "";
+                // A new save replaces one that was started and never finished (closed screen, slow phone).
+                if (stagingExport != null) { stagingExport.delete(); stagingExport = null; stagingToken = null; }
                 try {
                     stagingExport = File.createTempFile("imei-export-", ".bin", getCacheDir());
                     stagingToken = UUID.randomUUID().toString();
@@ -483,7 +485,9 @@ public final class MainActivity extends Activity {
 
         @JavascriptInterface public String beginFolder(String folderName) {
             synchronized (MainActivity.this) {
-                if (stagingFolder != null || pendingFolder != null) return "";
+                if (pendingFolder != null) return "";
+                // A new save or share replaces one that was started and never finished.
+                if (stagingFolder != null) { deleteFolder(stagingFolder); stagingFolder = null; stagingFolderToken = null; stagingFolderName = null; }
                 File folder = new File(getCacheDir(), "imei-folder-" + UUID.randomUUID());
                 if (!folder.mkdirs()) return "";
                 stagingFolder = folder;
@@ -554,7 +558,13 @@ public final class MainActivity extends Activity {
                 ArrayList<Uri> uris = new ArrayList<>();
                 for (File file : files) uris.add(androidx.core.content.FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", file));
                 Intent send = new Intent(Intent.ACTION_SEND_MULTIPLE);
-                send.setType("*/*");
+                // Pictures only: say so. WhatsApp and Gallery handle image/* better than */*.
+                boolean allImages = true;
+                for (File file : files) {
+                    String lower = file.getName().toLowerCase(java.util.Locale.ROOT);
+                    if (!(lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp"))) allImages = false;
+                }
+                send.setType(allImages ? "image/*" : "*/*");
                 send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
                 ClipData clip = ClipData.newRawUri("", uris.get(0));
                 for (int index = 1; index < uris.size(); index++) clip.addItem(new ClipData.Item(uris.get(index)));
