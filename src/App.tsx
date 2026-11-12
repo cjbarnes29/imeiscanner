@@ -1,6 +1,6 @@
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
-import { mergeOcrLines, straightenDataUrl, tileRects } from './multi-detect';
+import { countModelLabels, mergeOcrLines, needsOrientationCheck, shouldTurn, skewOfCanvas, straightenCanvas, straightenDataUrl, tileRects } from './multi-detect';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
 import { SAMSUNG_MODELS } from './samsung-models';
@@ -3276,7 +3276,8 @@ export default function App() {
         }
         // Nothing label-like read: the photo may be upside down, sideways or mirrored. Read a
         // smaller copy each way and, if one clearly reads as a label, scan that copy instead.
-        if (scanMode !== 'fast' && labelTextScore(enhancedResult.data.text || '') === 0) {
+        const currentScore = labelTextScore(enhancedResult.data.text || '');
+        if (scanMode !== 'fast' && needsOrientationCheck(currentScore)) {
           setProgress(`Checking photo orientation: ${file.name}`);
           let best: { score: number; file?: File } = { score: 0 };
           for (const turn of ORIENTATIONS) {
@@ -3286,12 +3287,28 @@ export default function App() {
             if (score > best.score) best = { score, file: turned };
             if (score >= 4) break;
           }
-          if (best.file && best.score >= 2) {
+          if (best.file && shouldTurn(currentScore, best.score)) {
             file = best.file;
             ({ color, enhanced: ocrImage } = await createScanImages(file, scanSize));
             dataUrl = color.toDataURL('image/jpeg', 0.9);
             enhancedResult = await worker.recognize(ocrImage);
           }
+        }
+        // A tilted photo makes the products hard to separate: level the whole picture first (about 2.5° or more).
+        if (scanMode !== 'fast' && !invertedRead) {
+          try {
+            const tilt = skewOfCanvas(color);
+            if (Math.abs(tilt.angle) >= 2.5 && tilt.gain >= 1.08) {
+              const levelled = straightenCanvas(color, tilt.angle);
+              const blob = await new Promise<Blob | null>(resolve => levelled.toBlob(resolve, 'image/jpeg', 0.92));
+              if (blob) {
+                file = new File([blob], file.name, { type: 'image/jpeg' });
+                ({ color, enhanced: ocrImage } = await createScanImages(file, scanSize));
+                dataUrl = color.toDataURL('image/jpeg', 0.9);
+                enhancedResult = await worker.recognize(ocrImage);
+              }
+            }
+          } catch (error) { console.warn('Could not level the photo', error); }
         }
         let raw = enhancedResult.data.text || '';
         let imeis = extractImei1s(raw);
@@ -3323,13 +3340,13 @@ export default function App() {
           if (barcodeLines.length) { lines = [...lines, ...barcodeLines]; raw += '\n' + barcodeLines.map(line => line.text).join('\n'); }
         }
         // The person said there are several products but fewer were found: look closer, tile by tile.
-        let shortOfExpected = false;
-        if (expectedProducts > 1 && scanMode !== 'fast') {
+        const targetProducts = Math.min(6, expectedProducts || countModelLabels(lines));
+        if (targetProducts > 1 && scanMode !== 'fast') {
           const known = deviceAnchors(lines, sourceWidth, sourceHeight, color.getContext('2d')?.getImageData(0, 0, sourceWidth, sourceHeight)).length;
-          if (known < expectedProducts) {
-            setProgress(`Looking closer for ${expectedProducts} products: ${file.name}`);
+          if (known < targetProducts) {
+            setProgress(`Looking closer for ${targetProducts} products: ${file.name}`);
             const before = lines.length;
-            const more = await tiledRead(worker, color, expectedProducts);
+            const more = await tiledRead(worker, color, targetProducts);
             lines = mergeOcrLines(lines, more.lines);
             for (const code of more.codes) if (!fullPhotoCodes.some(known => known.rawValue === code.rawValue)) fullPhotoCodes = [...fullPhotoCodes, code];
             lines = mergeOcrLines(lines, labelledBarcodeLines(fullPhotoCodes, lines));

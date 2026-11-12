@@ -105,3 +105,34 @@ export function mergeOcrLines(base: OcrLine[], extra: OcrLine[]): OcrLine[] {
   }
   return merged;
 }
+
+/** Turn the photo only when another angle reads clearly better than the current one (a weak read of junk must not block the check). */
+export function shouldTurn(currentScore: number, bestScore: number): boolean {
+  return bestScore >= 2 && bestScore >= currentScore + 2;
+}
+/** The photo needs an orientation check unless the current read already looks like a label (several label words / numbers found). */
+export function needsOrientationCheck(score: number): boolean { return score < 4; }
+
+/** Products visible in a photo, guessed from the "Model : SM-…" lines (one per label); lines at the same height count once. */
+export function countModelLabels(lines: OcrLine[]): number {
+  const found: number[] = [], xs: number[] = [];
+  for (const line of lines) {
+    if (!/m[o0]del\s*[:;.]?\s*s\s*m/i.test(line.text) || !line.bbox) continue;
+    const y = (line.bbox.y0 + line.bbox.y1) / 2, h = Math.max(1, line.bbox.y1 - line.bbox.y0);
+    const x = (line.bbox.x0 + line.bbox.x1) / 2;
+    if (!found.some((_, i) => Math.abs(found[i] - y) < h * 1.5 && Math.abs(xs[i] - x) < h * 6)) { found.push(y); xs.push(x); }
+  }
+  return found.length;
+}
+
+/** Tilt of a whole canvas (degrees, positive: text runs downward to the right) and how sure the estimate is. */
+export function skewOfCanvas(canvas: HTMLCanvasElement): { angle: number; gain: number } {
+  const scale = Math.min(1, 480 / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * scale)), h = Math.max(1, Math.round(canvas.height * scale));
+  const small = document.createElement('canvas'); small.width = w; small.height = h;
+  const context = small.getContext('2d', { willReadFrequently: true })!;
+  context.drawImage(canvas, 0, 0, w, h);
+  const pixels = context.getImageData(0, 0, w, h).data, gray = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) gray[i] = (pixels[i * 4] * 0.299 + pixels[i * 4 + 1] * 0.587 + pixels[i * 4 + 2] * 0.114) | 0;
+  return estimateSkewFromGray(gray, w, h);
+}

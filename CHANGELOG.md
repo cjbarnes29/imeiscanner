@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.17.1 — sideways and tilted multi-product photos
+- **Orientation check** now runs whenever the first read is weak (not only when nothing is read) and turns the photo only when another angle clearly reads better. Sideways photos with stray digits are no longer left sideways.
+- **The whole photo is levelled** (tilt of about 2.5° or more) before the products are located, not only the crops afterwards.
+- **Automatic product count:** with *Products in each photo* on Auto, the number of “Model : SM-…” lines is used as the expected count, so photos with several labels are re-read in enlarged tiles.
+- Measuring scripts for real photos in `test-photos` (`scripts/eval-multi-*.mjs`, not part of `npm test`); more tests for the new decisions.
+
 ## 1.17.0 — better detection of several products in one photo
 - **Scan → Products in each photo** (Auto, 1–6). When fewer products are found than you chose, the photo is read again in overlapping, enlarged tiles (text and barcodes) and the results are merged, then split again. Photos that still come up short are counted in the finished message; ones that cannot be split are marked for review with the expected count.
 - **Automatic straightening:** every crop is levelled (tilt of about 1–15° is detected from the text lines and undone) before it is read and saved.

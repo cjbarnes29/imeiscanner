@@ -29,4 +29,12 @@ for(const t of [...t4,...t2])assert.ok(t.x>=0&&t.y>=0&&t.x+t.width<=4000&&t.y+t.
 const L=(text,x0,y0)=>({text,bbox:{x0,y0,x1:x0+300,y1:y0+30}});
 const merged=m.mergeOcrLines([L('IMEI 1: 351555818871475',100,100)],[L('IMEI 1: 351555818871475',102,101),L('IMEI 1: 352099001761002',100,700)]);
 assert.equal(merged.length,2,'repeat dropped, new line kept');
+// Orientation decisions and product counting
+assert.equal(m.shouldTurn(0,4),true,'a sideways photo reads nothing: turn it');
+assert.equal(m.shouldTurn(2,3),false,'a small difference does not justify turning');
+assert.equal(m.shouldTurn(2,2),false);
+assert.equal(m.needsOrientationCheck(2),true,'weak read of junk is still checked');
+assert.equal(m.needsOrientationCheck(8),false,'a clear read is not turned');
+const M=(t,x,y)=>({text:t,bbox:{x0:x,y0:y,x1:x+300,y1:y+40}});
+assert.equal(m.countModelLabels([M('Model : SM-A165F/DS',50,50),M('Model : SM-A165F/DS',52,52),M('Model : SM-A165F/DS',50,900),M('SM-A165FZADMEA',50,130)]),2,'two labels (repeat of the same line counts once)');
 console.log('PASS: tilt estimation (0, 6, -9, 12 degrees), blank picture, overlapping tile plans for 2-6 products, merging repeated lines from tiles.');
