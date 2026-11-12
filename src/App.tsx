@@ -2051,7 +2051,8 @@ export default function App() {
       }),
     })),
   });
-  const WHATSAPP_GROUP = 30;
+  const WHATSAPP_NOTICE = 30;
+  const [waStart, setWaStart] = useState(WHATSAPP_NOTICE + 1);
   /** A person's phones as share-text input: grouped by model, with the labels used everywhere else. */
   function sectionForRows(name: string, rows: RecordItem[]) {
     const items = new Map<string, { label: string; count: number; ids: string[] }>();
@@ -2119,6 +2120,7 @@ export default function App() {
   function startWhatsApp(section: { id: string; name: string }) {
     const rows = idsOfSection(section.id).map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row);
     if (!rows.length) return;
+    setWaStart(WHATSAPP_NOTICE + 1);
     setWaSend({ name: section.name, rows });
   }
   const shareSections = [
@@ -3420,7 +3422,7 @@ export default function App() {
   const currentShareText=currentShareRow?shareNumberText({imei:currentShareRow.imei,serial:recordSerial(currentShareRow)},shareMode):'';
   function openSharing(ids:string[]){setShareIds(ids);setShareIndex(0);setShareStep('picture');setShareStatus('');setShareOneByOne(false);}
   const bulkShare=shareRows.length>1&&!shareOneByOne;
-  const SHARE_BATCH=30;
+  const SHARE_BATCH=100000;
   const shareBatches=Array.from({length:Math.ceil(shareRows.length/SHARE_BATCH)},(_,i)=>shareRows.slice(i*SHARE_BATCH,(i+1)*SHARE_BATCH));
   /** One message with every number, numbered in the same order as the pictures. */
   const bulkShareText=shareRows.map((row,index)=>{
@@ -4396,7 +4398,7 @@ export default function App() {
        <div className="modal-head"><h2>{shareIds.length>1?`Share ${shareIds.length} records`:"Share record"}</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
        <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI (or serial if no IMEI)</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
        {bulkShare?<div className="share-bulk">
-        <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
+        <p><strong>{shareRows.length} records.</strong> Step 1: share all the pictures to the same chat.{shareRows.length>30&&' WhatsApp may take only about 30 at once. If some are missing, use Download all pictures and attach the rest.'} Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
         <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
         <strong>Step 1 · Pictures</strong>
         <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareBulk('pictures',index)}>Share pictures {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length}</button>)}</div>
@@ -4470,10 +4472,17 @@ export default function App() {
         <div className="modal-head"><h2>Send {waSend.name}</h2><button className="subtle-btn" onClick={() => setWaSend(null)}>Close</button></div>
         <p>{waSend.rows.length} phones. Step 1 sends all the pictures in one send, with no text under them. Step 2 sends the IMEI and serial numbers once, as one message, in the same order as the pictures. Choose the same chat both times.</p>
         <div className="delete-person-choices">
-          {Array.from({ length: Math.ceil(waSend.rows.length / WHATSAPP_GROUP) }, (_, index) => {
-            const batch = waSend.rows.slice(index * WHATSAPP_GROUP, (index + 1) * WHATSAPP_GROUP);
-            return <button key={index} className="primary whatsapp-btn" onClick={() => sendGroup(waSend.name, batch, null)}>Step 1 · {waSend.rows.length > WHATSAPP_GROUP ? `Send pictures ${index * WHATSAPP_GROUP + 1}–${index * WHATSAPP_GROUP + batch.length}` : `Send all ${batch.length} pictures`}<small>One send, no text under the pictures</small></button>;
-          })}
+          <button type="button" className="primary whatsapp-btn" onClick={() => sendGroup(waSend.name, waSend.rows, null)}>Step 1 · Send all {waSend.rows.length} pictures<small>One send, no text under the pictures</small></button>
+        </div>
+        {waSend.rows.length > WHATSAPP_NOTICE && <div className="wa-warning" role="note">
+          <strong>Heads up: {waSend.rows.length} pictures.</strong>
+          <p>WhatsApp may accept only about {WHATSAPP_NOTICE} pictures in one send. Check the chat after Step 1. If some are missing, choose the first missing picture below and tap Continue.</p>
+          <div className="wa-continue">
+            <label>Continue from picture <input type="number" inputMode="numeric" min={2} max={waSend.rows.length} value={waStart} onChange={event => setWaStart(Math.max(2, Math.min(waSend.rows.length, Math.floor(Number(event.target.value)) || 2)))} /></label>
+            <button type="button" className="subtle-btn" onClick={() => sendGroup(waSend.name, waSend.rows.slice(waStart - 1), null)}>Continue · send pictures {waStart}–{waSend.rows.length}</button>
+          </div>
+        </div>}
+        <div className="delete-person-choices">
         </div>
         <div className="delete-person-choices">
           <button type="button" className="primary whatsapp-btn" onClick={() => openWhatsApp(waNumbersText(waSend.rows))}>Step 2 · Send the numbers once<small>IMEI{shareSerial ? ' and serial' : ''} numbers, one per line</small></button>

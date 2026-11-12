@@ -420,3 +420,9 @@ body{touch-action:pan-y pinch-zoom}
 .review-save-bar{position:sticky;bottom:0;z-index:4;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px -4px 0;padding:10px 4px calc(10px + env(safe-area-inset-bottom,0px));background:#101b2b;border-top:1px solid #30465d}
 .review-save-bar button{min-height:48px;padding:0 18px}
 .review-save-state{margin-left:auto;font-size:12px;color:#9aa9bc}
+.wa-warning{margin:10px 0;padding:12px 14px;border:1px solid #8a6d1f;border-radius:10px;background:#2a2410;color:#f3dd9a}
+.wa-warning p{margin:6px 0 10px;color:#e6d49a;line-height:1.5;font-size:14px}
+.wa-continue{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.wa-continue label{display:flex;gap:8px;align-items:center;font-size:14px}
+.wa-continue input{width:80px;min-height:44px;background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 10px;font:inherit}
+.wa-continue button{min-height:46px;flex:1 1 200px}
