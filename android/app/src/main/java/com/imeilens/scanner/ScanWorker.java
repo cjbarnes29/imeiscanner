@@ -42,7 +42,7 @@ public final class ScanWorker extends Worker {
         return value.toString();
     }
 
-    private ForegroundInfo foreground(int completed, int total) {
+    private ForegroundInfo foreground(int completed, int total, String detail) {
         Context context = getApplicationContext();
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(new NotificationChannel(CHANNEL, "IMEI scans", NotificationManager.IMPORTANCE_LOW));
@@ -51,7 +51,7 @@ public final class ScanWorker extends Worker {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle("IMEI Lens is scanning")
-            .setContentText(completed + " of " + total + " photos")
+            .setContentText(completed + " of " + total + " photos · " + detail)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setProgress(total, completed, false)
@@ -61,13 +61,13 @@ public final class ScanWorker extends Worker {
     }
 
     @NonNull @Override public Result doWork() {
-        Context context = getApplicationContext();
+        final Context context = getApplicationContext();
         JSONObject job = ScanStore.read(context);
         JSONArray queue = job.optJSONArray("queue");
         if (queue == null || queue.length() == 0) return Result.success();
         int completed = job.optInt("completed", 0);
         int failed = job.optInt("failed", 0);
-        HashSet<String> seenPhotos = new HashSet<>();
+        final java.util.Set<String> seenPhotos = java.util.concurrent.ConcurrentHashMap.newKeySet();
         HashSet<String> seenImeis = new HashSet<>();
         JSONArray existingRecords = job.optJSONArray("records");
         if (existingRecords != null) for (int index = 0; index < existingRecords.length(); index++) {
@@ -79,43 +79,96 @@ public final class ScanWorker extends Worker {
             if (previous != null) try { seenPhotos.add(photoFingerprint(Uri.parse(previous.getString("uri")))); }
             catch (Exception ignored) { /* A previous photo may no longer be accessible. */ }
         }
+        final DeviceProfile profile = DeviceProfile.detect(context);
+        final int maxWorkers = profile.maxWorkers;
+        final String personId = job.optString("personId", "person-1");
+        final java.util.concurrent.atomic.AtomicInteger maxEdge = new java.util.concurrent.atomic.AtomicInteger(profile.maxEdge);
+        // The pool can grow up to maxWorkers; permits decide how many are actually running.
+        final java.util.concurrent.Semaphore permits = new java.util.concurrent.Semaphore(profile.startWorkers);
+        final java.util.concurrent.BlockingQueue<TextRecognizer> recognizers = new java.util.concurrent.ArrayBlockingQueue<>(maxWorkers);
+        final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(maxWorkers);
+        final java.util.Map<Integer, java.util.concurrent.Future<JSONArray>> futures = new java.util.HashMap<>();
+        final boolean adaptive = "auto".equals(profile.mode);
+        int next = completed, active = profile.startWorkers, peak = active;
+        boolean growing = adaptive && maxWorkers > active;
+        long started = android.os.SystemClock.elapsedRealtime();
+        long windowStart = started;
+        int windowDone = 0;
+        double lastRate = 0;
         try {
-            setForegroundAsync(foreground(completed, queue.length())).get();
+            setForegroundAsync(foreground(completed, queue.length(), profile.label)).get();
             ScanStore.update(context, completed, failed, new JSONArray());
-            TextRecognizer recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
-            try {
-                for (int index = completed; index < queue.length(); index++) {
-                    if (isStopped() || "stopped".equals(ScanStore.read(context).optString("status"))) return Result.success();
-                    JSONObject photo = queue.optJSONObject(index);
-                    JSONArray additions = new JSONArray();
-                    try {
-                        Uri uri = Uri.parse(photo.getString("uri"));
-                        if (seenPhotos.add(photoFingerprint(uri)))
-                            additions = ImageScanner.scan(context, uri,
-                                photo.optString("name", "Phone photo.jpg"), job.optString("personId", "person-1"), recognizer);
-                        JSONArray unique = new JSONArray();
-                        for (int rowIndex = 0; rowIndex < additions.length(); rowIndex++) {
-                            JSONObject row = additions.optJSONObject(rowIndex);
-                            if (row == null) continue;
-                            String imei = row.optString("imei");
-                            if (imei.matches("[0-9]{15}") && !seenImeis.add(imei)) {
-                                ScanStore.image(context, row.optString("id")).delete();
-                                continue;
-                            }
-                            unique.put(row);
-                        }
-                        additions = unique;
-                    } catch (Exception error) { failed++; }
-                    if (isStopped() || "stopped".equals(ScanStore.read(context).optString("status"))) return Result.success();
-                    ScanStore.update(context, index + 1, failed, additions);
-                    setForegroundAsync(foreground(index + 1, queue.length())).get();
+            for (int slot = 0; slot < maxWorkers; slot++) recognizers.add(TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS));
+            for (int index = completed; index < queue.length(); index++) {
+                // Keep a few photos decoding/reading ahead; results are still saved in order.
+                while (next < queue.length() && next < index + maxWorkers * 2) {
+                    final JSONObject photo = queue.optJSONObject(next);
+                    futures.put(next, pool.submit(() -> {
+                        permits.acquire();
+                        try {
+                            TextRecognizer recognizer = recognizers.take();
+                            try {
+                                Uri uri = Uri.parse(photo.getString("uri"));
+                                if (!seenPhotos.add(photoFingerprint(uri))) return new JSONArray();
+                                String name = photo.optString("name", "Phone photo.jpg");
+                                try { return ImageScanner.scan(context, uri, name, personId, recognizer, maxEdge.get()); }
+                                catch (OutOfMemoryError tooBig) {
+                                    maxEdge.set(1600); // Out of memory: shrink for every worker and retry once.
+                                    return ImageScanner.scan(context, uri, name, personId, recognizer, 1600);
+                                }
+                            } finally { recognizers.put(recognizer); }
+                        } finally { permits.release(); }
+                    }));
+                    next++;
                 }
-            } finally { recognizer.close(); }
+                if (isStopped() || ScanStore.isStopped(context)) return Result.success();
+                JSONArray additions = new JSONArray();
+                try { additions = futures.remove(index).get(); }
+                catch (Exception error) { failed++; additions = new JSONArray(); }
+                JSONArray unique = new JSONArray();
+                for (int rowIndex = 0; rowIndex < additions.length(); rowIndex++) {
+                    JSONObject row = additions.optJSONObject(rowIndex);
+                    if (row == null) continue;
+                    String imei = row.optString("imei");
+                    if (imei.matches("[0-9]{15}") && !seenImeis.add(imei)) {
+                        ScanStore.image(context, row.optString("id")).delete();
+                        continue;
+                    }
+                    unique.put(row);
+                }
+                if (isStopped() || ScanStore.isStopped(context)) return Result.success();
+                ScanStore.update(context, index + 1, failed, unique);
+
+                // Adapt: back off when the phone is hot or low on memory, grow while it keeps up.
+                windowDone++;
+                if (active > 1 && (DeviceProfile.isHot(context) || maxEdge.get() < profile.maxEdge) && permits.tryAcquire()) { active--; growing = false; }
+                else if (windowDone >= 6) {
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    double rate = windowDone * 60000.0 / Math.max(1, now - windowStart);
+                    if (growing) {
+                        if (lastRate > 0 && rate < lastRate * 1.1) growing = false; // The last extra worker did not help.
+                        else if (active < maxWorkers && !DeviceProfile.isHot(context) && DeviceProfile.hasMemoryRoom(context)) {
+                            permits.release(); active++; peak = Math.max(peak, active);
+                        } else growing = false;
+                    }
+                    lastRate = rate; windowStart = now; windowDone = 0;
+                }
+                long seconds = Math.max(1, (android.os.SystemClock.elapsedRealtime() - started) / 1000);
+                int perMinute = (int) ((index + 1 - completed) * 60L / seconds);
+                setForegroundAsync(foreground(index + 1, queue.length(), profile.label + " · " + active + " at once · " + perMinute + "/min")).get();
+            }
+            long seconds = Math.max(1, (android.os.SystemClock.elapsedRealtime() - started) / 1000);
+            DeviceProfile.rememberRun(context, (int) ((queue.length() - completed) * 60L / seconds), peak, profile.label);
             ScanStore.finish(context, "completed", "");
             return Result.success();
         } catch (Exception error) {
             ScanStore.finish(context, "queued", "Scan paused; Android will retry it.");
             return Result.retry();
+        } finally {
+            pool.shutdownNow();
+            ScanStore.flush(context);
+            TextRecognizer recognizer;
+            while ((recognizer = recognizers.poll()) != null) recognizer.close();
         }
     }
 }

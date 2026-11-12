@@ -21,7 +21,7 @@ import { loadInventory, saveInventory, saveOriginalSource } from './record-store
 import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
 import { SettingsPanel } from './SettingsPanel';
-import { readCustomModels, type CustomModels } from './custom-models';
+import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
 type RecordItem = {
   id: string;
@@ -35,6 +35,8 @@ type RecordItem = {
   originalDataUrl?: string;
   cropDataUrl?: string;
   cropNeedsReview?: boolean;
+  /** Where the label text is in the photo (fractions of its size). The review screen opens zoomed on it. */
+  focus?: { x: number; y: number; w: number; h: number };
   model: string;
   imei: string;
   /** Second IMEI on dual-SIM labels. Undefined on records saved before this field existed. */
@@ -72,9 +74,32 @@ type AndroidBridge = {
   appendFolderFile?(token: string, filename: string, base64: string): boolean;
   finishFolder?(token: string): boolean;
   abortFolder?(token: string): void;
+  // Android share menu (APK 1.7+): send the staged files through Bluetooth, Quick Share, WhatsApp and so on.
+  shareFolder?(token: string, title: string): boolean;
+  // Delete every saved scan result and cropped photo kept by the Android app (APK 1.8+).
+  resetScans?(): boolean;
 };
 const androidBridge = (window as Window & { AndroidScanner?: AndroidBridge }).AndroidScanner;
-const NATIVE_IMPORTED_STORE = 'imei-lens-native-imported-v1';
+/** Cuts the label area out of a photo for the review preview. Resolves to '' if it cannot be done. */
+function cropToFocus(dataUrl: string, focus: { x: number; y: number; w: number; h: number }): Promise<string> {
+  return new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const sx = Math.round(focus.x * image.naturalWidth), sy = Math.round(focus.y * image.naturalHeight);
+        const sw = Math.max(1, Math.round(focus.w * image.naturalWidth)), sh = Math.max(1, Math.round(focus.h * image.naturalHeight));
+        const scale = Math.min(1, 1600 / Math.max(sw, sh));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(sw * scale)); canvas.height = Math.max(1, Math.round(sh * scale));
+        canvas.getContext('2d')!.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      } catch { resolve(''); }
+    };
+    image.onerror = () => resolve('');
+    image.src = dataUrl;
+  });
+}
+const NATIVE_IMPORTED_STORE ='imei-lens-native-imported-v1';
 function readNativeImportedIds(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(NATIVE_IMPORTED_STORE) || '[]') as string[]); }
   catch { return new Set(); }
@@ -1482,10 +1507,10 @@ export default function App() {
   useEffect(() => { localStorage.setItem('imei-collapsed-panels', JSON.stringify(collapsedPanels)); }, [collapsedPanels]);
   function togglePanel(id: string) { setCollapsedPanels(old => old.includes(id) ? old.filter(key => key !== id) : [...old, id]); }
   /** Stat cards and tabs: open a tab (and optionally a filter), then scroll to the records. */
-  function jumpTo(tab: 'records' | 'models' | 'share', nextFilter?: string) {
+  function jumpTo(tab: 'records' | 'models' | 'share' | 'unknown', nextFilter?: string, nextPerson = 'All') {
     setMainView('results');
     setRecordsTab(tab);
-    if (nextFilter) { setFilter(nextFilter); setQuery(''); setPersonFilter('All'); setRecordPage(1); }
+    if (nextFilter) { setFilter(nextFilter); setQuery(''); setPersonFilter(nextPerson); setRecordPage(1); }
     setCollapsedPanels(old => old.filter(key => key !== 'records'));
     requestAnimationFrame(() => document.getElementById('records')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
@@ -1553,6 +1578,8 @@ export default function App() {
   const [manualModel, setManualModel] = useState('');
   const [manualCrop, setManualCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
   const [reviewSource, setReviewSource] = useState('');
+  const [focusPreview, setFocusPreview] = useState('');
+  const [showFullPhoto, setShowFullPhoto] = useState(false);
   const [cropEditorOpen, setCropEditorOpen] = useState(false);
   const [cropZoom, setCropZoom] = useState(1);
   const [cropDraftPreview, setCropDraftPreview] = useState('');
@@ -1570,11 +1597,11 @@ export default function App() {
   const [deletePersonId, setDeletePersonId] = useState('');
   const [peopleOpen, setPeopleOpen] = useState(true);
   /** The tab under Scanned records (Detailed mode): the list, giving models out, or sharing. */
-  const [recordsTab, setRecordsTab] = useState<'records' | 'models' | 'share'>('records');
+  const [recordsTab, setRecordsTab] = useState<'records' | 'models' | 'share' | 'unknown'>('records');
   /** Detailed mode shows one section at a time, chosen from the bar at the bottom of the screen. */
   const [mainView, setMainView] = useState<'scan' | 'results' | 'export'>('results');
-  const activeView: 'scan' | 'records' | 'models' | 'share' | 'export' = mainView !== 'results' ? mainView : recordsTab;
-  function openView(view: 'scan' | 'records' | 'models' | 'share' | 'export') {
+  const activeView: 'scan' | 'records' | 'models' | 'share' | 'unknown' | 'export' = mainView !== 'results' ? mainView : recordsTab;
+  function openView(view: 'scan' | 'records' | 'models' | 'share' | 'unknown' | 'export') {
     if (view === 'scan' || view === 'export') setMainView(view); else { setMainView('results'); setRecordsTab(view); }
     window.scrollTo({ top: 0 });
   }
@@ -1761,6 +1788,15 @@ export default function App() {
       if (original) setReviewSource(original);
     }
   }, [selected?.id]);
+
+  // Open the review zoomed in on the label when the scanner found where it is.
+  useEffect(() => {
+    setFocusPreview(''); setShowFullPhoto(false);
+    if (!selected?.focus || selected.cropDataUrl) return;
+    let current = true;
+    void cropToFocus(selected.dataUrl, selected.focus).then(url => { if (current) setFocusPreview(url); });
+    return () => { current = false; };
+  }, [selected?.id, selected?.dataUrl, selected?.focus, selected?.cropDataUrl]);
 
   function cropPoint(event: ReactPointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -2062,13 +2098,13 @@ export default function App() {
                       <button className="subtle-btn" aria-label={`Rename ${personName(person)}`} onClick={() => { setEditingPersonId(person.id); setPersonDraft(person.name); }}><Pencil size={14} /> Rename</button>
                       <button className="subtle-btn danger" aria-label={`Delete ${personName(person)}`} disabled={personGroups.length < 2} title={personGroups.length < 2 ? 'Keep at least one person' : undefined} onClick={() => setDeletePersonId(person.id)}><Trash2 size={14} /> Delete</button>
                       <div className="person-models" aria-label={`Models ${personName(person)} has`}>
-                        {(personModels.get(person.id) || []).length ? (personModels.get(person.id) || []).map(item => <button type="button" key={item.key} className="model-tag" title="Open this model to change how many" onClick={() => focusModel(item.key)}>{item.label} <b>× {item.count}</b></button>) : <em>No models yet</em>}
+                        {(personModels.get(person.id) || []).length ? (personModels.get(person.id) || []).map(item => <button type="button" key={item.key} className="model-tag" title="Show these phones" onClick={() => jumpTo('records', item.key, person.id)}>{item.label} <b>× {item.count}</b></button>) : <em>No models yet</em>}
                       </div>
                     </>}
                 </li>)}
                 {(personModels.get(UNASSIGNED_FILTER) || []).length > 0 && <li className="people-unassigned">
                   <span className="person-name"><strong>Unassigned</strong><small>{(personModels.get(UNASSIGNED_FILTER) || []).reduce((sum, item) => sum + item.count, 0)} phones</small></span>
-                  <div className="person-models" aria-label="Models that are unassigned">{(personModels.get(UNASSIGNED_FILTER) || []).map(item => <button type="button" key={item.key} className="model-tag" title="Open this model to change how many" onClick={() => focusModel(item.key)}>{item.label} <b>× {item.count}</b></button>)}</div>
+                  <div className="person-models" aria-label="Models that are unassigned">{(personModels.get(UNASSIGNED_FILTER) || []).map(item => <button type="button" key={item.key} className="model-tag" title="Show these phones" onClick={() => jumpTo('records', item.key, UNASSIGNED_FILTER)}>{item.label} <b>× {item.count}</b></button>)}</div>
                 </li>}
               </ul>
               <button className="subtle-btn" onClick={addPersonGroup}>+ Add person</button>
@@ -2115,10 +2151,70 @@ export default function App() {
       </div>
     </div>
   );
+  /** Models the app could not name: they need a name typed once so every phone of that model reads correctly. */
+  const unknownGroups = modelGroups.filter(group => group.key === 'unknown' || group.label.endsWith('(not recognised)'));
+  const [unknownDrafts, setUnknownDrafts] = useState<Record<string, string>>({});
+  function saveUnknownName(group: { key: string; code: string }) {
+    const code = normalizeCode(group.code), label = cleanName(unknownDrafts[group.key] || '');
+    if (!code || !label) { setToast('Type the name for this model first.'); return; }
+    const next = { ...customModels, [code]: label };
+    if (!writeCustomModels(next)) { setToast('Could not save. Device storage is full.'); return; }
+    setCustomModels(next);
+    setUnknownDrafts(old => { const { [group.key]: _done, ...rest } = old; return rest; });
+    setToast(`Saved SM-${code}: ${label}.`);
+  }
+  const unknownTab = (
+    <div className="give-tab unknown-tab">
+      <p className="settings-help">{unknownGroups.length ? 'These models have no name yet. Type the name once and every phone of that model is updated.' : 'Every scanned model has a name. Nothing to fill in.'}</p>
+      <ul className="models-list">
+        {unknownGroups.map(group => <li key={group.key} className="give-card">
+          <div className="give-head"><strong>{group.code || 'No model code read'}</strong><small>{group.ids.length} phone{group.ids.length === 1 ? '' : 's'}</small></div>
+          {group.code
+            ? <div className="unknown-fill">
+              <input aria-label={`Name for ${group.code}`} value={unknownDrafts[group.key] || ''} maxLength={80} placeholder="Name, for example Galaxy A27" onChange={event => setUnknownDrafts(old => ({ ...old, [group.key]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') saveUnknownName(group); }} />
+              <button type="button" className="primary" disabled={!cleanName(unknownDrafts[group.key] || '')} onClick={() => saveUnknownName(group)}>Save name</button>
+            </div>
+            : <p className="settings-help">The model could not be read from these photos. Open the phones and type the model code.</p>}
+          <button type="button" className="subtle-btn" onClick={() => jumpTo('records', group.key)}>Show these phones</button>
+        </li>)}
+      </ul>
+      <button type="button" className="subtle-btn" onClick={() => setSettingsOpen(true)}>Add many names at once (Settings)</button>
+    </div>
+  );
+  /** Pictures plus a numbers file through the phone's share menu, which lists Bluetooth, Quick Share and chat apps. */
+  async function shareNearby(name: string, batch: RecordItem[]) {
+    if (!batch.length) return;
+    try {
+      const files: File[] = batch.map((row, index) => {
+        const blob = dataUrlBlob(recordPhoto(row)), extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+        return new File([blob], `${String(index + 1).padStart(2, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || row.number}.${extension}`, { type: blob.type || 'image/jpeg' });
+      });
+      const text = formatPersonShare([sharePayload(sectionForRows(name, batch))]);
+      files.push(new File([text], 'numbers.txt', { type: 'text/plain' }));
+      if (androidBridge?.beginFolder && androidBridge.shareFolder) {
+        const token = androidBridge.beginFolder('imei-share');
+        if (!token) throw new Error('Finish or cancel the current save before sharing.');
+        try {
+          for (const file of files) for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
+            const chunk = (await blobDataUrl(file.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
+            if (!androidBridge.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
+            if (file.size === 0) break;
+          }
+          if (!androidBridge.shareFolder(token, name)) throw new Error('Could not open the share menu.');
+        } catch (error) { androidBridge.abortFolder?.(token); throw error; }
+        setToast('Choose Bluetooth (or Quick Share) in the menu, then the nearby device.');
+        return;
+      }
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files })) { await navigator.share({ files, title: name }); return; }
+      setToast('This browser cannot share files. Use the Android app, or Download all pictures.');
+    } catch (error) {
+      if ((error as DOMException)?.name !== 'AbortError') setToast(error instanceof Error ? error.message : 'Could not open the share menu.');
+    }
+  }
   const shareTab = (
     <div className="share-tab">
       {shareSections.length === 0 ? <p>No phones yet.</p> : <>
-        <p className="settings-help">The WhatsApp button on a person sends their pictures with the model and IMEI numbers. Your phone's share menu opens; tap WhatsApp and choose the chat.</p>
+        <p className="settings-help">WhatsApp sends a person's pictures with the model and IMEI numbers. Bluetooth / nearby opens your phone's share menu with the pictures and a numbers file, so you can pick Bluetooth or Quick Share.</p>
         <div className="share-toolbar">
           <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp text — everyone</button>
           <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
@@ -2132,6 +2228,7 @@ export default function App() {
             <div className="share-toolbar">
               <button className="primary whatsapp-btn" aria-label={`WhatsApp ${section.name}: pictures and IMEI`} onClick={() => startWhatsApp(section)}>WhatsApp · pictures + IMEI</button>
               <button className="subtle-btn" aria-label={`Text only for ${section.name}`} onClick={() => openWhatsApp(formatPersonShare([sharePayload(section)]))}>Text only</button>
+              <button className="subtle-btn" aria-label={`Bluetooth or nearby share for ${section.name}`} onClick={() => void shareNearby(section.name, idsOfSection(section.id).map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row))}>Bluetooth / nearby</button>
               <button className="subtle-btn" aria-label={`Copy ${section.name}`} onClick={() => void copyText(formatPersonShare([sharePayload(section)])).then(ok => setToast(ok ? `${section.name}'s list copied.` : 'Copy failed.'))}>Copy</button>
             </div>
           </li>)}
@@ -2243,6 +2340,20 @@ export default function App() {
   const allVisibleSelected = visible.length > 0 &&
     visible.every(r => selectedIdSet.has(r.id));
   /** Clears the upload queue, progress, search, filters and selection so a new batch can start. Saved records are not touched. */
+  /** Reset: delete every scanned record and photo on this device, including the Android app's saved scans. */
+  const [resetOpen, setResetOpen] = useState(false);
+  useBackLayer(resetOpen, () => setResetOpen(false), 'reset');
+  function resetEverything() {
+    if (androidBridge?.resetScans && !androidBridge.resetScans()) { setToast('Could not clear the scans saved by the app. Nothing was deleted.'); setResetOpen(false); return; }
+    importedAndroidIds.current.clear();
+    try { localStorage.removeItem(NATIVE_IMPORTED_STORE); } catch { /* nothing stored */ }
+    setRecords([]); setFiles([]); setProgress(''); setCompletedFiles(0); setLaptopMessage('');
+    setQuery(''); setFilter('All'); setPersonFilter('All'); setSelectedIds([]); setSelectedOnly(false); setRecordPage(1);
+    setSelected(null); setAndroidJob(null); setGiveDraft({});
+    setResetOpen(false);
+    setToast('All scanned records and photos were deleted.');
+  }
+
   function resetForNewEntries() {
     if (busy || laptopUploading) { setToast('Stop the current scan first, then reset.'); return; }
     setFiles([]); setProgress(''); setCompletedFiles(0); setLaptopMessage('');
@@ -2888,7 +2999,7 @@ export default function App() {
         rotatePhoto(reviewSource || selected.dataUrl, direction),
         selected.cropDataUrl ? rotatePhoto(selected.cropDataUrl, direction) : Promise.resolve(undefined)
       ]);
-      const patch = { dataUrl, cropDataUrl, originalDataUrl: dataUrl };
+      const patch = { dataUrl, cropDataUrl, originalDataUrl: dataUrl, focus: undefined };
       setRecords(old => old.map(r => r.id === selected.id ? { ...r, ...patch } : r));
       setSelected({ ...selected, ...patch });
       setReviewSource(dataUrl);
@@ -3350,6 +3461,7 @@ export default function App() {
             <button aria-pressed={simpleView} onClick={() => setSimpleView(true)}>Simple</button>
             <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
           </div>
+          <button type="button" className="settings-btn reset-all-btn" aria-label="Reset: delete all scanned IMEIs" title="Reset: delete all scanned IMEIs" disabled={!records.length && !(androidJob && androidJob.status !== 'idle')} onClick={() => setResetOpen(true)}><Trash2 size={18} /></button>
           <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
           <span className="local-pill">
             <span /> {storageWarning ? 'Some records not saved' : 'Stored on this device'}
@@ -3358,6 +3470,14 @@ export default function App() {
       </header>
 
       {settingsOpen && <SettingsPanel onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {resetOpen && <div className="modal-backdrop"><section className="modal reset-modal" role="alertdialog" aria-modal="true" aria-label="Reset all scanned IMEIs">
+        <h2>Delete all scanned IMEIs?</h2>
+        <p>This permanently deletes {records.length} scanned record{records.length === 1 ? '' : 's'} and their photos from this device. Your people, model names and settings are kept. This cannot be undone, so export first if you still need them.</p>
+        <div className="reset-actions">
+          <button type="button" className="subtle-btn" autoFocus onClick={() => setResetOpen(false)}>Cancel</button>
+          <button type="button" className="subtle-btn danger" onClick={resetEverything}>Delete everything</button>
+        </div>
+      </section></div>}
       {cameraOpen && <CameraCapture onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}`}>
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
@@ -3774,41 +3894,22 @@ export default function App() {
             </div>
           </div>
 
-          {!simpleView && recordsTab === 'records' && <div className="filters">
-            <button
-              className={filter === 'All' ? 'active' : ''}
-              onClick={() => setFilter('All')}
-            >
-              All devices <b>{records.length}</b>
-            </button>
-
-            {modelGroups.map(group => (
-              <button
-                key={group.key}
-                className={filter === group.key ? 'active' : ''}
-                onClick={() => setFilter(group.key)}
-                title={group.code || undefined}
-              >
-                {group.label} <b>{group.ids.length}</b>
-              </button>
-            ))}
-
-            <button
-              className={filter === 'Review' ? 'active' : ''}
-              onClick={() => setFilter('Review')}
-            >
-              Needs review
-            </button>
-            <button
-              className={filter === 'Valid' ? 'active' : ''}
-              onClick={() => setFilter('Valid')}
-            >
-              Valid IMEI <b>{validCount}</b>
-            </button>
-
+          {!simpleView && recordsTab === 'records' && <div className="filters filters-compact">
+            <label className="filter-select">Model
+              <select aria-label="Filter by model" value={filter === 'All' || modelGroups.some(group => group.key === filter) ? filter : 'All'} onChange={event => setFilter(event.target.value)}>
+                <option value="All">All devices ({records.length})</option>
+                {modelGroups.map(group => <option key={group.key} value={group.key}>{group.label} ({group.ids.length})</option>)}
+              </select>
+            </label>
+            <div className="filter-chips" role="group" aria-label="Status filter">
+              <button className={filter !== 'Review' && filter !== 'Valid' ? 'active' : ''} onClick={() => setFilter('All')}>All</button>
+              <button className={filter === 'Review' ? 'active' : ''} onClick={() => setFilter('Review')}>Needs review</button>
+              <button className={filter === 'Valid' ? 'active' : ''} onClick={() => setFilter('Valid')}>Valid IMEI <b>{validCount}</b></button>
+            </div>
           </div>}
 
           {!simpleView && recordsTab === 'models' && modelsTab}
+          {!simpleView && recordsTab === 'unknown' && unknownTab}
           {!simpleView && recordsTab === 'share' && shareTab}
 
           <div className="records-tab-body" hidden={!simpleView && recordsTab !== 'records'}>
@@ -3826,6 +3927,7 @@ export default function App() {
                 </select>
               </label>
 </>)}
+              <div className="action-bar" role="group" aria-label="Actions for selected phones">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
@@ -3835,6 +3937,7 @@ export default function App() {
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
+              </div>
               <details className="more-actions">
                 <summary>More actions</summary>
                 <div className="more-actions-body">
@@ -4132,7 +4235,7 @@ export default function App() {
               <div><button className="subtle-btn" onClick={() => setDeleteReviewConfirm(false)}>Cancel</button><button className="subtle-btn danger" onClick={() => deleteRecord(selected, true, true)}>Delete record</button></div>
             </div>}
 
-            {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={recordPhoto(selected)} alt="Selected record photo" /></div>}
+            {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} />{focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}</div>}
 
             {!cropEditorOpen && reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
               <button className="subtle-btn" disabled={reviewIndex === 0 || adjustingCrop || rotatingPhoto || !!reviewSplit || manualModel !== exportModel(selected.model) || manualImei !== selected.imei} onClick={() => setSelected(reviewRecords[reviewIndex - 1])}>← Previous</button>
@@ -4363,7 +4466,7 @@ export default function App() {
       </section></div>}
       {showTop && !selected && shareIds.length === 0 && !cameraOpen && <button type="button" className="back-to-top" aria-label="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>↑ Top</button>}
       {!simpleView && <nav className="bottom-nav" aria-label="Sections">
-        {([['scan', 'Scan', ScanLine, 0], ['records', 'Records', ImageIcon, records.length], ['models', 'Give models', Smartphone, giveChanged.length], ['share', 'Share', Share2, 0], ['export', 'Export', Download, 0]] as const).map(([key, label, Icon, badge]) =>
+        {([['scan', 'Scan', ScanLine, 0], ['records', 'Records', ImageIcon, records.length], ['models', 'Give', Smartphone, giveChanged.length], ['unknown', 'Unknown', AlertTriangle, unknownGroups.length], ['share', 'Share', Share2, 0], ['export', 'Export', Download, 0]] as const).map(([key, label, Icon, badge]) =>
           <button key={key} type="button" className={activeView === key ? 'active' : ''} aria-current={activeView === key ? 'page' : undefined} onClick={() => openView(key)}>
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}

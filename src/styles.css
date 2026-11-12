@@ -351,3 +351,45 @@ button.stat:hover,button.stat:focus-visible{border-color:#4fd1a5;outline:none}
 .confirm-delete.modal,.wa-groups-modal.modal{height:auto!important;max-height:calc(100dvh - 32px)!important;align-content:start;overflow:auto}
 .confirm-delete h2{font-size:20px}.confirm-delete p{margin:0}
 .delete-person-choices button{min-height:46px;padding:8px 12px}
+
+.review-photo-stage{position:relative}
+.photo-zoom-toggle{position:absolute;right:8px;bottom:8px;min-height:40px;padding:6px 14px;font-size:12px;background:#0d1727e6;backdrop-filter:blur(6px)}
+.speed-modes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:8px 0}
+.speed-modes button{min-height:56px;text-align:left;display:grid;gap:2px;padding:8px 12px}
+.speed-modes button small{font-size:11px;opacity:.75;font-weight:400}
+.speed-modes button.active{border-color:#58d7b0;background:#16332f;color:#fff}
+.speed-stats{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:#9aa9bc;margin:4px 0 10px}
+.speed-modes button{justify-items:start;place-content:center start;text-align:left}.speed-modes button>*{text-align:left}
+
+/* Compact header and controls for phones */
+@media(max-width:600px){
+  .topbar{height:52px;padding:0 10px}
+  .brand{gap:8px}.brandmark{width:32px;height:32px;border-radius:9px}
+  .brand strong{font-size:12px;letter-spacing:1px;white-space:nowrap}.brand span{display:none}
+  .top-actions{gap:8px}.local-pill{display:none}
+  .topbar .iconbtn{padding:6px}
+}
+.back-to-top{min-height:40px;min-width:40px;padding:0 12px;font-size:12px;opacity:.9}
+.action-bar{flex:1 1 100%;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.action-bar>button{min-height:46px;padding:6px 8px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px;text-align:center}
+.action-bar .share-all-btn{grid-column:1/-1}
+.action-bar .delete-selected{border-color:#a8444f;background:#3a1a22;color:#ffb4bc}
+.action-bar .delete-selected:disabled{opacity:.6}
+.filters-compact{display:grid;gap:8px;padding:10px 0;overflow:visible;flex-wrap:wrap}
+.filter-select{display:grid;gap:4px;font-size:12px;color:#9aa9bc}
+.filter-select select{min-height:46px;width:100%}
+.filter-chips{display:flex;gap:8px;flex-wrap:wrap}
+.filter-chips button{min-height:40px;padding:6px 14px;border:1px solid #30465d;border-radius:20px;background:#121f31;color:#b3c4d1;font:inherit;font-size:13px;cursor:pointer}
+.filter-chips button.active{border-color:#58d7b0;background:#16332f;color:#fff}
+.unknown-fill{display:flex;gap:8px;margin:8px 0}.unknown-fill input{flex:1;min-width:0;min-height:44px}
+.bottom-nav{grid-template-columns:repeat(6,1fr)}.bottom-nav button{font-size:10px}
+.settings-bulk textarea{width:100%;min-height:110px;background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:10px;font:inherit;font-size:13px;resize:vertical}
+.filters-compact{padding:10px 14px}
+.filter-select select{background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 12px;font:inherit;font-size:15px}
+.unknown-tab{padding:4px 14px 14px}
+.unknown-tab .give-card{margin-bottom:10px}
+.unknown-fill input{background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 12px;font:inherit}
+.reset-all-btn{color:#ffb4bc;border-color:#6b3039}.reset-all-btn:disabled{opacity:.4}
+.reset-modal{max-width:420px;padding:20px}.reset-modal h2{margin:0 0 10px;font-size:20px}.reset-modal p{color:#b3c4d1;line-height:1.55;margin:0 0 16px}
+.reset-actions{display:flex;gap:10px;justify-content:flex-end}.reset-actions button{min-height:46px;padding:0 18px}
+.modal.reset-modal{height:auto;max-height:none;margin:auto;align-self:center}.modal-backdrop:has(.reset-modal){align-items:center}
