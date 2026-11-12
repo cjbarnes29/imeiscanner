@@ -2,6 +2,13 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.18.0 — confidence score, learning from corrections
+- **Confidence score** for every record (0–100, high / medium / low) shown at the top of the review window; hover for the reasons (checksum valid, barcode confirmed, IMEI 2, serial, catalog match, crop, duplicate). A record with no IMEI never scores above 45.
+- **Learns from verified corrections:** when you change a model code in review (for example a misread `SM-A1O5F` to `SM-A165F`), the same misread is fixed automatically in later scans on this phone.
+- **Repeated model references:** an unverified model code that is one character away from a code seen on at least two other phones is corrected to it. Models already named from the Samsung catalog are never changed.
+- Fixed: a misread model code with a letter where a digit belongs was not recognised as a code.
+- New automated tests for the score and the learning.
+
 ## 1.17.1 — sideways and tilted multi-product photos
 - **Orientation check** now runs whenever the first read is weak (not only when nothing is read) and turns the photo only when another angle clearly reads better. Sideways photos with stray digits are no longer left sideways.
 - **The whole photo is levelled** (tilt of about 2.5° or more) before the products are located, not only the crops afterwards.

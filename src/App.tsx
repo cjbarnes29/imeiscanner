@@ -1,5 +1,7 @@
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
+import { scoreConfidence } from './confidence';
+import { learnCorrection, readLearned, refineModel, writeLearned } from './learning';
 import { countModelLabels, mergeOcrLines, needsOrientationCheck, shouldTurn, skewOfCanvas, straightenCanvas, straightenDataUrl, tileRects } from './multi-detect';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
@@ -204,6 +206,17 @@ async function uniqueUploadPhotos(files: File[]) {
     if (!seen.has(hash)) { seen.add(hash); unique.push(file); }
   }
   return unique;
+}
+
+/** How sure the app is about a record (0-100) and why. */
+function recordConfidence(row: RecordItem) {
+  const pair = recordImeiPair(row);
+  return scoreConfidence({
+    imei: row.imei, luhnOk: luhnValid(row.imei), barcodeConfirmed: !!row.imei && barcodeImei(row.raw || '', 1) === row.imei,
+    imei2Valid: /^\d{15}$/.test(pair.imei2 || '') && luhnValid(pair.imei2 || ''),
+    serial: recordSerial(row), serialNeedsReview: row.serialNeedsReview, model: row.model,
+    catalogMatched: !!catalogModel(row.raw || ''), duplicate: row.duplicate, cropNeedsReview: row.cropNeedsReview
+  });
 }
 
 function reviewStatus(row: RecordItem) {
@@ -3406,7 +3419,7 @@ export default function App() {
           const y = (line.bbox.y0 + line.bbox.y1) / 2;
           return x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height;
         }).map(line => line.text).join('\n') : raw;
-        const model = identifyModel(cropRaw, file.name, mostlyWhite);
+        const model = refineModel(identifyModel(cropRaw, file.name, mostlyWhite), [...records, ...newRows].map(row => row.model), readLearned()).model;
         newRows.push({
           id: newId(),
           pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
@@ -3536,6 +3549,7 @@ export default function App() {
     const built = buildReviewPatch(selected, currentFields());
     if ('error' in built) { setWarning(built.error); return; }
     const { patch } = built;
+    if (patch.model && patch.model !== selected.model) writeLearned(learnCorrection(readLearned(), selected.model, patch.model));
     updateRow(selected.id, patch);
     const { [selected.id]: _saved, ...rest } = draftsRef.current;
     setDrafts(rest);
@@ -4887,7 +4901,7 @@ export default function App() {
             <div className={cropEditorOpen ? undefined : 'review-sticky'}>
             <div className="modal-head">
               <div>
-                <div className="eyebrow">IMAGE REVIEW</div>
+                <div className="eyebrow" title={recordConfidence(selected).reasons.join('; ')}>IMAGE REVIEW · {recordConfidence(selected).score}% sure ({recordConfidence(selected).level})</div>
                 <h2>{selected.name}</h2>
               </div>
 
