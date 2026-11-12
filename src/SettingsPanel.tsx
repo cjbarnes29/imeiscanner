@@ -42,6 +42,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   const [message, setMessage] = useState('');
   const [speed, setSpeed] = useState<SpeedInfo | null>(readSpeed);
   const [bulk, setBulk] = useState('');
+  const [listOpen, setListOpen] = useState(false);
   const [auto, setAuto] = useState(() => localStorage.getItem(CATALOG_AUTO_KEY) !== 'off');
   const fileInput = useRef<HTMLInputElement>(null);
   const [devFilter, setDevFilter] = useState<'missing' | 'all'>('missing');
@@ -209,7 +210,9 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     </div>
     {key && <small className="settings-help">{customModels[key] ? `SM-${key} is already yours: ${customModels[key]}.` : builtIn ? `SM-${key} is built in as ${builtIn}. Adding it uses your name instead.` : `SM-${key} is not in the built-in list.`}</small>}
 
-    {Object.keys(customModels).length > 0 && <>
+    {Object.keys(customModels).length > 0 && <button type="button" className="subtle-btn view-models-btn" onClick={() => setListOpen(true)}>View my models ({Object.keys(customModels).length})</button>}
+    {listOpen && Object.keys(customModels).length > 0 && <div className="modal-backdrop"><section className="modal models-dialog" role="dialog" aria-modal="true" aria-label="My models">
+      <div className="modal-head"><h2>My models ({Object.keys(customModels).length})</h2><button className="subtle-btn" onClick={() => setListOpen(false)}>Close</button></div>
       {Object.keys(customModels).length > 6 && <input className="settings-search" aria-label="Search my models" placeholder="Search my models" value={search} onChange={event => setSearch(event.target.value)} />}
       <ul className="settings-list">
         {entries.map(([codeKey, label]) => <li key={codeKey}>
@@ -228,7 +231,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
         </li>)}
         {!entries.length && <li><em>No match.</em></li>}
       </ul>
-    </>}
+    </section></div>}
     {Object.keys(customModels).length === 0 && <p className="settings-help"><em>You have not added any models yet.</em></p>}
 
     <div className="settings-bulk">
