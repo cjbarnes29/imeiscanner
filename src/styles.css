@@ -393,3 +393,16 @@ button.stat:hover,button.stat:focus-visible{border-color:#4fd1a5;outline:none}
 .reset-modal{max-width:420px;padding:20px}.reset-modal h2{margin:0 0 10px;font-size:20px}.reset-modal p{color:#b3c4d1;line-height:1.55;margin:0 0 16px}
 .reset-actions{display:flex;gap:10px;justify-content:flex-end}.reset-actions button{min-height:46px;padding:0 18px}
 .modal.reset-modal{height:auto;max-height:none;margin:auto;align-self:center}.modal-backdrop:has(.reset-modal){align-items:center}
+.speed-device{display:grid;gap:6px;padding:10px 12px;border:1px solid #30465d;border-radius:10px;background:#0d1828;margin:8px 0;font-size:13px;color:#c9d7e5}.speed-device span{color:#9aa9bc}.speed-device button{justify-self:start;min-height:40px}
+.model-picker{display:grid;gap:8px}.model-picker select,.model-picker input{width:100%;min-height:48px;background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 12px;font:inherit;font-size:15px}
+
+/* Keep the page from sliding sideways and keep the bottom bar fixed while scrolling */
+html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
+body{touch-action:pan-y pinch-zoom}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;width:100%;transform:translate3d(0,0,0);contain:layout paint;overscroll-behavior:none}
+.back-to-top{transform:translate3d(0,0,0)}
+@media(max-width:700px){.results .table-wrap,.results table{max-width:100%;overflow-x:hidden}.results thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}}
+.model-search{min-height:44px}
+.model-add{display:grid;gap:8px;padding:10px 12px;border:1px solid #30465d;border-radius:10px;background:#0d1828}
+.model-add small{color:#ffb4bc}
+.model-add-actions{display:flex;gap:8px}.model-add-actions button{min-height:44px}

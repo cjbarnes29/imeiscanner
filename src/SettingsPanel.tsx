@@ -16,7 +16,7 @@ type Props = {
 };
 
 type SpeedBridge = { speedInfo?: () => string; setSpeedMode?: (mode: string) => boolean };
-type SpeedInfo = { mode: string; label: string; startWorkers: number; maxWorkers: number; capacity: number; cores: number; ramGb: number; lastRate: number; lastWorkers: number; lastMode: string };
+type SpeedInfo = { mode: string; label: string; startWorkers: number; maxWorkers: number; capacity: number; cores: number; ramGb: number; lastRate: number; lastWorkers: number; lastMode: string; batterySaver?: boolean; hot?: boolean; lowRam?: boolean; androidVersion?: string; device?: string };
 const SPEED_MODES = [
   { id: 'auto', name: 'Auto', hint: 'Starts gently, speeds up while the phone keeps up (recommended)' },
   { id: 'turbo', name: 'Turbo', hint: 'Most photos at once. Phone may get warm' },
@@ -168,6 +168,11 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
       <p className="settings-help">Choose how hard this phone works while scanning. Auto adds more photos at once while the phone stays cool and has free memory, and backs off if it heats up.</p>
       <div className="speed-modes" role="group" aria-label="Phone scanning power">
         {SPEED_MODES.map(option => <button key={option.id} type="button" className={`subtle-btn ${speed.mode === option.id ? 'active' : ''}`} aria-pressed={speed.mode === option.id} onClick={() => chooseSpeed(option.id)}>{option.name}<small>{option.hint}</small></button>)}
+      </div>
+      <div className="speed-device">
+        <strong>{speed.device || 'This phone'}</strong>{speed.androidVersion ? ` · Android ${speed.androidVersion}` : ''}
+        <span>{speed.lowRam ? 'Low-memory phone: scans one photo at a time.' : speed.batterySaver ? 'Battery saver is on: Auto is limited to 2 photos at once.' : speed.hot ? 'The phone is hot: scanning will slow down to cool it.' : 'Ready: Auto starts with 2 photos at once and grows to the limit below while the phone stays cool.'}</span>
+        <button type="button" className="subtle-btn" onClick={() => { setSpeed(readSpeed()); setMessage('Checked this phone again.'); }}>Check this phone again</button>
       </div>
       <div className="speed-stats"><span>{speed.cores} CPU cores</span><span>{speed.ramGb} GB memory</span><span>Up to {speed.maxWorkers} photo{speed.maxWorkers === 1 ? '' : 's'} at once</span>{speed.lastRate > 0 && <span>Last scan: {speed.lastRate} photos/min ({speed.lastMode}, up to {speed.lastWorkers} at once)</span>}</div>
     </>}

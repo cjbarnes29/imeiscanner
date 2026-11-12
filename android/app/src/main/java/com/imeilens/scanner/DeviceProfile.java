@@ -92,6 +92,12 @@ final class DeviceProfile {
             json.put("startWorkers", profile.startWorkers);
             json.put("maxWorkers", profile.maxWorkers);
             json.put("capacity", capacity(context));
+            PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            json.put("batterySaver", power != null && power.isPowerSaveMode());
+            json.put("hot", isHot(context));
+            json.put("lowRam", activity.isLowRamDevice());
+            json.put("androidVersion", Build.VERSION.RELEASE);
+            json.put("device", Build.MANUFACTURER + " " + Build.MODEL);
             json.put("cores", Runtime.getRuntime().availableProcessors());
             json.put("ramGb", Math.round(memory.totalMem / (1024.0 * 1024.0 * 1024.0)));
             json.put("lastRate", prefs.getInt("lastRate", 0));

@@ -287,11 +287,13 @@ public final class MainActivity extends Activity {
                 JSONArray records = job.optJSONArray("records");
                 JSONArray queue = job.optJSONArray("queue");
                 String uri = "", filename = "";
+                int turn = 0;
                 if (records != null) for (int index = 0; index < records.length(); index++) {
                     JSONObject row = records.optJSONObject(index);
                     if (row != null && id.equals(row.optString("id"))) {
                         uri = row.optString("sourceUri");
                         filename = row.optString("name");
+                        turn = row.optInt("rotation", 0);
                         break;
                     }
                 }
@@ -304,6 +306,7 @@ public final class MainActivity extends Activity {
                 }
                 if (uri.isEmpty()) return "";
                 Bitmap source = ImageScanner.decode(MainActivity.this, Uri.parse(uri));
+                if (turn != 0) { Bitmap turned = ImageScanner.rotate(source, turn); source.recycle(); source = turned; }
                 try {
                     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
                     source.compress(Bitmap.CompressFormat.JPEG, 88, bytes);
