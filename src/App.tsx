@@ -3843,7 +3843,7 @@ export default function App() {
             <button aria-pressed={simpleView} onClick={() => setSimpleView(true)}>Simple</button>
             <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
           </div>
-          <button type="button" className="settings-btn reset-all-btn" aria-label="Reset: delete all scanned IMEIs" title="Reset: delete all scanned IMEIs" disabled={!records.length && !(androidJob && androidJob.status !== 'idle')} onClick={() => setResetOpen(true)}><Trash2 size={18} /></button>
+          <button type="button" className="settings-btn reset-all-btn" aria-label="Reset: delete all scanned IMEIs" title="Reset: delete all scanned IMEIs" onClick={() => setResetOpen(true)}><Trash2 size={18} /></button>
           <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
           <span className="local-pill">
             <span /> {storageWarning ? 'Some records not saved' : 'Stored on this device'}
@@ -3868,7 +3868,7 @@ export default function App() {
       </section></div>}
       {resetOpen && <div className="modal-backdrop"><section className="modal reset-modal" role="alertdialog" aria-modal="true" aria-label="Reset all scanned IMEIs">
         <h2>Delete all scanned IMEIs?</h2>
-        <p>This permanently deletes {records.length} scanned record{records.length === 1 ? '' : 's'} and their photos from this device. Your people, model names and settings are kept. This cannot be undone, so export first if you still need them.</p>
+        <p>{records.length ? <>This permanently deletes {records.length} scanned record{records.length === 1 ? '' : 's'} and their photos from this device.</> : <>There are no scanned records on this screen. This also clears any scan results and photos the app still has saved.</>} Your people, model names and settings are kept. This cannot be undone, so export first if you still need them.</p>
         <div className="reset-actions">
           <button type="button" className="subtle-btn" autoFocus onClick={() => setResetOpen(false)}>Cancel</button>
           <button type="button" className="subtle-btn danger" onClick={resetEverything}>Delete everything</button>

@@ -1,12 +1,12 @@
 {
   "name": "imei-photo-scanner",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.12.1",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-ocr-assets.mjs",
+    "predev": "node scripts/write-version.mjs",
     "dev": "vite --host 0.0.0.0",
-    "prebuild": "node scripts/copy-ocr-assets.mjs",
+    "prebuild": "node scripts/write-version.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "laptop": "node server/index.mjs",
