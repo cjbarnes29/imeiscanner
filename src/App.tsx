@@ -1138,9 +1138,11 @@ function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose
   const [groups, setGroups] = useState<CropGroup[]>([]);
   const [progress, setProgress] = useState('');
   const [notice, setNotice] = useState('');
-  const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
-  useEffect(() => () => { void workerRef.current?.terminate(); workerRef.current = null; }, []);
-  const worker = async () => workerRef.current ||= await newOcrWorker();
+  // The reader (about 10 MB of engine and language data) is started as soon as the editor opens, while you draw the boxes,
+  // so Save all does not start with a long 'Preparing…'. One shared start-up, whoever asks first.
+  const workerRef = useRef<Promise<Awaited<ReturnType<typeof createWorker>>> | null>(null);
+  useEffect(() => { workerRef.current ||= newOcrWorker(); workerRef.current.catch(() => { workerRef.current = null; }); return () => { void workerRef.current?.then(w => w.terminate()).catch(() => undefined); workerRef.current = null; }; }, []);
+  const worker = () => (workerRef.current ||= newOcrWorker());
   const asDraft = (list: StudioPlan[]) => list.map(plan => ({ recordId: plan.id, boxes: plan.boxes }));
   const discard = () => { clearDraft(localStorage); onClose(); };
 
@@ -1149,7 +1151,7 @@ function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose
     setPlans(Object.fromEntries(list.map(plan => [plan.id, plan.boxes]))); setNotice('');
     const out: CropGroup[] = [];
     try {
-      setProgress('Preparing…');
+      setProgress('Starting the reader (the first time takes longer)…');
       const w = await worker().catch(() => null);
       for (const [position, plan] of planned.entries()) {
         const entry = items.find(item => item.id === plan.id)!;
