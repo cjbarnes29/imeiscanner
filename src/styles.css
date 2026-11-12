@@ -325,3 +325,29 @@ button.stat:hover,button.stat:focus-visible{border-color:#4fd1a5;outline:none}
 .confirm-bar{position:sticky;bottom:8px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border:1px solid #4fd1a5;border-radius:14px;background:#0e2a2a;box-shadow:0 6px 24px #0008}
 .confirm-bar span{flex:1 1 120px;color:#b3c4d1}.confirm-bar button{min-height:46px}
 .whatsapp-btn{background:#25d366!important;border-color:#25d366!important;color:#04200f!important}
+.wa-groups-modal{display:grid;gap:10px;width:min(460px,100%)}.wa-groups-modal .modal-head button{flex:none;width:auto;min-width:72px}
+.person-models button.model-tag{padding:3px 10px;border:1px solid #35506a;border-radius:14px;background:#162638;color:#e8edf5;font:inherit;font-size:13px;cursor:pointer;min-height:32px}
+.person-models button.model-tag:hover,.person-models button.model-tag:focus-visible{border-color:#4fd1a5;outline:none}
+.give-card{scroll-margin-top:90px}
+.give-card.focused{outline:2px solid #4fd1a5;box-shadow:0 0 0 5px #4fd1a533}
+.link-btn{background:none;border:0;padding:6px 0;color:#9ff0d3;text-decoration:underline;font:inherit;cursor:pointer;text-align:left}
+[hidden]{display:none!important}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:8;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:6px 6px max(6px,env(safe-area-inset-bottom));background:#0d1727f2;border-top:1px solid #253248;backdrop-filter:blur(8px)}
+.bottom-nav button{position:relative;display:grid;justify-items:center;align-content:center;gap:2px;min-height:54px;padding:6px 2px;border:0;border-radius:12px;background:none;color:#b3c4d1;font:inherit;font-size:11px;cursor:pointer}
+.bottom-nav button.active{background:#123b34;color:#9ff0d3;font-weight:700}
+.bottom-nav button b{position:absolute;top:2px;right:6px;min-width:18px;padding:0 5px;border-radius:9px;background:#4fd1a5;color:#04200f;font-size:10px;line-height:16px;text-align:center}
+.has-bottom-nav main{padding-bottom:96px}
+.has-bottom-nav .back-to-top{bottom:84px}
+.has-bottom-nav .toast{bottom:84px}
+.has-bottom-nav .undo-bar{bottom:150px}
+.has-bottom-nav .confirm-bar{bottom:72px}
+.nav-mode .panel-toggle{display:none}
+.more-actions{flex:1 1 100%;border:1px solid #253248;border-radius:12px;padding:4px 10px}
+.more-actions>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700}
+.more-actions-body{display:flex;flex-wrap:wrap;gap:8px;padding:6px 0 10px}
+.more-actions-body .move-to{display:flex;align-items:center;gap:6px;color:#b3c4d1;font-size:14px}
+.more-actions-body select{min-height:44px;padding:6px 10px;border:1px solid #35506a;border-radius:10px;background:#0b1625;color:#e8edf5;font:inherit;font-size:16px;max-width:100%}
+/* small confirmation dialogs hug their content instead of filling the screen */
+.confirm-delete.modal,.wa-groups-modal.modal{height:auto!important;max-height:calc(100dvh - 32px)!important;align-content:start;overflow:auto}
+.confirm-delete h2{font-size:20px}.confirm-delete p{margin:0}
+.delete-person-choices button{min-height:46px;padding:8px 12px}

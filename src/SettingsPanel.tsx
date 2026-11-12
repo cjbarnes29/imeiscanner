@@ -9,16 +9,20 @@ type Props = {
   customModels: CustomModels;
   onModelsChange: (models: CustomModels) => void;
   onCatalogChange: () => void;
+  /** Fix a model code on every scanned phone that has it; returns how many phones changed. */
+  onChangeCode: (from: string, to: string) => number;
   onDownload: (blob: Blob, filename: string) => void;
   onClose: () => void;
 };
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onDownload, onClose }: Props) {
+export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
   const [draft, setDraft] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const [devCode, setDevCode] = useState('');
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
   const [auto, setAuto] = useState(() => localStorage.getItem(CATALOG_AUTO_KEY) !== 'off');
@@ -54,9 +58,12 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   }
 
   function saveEdit(codeKey: string) {
-    const label = cleanName(draft);
+    const label = cleanName(draft), newKey = normalizeCode(editCode);
+    if (!newKey) { setMessage('Type a model code such as SM-R420 (a letter and three digits).'); return; }
     if (!label) { setMessage('The name cannot be empty. Use Delete to remove the model.'); return; }
-    if (save({ ...customModels, [codeKey]: label }, `Saved SM-${codeKey}.`)) setEditing('');
+    if (newKey !== codeKey && customModels[newKey] && !window.confirm(`SM-${newKey} already has the name "${customModels[newKey]}". Replace it?`)) return;
+    const { [codeKey]: _old, ...rest } = customModels;
+    if (save({ ...rest, [newKey]: label }, newKey !== codeKey ? `Changed SM-${codeKey} to SM-${newKey}: ${label}.` : `Saved SM-${codeKey}.`)) setEditing('');
   }
 
   function remove(codeKey: string) {
@@ -65,10 +72,19 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   }
 
   function saveDevice(codeKey: string) {
-    const label = cleanName(devDraft);
+    const label = cleanName(devDraft), newKey = normalizeCode(devCode);
+    if (!newKey) { setMessage('Type a model code such as SM-R420 (a letter and three digits).'); return; }
     if (!label) { setMessage('Type the name you want to see for this model.'); return; }
-    if (!customModels[codeKey] && Object.keys(customModels).length >= MAX_CUSTOM_MODELS) { setMessage(`You can keep up to ${MAX_CUSTOM_MODELS} models.`); return; }
-    if (save({ ...customModels, [codeKey]: label }, `Saved SM-${codeKey}: ${label}.`)) setDevEditing('');
+    let base = customModels;
+    if (newKey !== codeKey) {
+      const count = scannedModels.filter(model => normalizeCode(model) === codeKey).length;
+      if (!window.confirm(`Change SM-${codeKey} to SM-${newKey} on ${count} scanned phone${count === 1 ? '' : 's'}? Use this to fix a code that was read wrongly.`)) return;
+      onChangeCode(codeKey, newKey);
+      const { [codeKey]: _old, ...rest } = customModels;
+      base = rest;
+    }
+    if (!base[newKey] && Object.keys(base).length >= MAX_CUSTOM_MODELS) { setMessage(`You can keep up to ${MAX_CUSTOM_MODELS} models.`); return; }
+    if (save({ ...base, [newKey]: label }, newKey !== codeKey ? `Changed SM-${codeKey} to SM-${newKey}: ${label}.` : `Saved SM-${codeKey}: ${label}.`)) setDevEditing('');
   }
 
   function removeAll() {
@@ -108,7 +124,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
-    <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code.</p>
+    <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
 
     <h3>Devices in my scans</h3>
     <p className="settings-help">{devices.rows.length ? (missingCount ? <><b>{missingCount}</b> scanned model{missingCount === 1 ? ' is' : 's are'} not in any catalog. Add a name so {missingCount === 1 ? 'it shows' : 'they show'} instead of the code.</> : 'Every scanned model is in a catalog or has your name.') : 'No scanned models yet. Scan some phones and they appear here.'}{devices.noCode > 0 && ` ${devices.noCode} phone${devices.noCode === 1 ? ' has' : 's have'} no model code.`}</p>
@@ -118,13 +134,18 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     </div>}
     {shownDevices.length > 0 && <ul className="settings-list device-list" aria-label="Scanned devices">
       {shownDevices.map(row => <li key={row.code} className={`device-${row.source}`}>
-        <div className="cap-field"><small>Model code</small><b>SM-{row.code}</b></div>
-        <div className="cap-field grow"><small>Name</small><span>{row.name || <em>No name yet</em>}</span><small>{row.count} phone{row.count === 1 ? '' : 's'} · {sourceLabel[row.source]}</small></div>
         {devEditing === row.code
-          ? <><input autoFocus aria-label={`Name for SM-${row.code}`} value={devDraft} maxLength={80} placeholder="Name to show" onChange={event => setDevDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveDevice(row.code); if (event.key === 'Escape') setDevEditing(''); }} />
-            <button className="primary" onClick={() => saveDevice(row.code)}>Save</button><button className="subtle-btn" onClick={() => setDevEditing('')}>Cancel</button></>
-          : <><button className={row.source === 'missing' ? 'primary' : 'subtle-btn'} onClick={() => { setDevEditing(row.code); setDevDraft(row.name); }}>{row.source === 'missing' ? 'Add' : 'Edit'}</button>
-            {row.source === 'mine' && <button className="subtle-btn danger" aria-label={`Delete my name for SM-${row.code}`} onClick={() => remove(row.code)}>Delete</button>}</>}
+          ? <>
+            <div className="cap-field"><small>Model code</small><input aria-label={`Code for SM-${row.code}`} value={devCode} maxLength={24} autoCapitalize="characters" placeholder="SM-R420" onChange={event => setDevCode(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveDevice(row.code); if (event.key === 'Escape') setDevEditing(''); }} /></div>
+            <div className="cap-field grow"><small>Name</small><input autoFocus aria-label={`Name for SM-${row.code}`} value={devDraft} maxLength={80} placeholder="Name to show" onChange={event => setDevDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveDevice(row.code); if (event.key === 'Escape') setDevEditing(''); }} /></div>
+            <button className="primary" onClick={() => saveDevice(row.code)}>Save</button><button className="subtle-btn" onClick={() => setDevEditing('')}>Cancel</button>
+          </>
+          : <>
+            <div className="cap-field"><small>Model code</small><b>SM-{row.code}</b></div>
+            <div className="cap-field grow"><small>Name</small><span>{row.name || <em>No name yet</em>}</span><small>{row.count} phone{row.count === 1 ? '' : 's'} · {sourceLabel[row.source]}</small></div>
+            <button className={row.source === 'missing' ? 'primary' : 'subtle-btn'} onClick={() => { setDevEditing(row.code); setDevDraft(row.name); setDevCode(`SM-${row.code}`); }}>{row.source === 'missing' ? 'Add' : 'Edit'}</button>
+            {row.source === 'mine' && <button className="subtle-btn danger" aria-label={`Delete my name for SM-${row.code}`} onClick={() => remove(row.code)}>Delete</button>}
+          </>}
       </li>)}
     </ul>}
 
@@ -141,13 +162,18 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
       {Object.keys(customModels).length > 6 && <input className="settings-search" aria-label="Search my models" placeholder="Search my models" value={search} onChange={event => setSearch(event.target.value)} />}
       <ul className="settings-list">
         {entries.map(([codeKey, label]) => <li key={codeKey}>
-          <div className="cap-field"><small>Model code</small><b>SM-{codeKey}</b></div>
           {editing === codeKey
-            ? <><input autoFocus aria-label={`Name for SM-${codeKey}`} value={draft} maxLength={80} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveEdit(codeKey); if (event.key === 'Escape') setEditing(''); }} />
-              <button className="primary" onClick={() => saveEdit(codeKey)}>Save</button><button className="subtle-btn" onClick={() => setEditing('')}>Cancel</button></>
-            : <><div className="cap-field grow"><small>Name</small><span>{label}</span></div>
-              <button className="subtle-btn" onClick={() => { setEditing(codeKey); setDraft(label); }}>Edit</button>
-              <button className="subtle-btn danger" aria-label={`Delete SM-${codeKey}`} onClick={() => remove(codeKey)}>Delete</button></>}
+            ? <>
+              <div className="cap-field"><small>Model code</small><input aria-label={`Code for SM-${codeKey}`} value={editCode} maxLength={24} autoCapitalize="characters" placeholder="SM-R420" onChange={event => setEditCode(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveEdit(codeKey); if (event.key === 'Escape') setEditing(''); }} /></div>
+              <div className="cap-field grow"><small>Name</small><input autoFocus aria-label={`Name for SM-${codeKey}`} value={draft} maxLength={80} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') saveEdit(codeKey); if (event.key === 'Escape') setEditing(''); }} /></div>
+              <button className="primary" onClick={() => saveEdit(codeKey)}>Save</button><button className="subtle-btn" onClick={() => setEditing('')}>Cancel</button>
+            </>
+            : <>
+              <div className="cap-field"><small>Model code</small><b>SM-{codeKey}</b></div>
+              <div className="cap-field grow"><small>Name</small><span>{label}</span></div>
+              <button className="subtle-btn" onClick={() => { setEditing(codeKey); setDraft(label); setEditCode(`SM-${codeKey}`); }}>Edit</button>
+              <button className="subtle-btn danger" aria-label={`Delete SM-${codeKey}`} onClick={() => remove(codeKey)}>Delete</button>
+            </>}
         </li>)}
         {!entries.length && <li><em>No match.</em></li>}
       </ul>
