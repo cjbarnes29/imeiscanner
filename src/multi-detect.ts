@@ -74,6 +74,29 @@ export async function straightenDataUrl(dataUrl: string, quality = 0.9): Promise
   } catch { return { dataUrl, angle: 0 }; }
 }
 
+/**
+ * Tiles of about `side` pixels covering the whole picture, with overlap, for photos too big to read in one go.
+ * The tile count does not depend on how many products were found (that count comes from the weak whole-photo read);
+ * it depends on the photo size alone. At most `maxTiles`: beyond that the tiles simply grow.
+ */
+export function gridTileRects(width: number, height: number, side = 1300, overlap = 0.14, maxTiles = 12): Rect[] {
+  let cols = Math.max(1, Math.ceil(width / side)), rows = Math.max(1, Math.ceil(height / side));
+  while (cols * rows > maxTiles) { if (cols / width * height > rows) cols--; else rows--; if (cols < 1) cols = 1; if (rows < 1) rows = 1; }
+  const tw = width / cols, th = height / rows, tiles: Rect[] = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x0 = Math.max(0, c * tw - (c ? tw * overlap : 0)), x1 = Math.min(width, (c + 1) * tw + (c < cols - 1 ? tw * overlap : 0));
+    const y0 = Math.max(0, r * th - (r ? th * overlap : 0)), y1 = Math.min(height, (r + 1) * th + (r < rows - 1 ? th * overlap : 0));
+    tiles.push({ x: Math.round(x0), y: Math.round(y0), width: Math.round(x1 - x0), height: Math.round(y1 - y0) });
+  }
+  return tiles;
+}
+
+/** Median height of the read text lines: small values mean the labels are small in the picture and need a closer look. */
+export function medianLineHeight(lines: OcrLine[]): number {
+  const heights = lines.map(line => line.bbox.y1 - line.bbox.y0).filter(h => Number.isFinite(h) && h > 0).sort((a, b) => a - b);
+  return heights.length ? heights[Math.floor(heights.length / 2)] : 0;
+}
+
 /** Overlapping tiles to read one by one: 2 products → 2 halves, 3 → thirds, 4 → 2×2, 5-6 → 3×2 (long side first). */
 export function tileRects(width: number, height: number, products: number, overlap = 0.14): Rect[] {
   const landscape = width >= height;

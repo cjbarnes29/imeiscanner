@@ -181,3 +181,16 @@ export function repeatedAcrossBoxes(imeis: string[]): Set<number> {
   imeis.forEach((imei, i) => { if (imei && imeis.some((other, j) => j !== i && other === imei)) out.add(i); });
   return out;
 }
+
+/**
+ * An IMEI 2 is kept only when it can belong to this IMEI 1: it must pass the checksum and, on Samsung labels, share the six serial
+ * digits (positions 9-14) with IMEI 1. A number that fails either was misread or comes from the neighbouring product.
+ */
+export function pairedImei2(imei1: string, imei2: string, model: string): string {
+  if (!imei2) return '';
+  if (!luhnValid(imei2)) return '';
+  if (imei1 && /^SM-/i.test(model.trim()) && imei1.slice(8, 14) !== imei2.slice(8, 14)) return '';
+  return imei2;
+}
+
+

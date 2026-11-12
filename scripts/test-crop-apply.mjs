@@ -8,6 +8,7 @@ const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true,
 const names = ['luhnValid', 'recordImeiPair', 'modelForCrop', 'splitRecords', 'extractImei1s', 'extractPreferredImei', 'unindexedImeisShim'].filter(n => n !== 'unindexedImeisShim');
 let helpers = 'let idCounter = 0; const newId = () => "id" + (++idCounter) + "-abcdefgh";\nconst digits = s => s.replace(/\\D/g, "");\n';
 helpers += 'const identifyModel = (text) => { const m = text.match(/\\bSM-[A-Z][0-9]{3}[A-Z0-9]/i); return m ? m[0].toUpperCase() : "Unknown unit — review"; };\n';
+{ const iv = ts.createSourceFile('imei-validate.ts', await readFile('src/imei-validate.ts', 'utf8'), ts.ScriptTarget.ES2022, true); const node = iv.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'pairedImei2'); assert.ok(node, 'Missing pairedImei2'); helpers += node.getText(iv).replace(/^export /, '') + '\n'; }
 for (const name of names) {
   const node = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === name);
   assert.ok(node, `Missing app function ${name}`);
