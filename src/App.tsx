@@ -4279,9 +4279,14 @@ export default function App() {
               <select id="review-person" value={selected.personId || 'unassigned'} onChange={event => { const plan = assignPerson(selected.id, event.target.value); if (plan.moved.length) setSelected({ ...selected, personId: ownerOf(event.target.value) }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
               <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
               <input id="manual-imei2" inputMode="numeric" maxLength={15} value={manualImei2} onChange={event => setManualImei2(digits(event.target.value).slice(0, 15))} />
-              <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
               <small>Enter moves to the next field, then saves and opens the next record. Use arrow keys to navigate when not typing.</small>
               {(manualModel !== exportModel(selected.model) || manualImei !== selected.imei) && <small>Save changes before moving to another record.</small>}
+            </div>}
+
+            {!cropEditorOpen && <div className="review-save-bar" role="group" aria-label="Save this record">
+              <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
+              {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
+              <span className="review-save-state" role="status">{manualModel !== exportModel(selected.model) || manualImei !== selected.imei || manualSerial !== recordSerial(selected) || manualImei2 !== recordImeiPair(selected).imei2 ? 'Unsaved changes' : 'All saved'}</span>
             </div>}
 
             <div className="modal-meta">
