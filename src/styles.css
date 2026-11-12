@@ -521,3 +521,14 @@ body{touch-action:pan-y pinch-zoom}
   .topbar .mode-toggle button{padding:0 8px;font-size:12px}
   .topbar .top-actions .settings-btn{width:34px;height:34px}
 }
+
+/* Scan and review: nothing is written on top of the picture; the picture is larger and clearer. */
+.photo-zoom-toggle{position:static;width:100%;margin-top:6px}
+.camera-countdown{position:static;text-align:center;font-size:36px;color:#fff;text-shadow:none}
+.camera-batch>div{display:flex;flex-direction:column;align-items:center;gap:2px}
+.camera-batch button{position:static;min-height:28px;min-width:36px}
+.review-photo-stage{height:clamp(220px,46dvh,420px)}
+.review-photo-stage .preview,.review-photo-stage video,.crop-editor img,.share-preview{filter:contrast(1.1) brightness(1.04) saturate(1.05);image-rendering:auto}
+@media(max-width:700px){.review-photo-stage{height:clamp(210px,44dvh,380px)}}
+
+.text-size-choice{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 16px}.text-size-choice button{flex:1;min-width:70px;justify-content:center;padding:10px 6px}

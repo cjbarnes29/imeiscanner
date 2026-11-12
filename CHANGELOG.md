@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.14.0 — clean pictures, text size
+- Pictures sent or saved (WhatsApp, Bluetooth, Save to my phone, One by one) have **no text written on them**. They are resized to 1600 px and sharpened with a little extra contrast. The numbers stay in the caption and `numbers.txt`.
+- The tick-box *Also write the IMEI / serial on each picture* is gone.
+- Scanning and review: the Zoom/Full photo button, the camera countdown and the thumbnail remove buttons no longer sit on top of pictures; the photo area is taller and clearer.
+- **Settings → Text size**: Small, Normal, Large, Extra large, remembered on the phone.
+
 ## 1.13.0 — choose the save folder once
 - **One by one** and **Save to my phone** ask for a folder **once** (Android keeps the permission) and then save without asking, into `IMEI-<person>` inside it.
 - Saving again **replaces** the earlier numbered pictures and `numbers.txt` automatically. Saving only "the rest" keeps the pictures already saved; `numbers.txt` always lists every phone.

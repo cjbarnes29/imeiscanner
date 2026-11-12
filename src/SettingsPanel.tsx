@@ -4,6 +4,7 @@ import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
 import { CatalogDialog } from './CatalogDialog';
 import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
+import { readTextSize, saveTextSize, TEXT_SIZES, type TextSizeId } from './text-size';
 import { APP_COMMIT, APP_VERSION } from './version';
 
 type Props = {
@@ -206,10 +207,15 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     try { if (on) localStorage.removeItem(CATALOG_AUTO_KEY); else localStorage.setItem(CATALOG_AUTO_KEY, 'off'); } catch { /* ignore */ }
   }
 
+  const [textSize, setTextSize] = useState<TextSizeId>(readTextSize);
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
     <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
+
+    <h3>Text size</h3>
+    <p className="settings-help">Make the writing in the whole app smaller or bigger. It is remembered on this phone.</p>
+    <div className="text-size-choice" role="radiogroup" aria-label="Text size">{TEXT_SIZES.map(size => <button key={size.id} type="button" role="radio" aria-checked={textSize === size.id} className={textSize === size.id ? "primary" : "subtle-btn"} onClick={() => { setTextSize(size.id); saveTextSize(size.id); }}>{size.label}</button>)}</div>
 
     {speed && <>
       <h3>Phone scanning power</h3>

@@ -24,6 +24,7 @@ import { CameraCapture } from './CameraCapture';
 import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
 import { embedPhotoLimit } from './capacity';
+import './text-size';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
 type RecordItem = {
@@ -452,25 +453,37 @@ function writeWaProgress(sectionId: string, ids: string[]) {
     localStorage.setItem(WA_PROGRESS_KEY, JSON.stringify(all));
   } catch { /* progress is a convenience: ignore a full storage */ }
 }
-/** The picture with a band under it that shows its number and IMEI / serial, so each picture explains itself. */
-function labelledPhoto(dataUrl: string, lines: string[]): Promise<Blob> {
+/** Draws the photo at a readable size with a little extra contrast and sharpness. No text is ever written on it. */
+function drawReadable(image: HTMLImageElement, maxEdge: number): HTMLCanvasElement {
+  const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext('2d', { willReadFrequently: true })!;
+  context.imageSmoothingQuality = 'high';
+  context.filter = 'contrast(1.12) brightness(1.04)';
+  context.drawImage(image, 0, 0, width, height);
+  context.filter = 'none';
+  // Gentle sharpen (unsharp mask) so small label print stays crisp after shrinking.
+  const data = context.getImageData(0, 0, width, height), src = data.data, out = new Uint8ClampedArray(src);
+  const amount = 0.6, row = width * 4;
+  for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+    const i = y * row + x * 4;
+    for (let c = 0; c < 3; c++) {
+      const blur = (src[i + c - 4] + src[i + c + 4] + src[i + c - row] + src[i + c + row]) / 4;
+      out[i + c] = src[i + c] + (src[i + c] - blur) * amount;
+    }
+  }
+  data.data.set(out); context.putImageData(data, 0, 0);
+  return canvas;
+}
+/** The photo as a clear JPEG with no text on it. */
+function readablePhoto(dataUrl: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
-      try {
-        const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
-        const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
-        const font = Math.max(24, Math.round(width / 20)), pad = Math.round(font * 0.45), line = Math.round(font * 1.3);
-        const band = pad * 2 + lines.length * line;
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height + band;
-        const context = canvas.getContext('2d')!;
-        context.drawImage(image, 0, 0, width, height);
-        context.fillStyle = '#101827'; context.fillRect(0, height, width, band);
-        context.fillStyle = '#ffffff'; context.textBaseline = 'top'; context.font = `700 ${font}px sans-serif`;
-        lines.forEach((text, index) => context.fillText(text, pad, height + pad + index * line, width - pad * 2));
-        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not write the numbers on a picture.')), 'image/jpeg', 0.88);
-      } catch (error) { reject(error); }
+      try { drawReadable(image, 1600).toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not prepare a picture.')), 'image/jpeg', 0.9); }
+      catch (error) { reject(error); }
     };
     image.onerror = () => reject(new Error('A picture could not be opened.'));
     image.src = dataUrl;
@@ -495,25 +508,13 @@ function writeOneByOne(sectionId: string, state: OneByOneState) {
   } catch { /* progress is a convenience */ }
 }
 
-/** The picture with a band showing its number and IMEI / serial, as base64 JPEG. Smaller than the original so it is quick to send. */
-function labelledPhotoBase64(dataUrl: string, lines: string[], maxEdge = 1280): Promise<string> {
+/** The photo as base64 JPEG, smaller and clearer, with no text on it. */
+function readablePhotoBase64(dataUrl: string, maxEdge = 1600): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
-      try {
-        const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
-        const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
-        const font = Math.max(22, Math.round(width / 20)), pad = Math.round(font * 0.45), line = Math.round(font * 1.3);
-        const band = pad * 2 + lines.length * line;
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height + band;
-        const context = canvas.getContext('2d')!;
-        context.drawImage(image, 0, 0, width, height);
-        context.fillStyle = '#101827'; context.fillRect(0, height, width, band);
-        context.fillStyle = '#ffffff'; context.textBaseline = 'top'; context.font = `700 ${font}px sans-serif`;
-        lines.forEach((text, index) => context.fillText(text, pad, height + pad + index * line, width - pad * 2));
-        resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1] || '');
-      } catch (error) { reject(error); }
+      try { resolve(drawReadable(image, maxEdge).toDataURL('image/jpeg', 0.9).split(',')[1] || ''); }
+      catch (error) { reject(error); }
     };
     image.onerror = () => reject(new Error('A picture could not be opened.'));
     image.src = dataUrl;
@@ -2181,7 +2182,6 @@ export default function App() {
   /** A reason WhatsApp did not work, so Bluetooth is offered instead. */
   const [waProblem, setWaProblem] = useState('');
   const [waPreferBluetooth, setWaPreferBluetooth] = useState(false);
-  const [waLabel, setWaLabel] = useState(false);
   /** Add one caption with every IMEI / serial to the picture send (shown by WhatsApp once). */
   const [waCaption, setWaCaption] = useState(true);
   /** The one-by-one screen for a person: look at each phone, copy its numbers, download its picture. */
@@ -2250,12 +2250,9 @@ export default function App() {
         const position = waSend.rows.indexOf(row) + 1;
         const lines = pictureLines(row, position, waSend.rows.length, viaBluetooth);
         const source = recordPhoto(row);
-        // Writing the numbers on the picture is the slow part; by default the picture is sent as it is.
-        const labelled = waLabel || viaBluetooth;
-        const mime = labelled ? 'image/jpeg' : (source.match(/^data:([^;,]+)/)?.[1] || 'image/jpeg');
-        const base64 = labelled ? await labelledPhotoBase64(source, lines) : source.split(',')[1] || '';
-        const extension = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-        items.push({ name: `${String(position).padStart(3, '0')}.${extension}`, base64, mime });
+        // Pictures carry no text; the numbers go in the caption (and numbers.txt for Bluetooth).
+        const base64 = await readablePhotoBase64(source);
+        items.push({ name: `${String(position).padStart(3, '0')}.jpg`, base64, mime: 'image/jpeg' });
         numbers.push(lines.join('  '));
         captions.push(captionLine(row, position));
         if (index % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0)); // let the screen update
@@ -2349,7 +2346,7 @@ export default function App() {
       for (let index = 0; index < rows.length; index++) {
         const row = rows[index];
         const position = allRows.indexOf(row) + 1 || index + 1;
-        const base64 = await labelledPhotoBase64(recordPhoto(row), pictureLines(row, position, total, true));
+        const base64 = await readablePhotoBase64(recordPhoto(row));
         stageBase64(token, `${String(position).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, base64);
         setToast(`Preparing ${index + 1} of ${rows.length}…`);
         if (index % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
@@ -2391,7 +2388,7 @@ export default function App() {
         const row = rows[index];
         const position = allRows.indexOf(row) + 1 || index + 1;
         const lines = pictureLines(row, position, total, true);
-        const blob = await labelledPhoto(recordPhoto(row), lines);
+        const blob = await readablePhoto(recordPhoto(row));
         const file = new File([blob], `${String(position).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, { type: 'image/jpeg' });
         numbers.push(lines.join('  '));
         if (useFolder) await append(file); else { saveDirectFile(file, file.name); await new Promise(resolve => setTimeout(resolve, 350)); }
@@ -4777,7 +4774,8 @@ export default function App() {
             </div>}
 
 
-            {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} />{focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}</div>}
+            {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} /></div>}
+            {!cropEditorOpen && focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}
 
 
 
@@ -4970,7 +4968,7 @@ export default function App() {
         const noWhatsApp = waCaps?.whatsapp === false;
         const bluetoothFirst = waPreferBluetooth || noWhatsApp;
         const problem = noWhatsApp ? 'WhatsApp is not installed on this phone.' : waProblem || (remaining > WHATSAPP_NOTICE ? `WhatsApp may not take all ${remaining} pictures at once.` : '');
-        const whatsappButton = <button type="button" className={bluetoothFirst ? 'subtle-btn' : 'primary whatsapp-btn'} disabled={!!waBusy || noWhatsApp} onClick={() => void sendWhatsAppPictures('whatsapp')}>{waBusy || (done === 0 ? `Send all ${total} pictures by WhatsApp` : `WhatsApp · continue with pictures ${nextPosition}–${total}`)}<small>{noWhatsApp ? 'WhatsApp is not installed.' : `One send with all the pictures${waCaption ? ' and one caption listing every IMEI / serial' : ''}.${waLabel ? ' Numbers also written on each picture.' : ''}`}</small></button>;
+        const whatsappButton = <button type="button" className={bluetoothFirst ? 'subtle-btn' : 'primary whatsapp-btn'} disabled={!!waBusy || noWhatsApp} onClick={() => void sendWhatsAppPictures('whatsapp')}>{waBusy || (done === 0 ? `Send all ${total} pictures by WhatsApp` : `WhatsApp · continue with pictures ${nextPosition}–${total}`)}<small>{noWhatsApp ? 'WhatsApp is not installed.' : `One send with all the pictures${waCaption ? ' and one caption listing every IMEI / serial' : ''}.`}</small></button>;
         const bluetoothButton = <button type="button" className={bluetoothFirst || problem ? 'primary' : 'subtle-btn'} disabled={!!waBusy || waCaps?.bluetooth === false} onClick={() => void sendWhatsAppPictures('bluetooth')}>Send {remaining} by Bluetooth{bluetoothFirst ? '' : ' instead'}<small>{waCaps?.bluetooth === false ? 'This phone has no Bluetooth.' : `Pictures with IMEI / serial written on them, plus a numbers.txt file.${waCaps?.bluetoothOn === false ? ' Bluetooth is off: turn it on first.' : ''}`}</small></button>;
         return <div className="modal-backdrop"><section className="modal wa-groups-modal" role="dialog" aria-modal="true" aria-label={`Send ${waSend.name}'s phones`}>
           <div className="modal-head"><h2>Send {waSend.name}</h2><button className="subtle-btn" onClick={() => setWaSend(null)}>Close</button></div>
@@ -4980,7 +4978,6 @@ export default function App() {
             <small>{remaining ? `Next to send: picture ${nextPosition} of ${total}` : 'All pictures are sent.'}</small>
           </div>
           <label className="settings-check"><input type="checkbox" checked={waCaption} onChange={event => setWaCaption(event.target.checked)} /> Add one caption with every IMEI / serial</label>
-          <label className="settings-check"><input type="checkbox" checked={waLabel} onChange={event => setWaLabel(event.target.checked)} /> Also write the IMEI / serial on each picture (slower)</label>
           <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Always include serial numbers</label>
           {!waAttempt && remaining > 0 && problem && <div className="wa-warning" role="alert">
             <strong>{problem}</strong>
