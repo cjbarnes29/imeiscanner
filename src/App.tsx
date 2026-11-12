@@ -304,6 +304,7 @@ async function tiledRead(worker: Awaited<ReturnType<typeof createWorker>>, color
   const from = source || color, ratio = from.width / color.width;
   const tiles = products > 0 ? tileRects(from.width, from.height, products) : gridTileRects(from.width, from.height);
   for (const tile of tiles) {
+    await yieldToUi();
     const scale = Math.min(2.5, 1800 / Math.max(tile.width, tile.height));
     const width = Math.max(1, Math.round(tile.width * scale)), height = Math.max(1, Math.round(tile.height * scale));
     const plain = document.createElement('canvas'); plain.width = width; plain.height = height;
@@ -710,6 +711,7 @@ async function createCroppedPhotos(image: HTMLCanvasElement | string, regions: C
     const cut = canvas.toDataURL('image/jpeg', 0.9);
     // Tilted label? Level it so the text reads straight (and the second read is more accurate).
     result.set(region.imei, (await straightenDataUrl(cut)).dataUrl);
+    await yieldToUi();
   }
   return result;
 }
@@ -954,6 +956,8 @@ type CropGroup = { id: string; name: string; source: string; crops: SplitCrop[] 
  * (public/ocr), not a CDN: no download on the first scan, and it works offline.
  */
 const OCR_BASE = new URL('ocr', document.baseURI).href;
+/** Let the page repaint and answer taps between heavy steps (canvas work, barcode decoding and picture treatments run on the page's own thread). */
+const yieldToUi = () => new Promise<void>(resolve => { const done = () => resolve(); const timer = window.setTimeout(done, 60); requestAnimationFrame(() => { window.clearTimeout(timer); window.setTimeout(done, 0); }); });
 const newOcrWorker = () => createWorker('eng', 1, { workerPath: `${OCR_BASE}/worker.min.js`, corePath: OCR_BASE, langPath: OCR_BASE });
 
 /**
@@ -1030,8 +1034,11 @@ async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | n
       if (worker) {
         let lines: OcrLine[] = [];
         ({ raw, lines } = await readCropImei(worker, cropDataUrl));
+        await yieldToUi();
         raw = await cameraBarcodeText(cropDataUrl, raw, lines);
+        await yieldToUi();
         raw = await refineCropText(worker, cropDataUrl, raw, lines);
+        await yieldToUi();
         ({ raw, judgement } = await rereadIfUncertain(worker, cropDataUrl, raw, knownTacs));
         imei = cameraImei(raw);
         // Votes across passes or a checksum repair fill in only when the normal rules found nothing.
