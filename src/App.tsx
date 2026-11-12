@@ -129,6 +129,39 @@ function readNativeImportedIds(): Set<string> {
 const STORE = 'imei-lens-records-v1';
 const PEOPLE_STORE = 'imei-lens-people-v1';
 
+/** What was typed for pictures but not saved yet, kept on this phone so it survives closing the app. */
+type DraftFields = { model: string; imei: string; imei2: string; serial: string };
+const DRAFTS_KEY = 'imei-lens-drafts-v1';
+type SavedDrafts = { fields: Record<string, DraftFields>; boxes: Record<string, DrawnBox[]> };
+function readSavedDrafts(): SavedDrafts {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || '{}') as Partial<SavedDrafts>;
+    return { fields: saved.fields && typeof saved.fields === 'object' ? saved.fields : {}, boxes: saved.boxes && typeof saved.boxes === 'object' ? saved.boxes : {} };
+  } catch { return { fields: {}, boxes: {} }; }
+}
+function writeSavedDrafts(saved: SavedDrafts) {
+  try {
+    if (!Object.keys(saved.fields).length && !Object.keys(saved.boxes).length) localStorage.removeItem(DRAFTS_KEY);
+    else localStorage.setItem(DRAFTS_KEY, JSON.stringify(saved));
+  } catch { /* drafts are a convenience: ignore a full storage */ }
+}
+const BULK_PLANS_KEY = 'imei-lens-bulk-crop-plans-v1';
+/** Save the bulk-crop boxes of these photos, keeping boxes saved earlier for other photos. */
+function writeBulkPlans(itemIds: string[], plans: Record<string, DrawnBox[]>) {
+  try {
+    const ids = new Set(itemIds);
+    const kept = Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem(BULK_PLANS_KEY) || '{}') as Record<string, DrawnBox[]>).filter(([id]) => !ids.has(id)));
+    const merged = { ...kept, ...Object.fromEntries(Object.entries(plans).filter(([, list]) => list.length)) };
+    if (Object.keys(merged).length) localStorage.setItem(BULK_PLANS_KEY, JSON.stringify(merged)); else localStorage.removeItem(BULK_PLANS_KEY);
+  } catch { /* ignore a full storage */ }
+}
+function readBulkPlans(ids: string[]): Record<string, DrawnBox[]> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BULK_PLANS_KEY) || '{}') as Record<string, DrawnBox[]>;
+    return Object.fromEntries(Object.entries(saved).filter(([id, list]) => ids.includes(id) && Array.isArray(list) && list.length));
+  } catch { return {}; }
+}
+
 /** Most boxes one photo can be split into while drawing. The number of boxes drawn is the number of products. */
 const MAX_BOXES = 20;
 
@@ -962,7 +995,7 @@ function splitRecords(original: RecordItem, crops: SplitCrop[], source: string, 
     return {
       ...original, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
       sourcePictureId, number: index === 0 ? original.number : firstNumber + index - 1,
-      dataUrl: crop.cropDataUrl, cropDataUrl: crop.cropDataUrl, focus: undefined,
+      dataUrl: crop.cropDataUrl, originalDataUrl: undefined, cropDataUrl: crop.cropDataUrl, focus: undefined,
       ...serial, imei: crop.imei, imei2: recordImeiPair({ imei: crop.imei, raw: crop.raw } as RecordItem).imei2,
       model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
       cropNeedsReview: !crop.imei && !serial.serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
@@ -978,6 +1011,10 @@ function BoxPad({ src, done, cur, setCur, locked }: { src: string; done: DrawnBo
   const draw = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!start.current || locked) return;
     const p = point(event), s = start.current;
+    if (s.edge === 'move' && s.initial) {
+      setCur({ ...s.initial, x: Math.max(0, Math.min(100 - s.initial.width, s.initial.x + (p.x - s.x))), y: Math.max(0, Math.min(100 - s.initial.height, s.initial.y + (p.y - s.y))) });
+      return;
+    }
     if (s.edge && s.initial) {
       const right = s.initial.x + s.initial.width, bottom = s.initial.y + s.initial.height;
       const left = s.edge.includes('w') ? Math.min(p.x, right - 1) : s.initial.x, top = s.edge.includes('n') ? Math.min(p.y, bottom - 1) : s.initial.y;
@@ -988,11 +1025,11 @@ function BoxPad({ src, done, cur, setCur, locked }: { src: string; done: DrawnBo
     setCur({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), width: Math.abs(p.x - s.x), height: Math.abs(p.y - s.y) });
   };
   return <div className="crop-viewport"><div className="crop-editor" style={{ maxWidth: '100%' }}
-    onPointerDown={event => { if (locked) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const p = point(event); start.current = { ...p, edge: (event.target as HTMLElement).dataset.edge, initial: { ...cur } }; if (!start.current.edge) draw(event); }}
+    onPointerDown={event => { if (locked) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const p = point(event); start.current = { ...p, edge: (event.target as HTMLElement).dataset.edge || ((event.target as HTMLElement).dataset.move && !(cur.width >= 99.9 && cur.height >= 99.9) ? 'move' : undefined), initial: { ...cur } }; if (!start.current.edge) draw(event); }}
     onPointerMove={draw} onPointerUp={event => { draw(event); start.current = null; }} onPointerCancel={() => { start.current = null; }}>
     <img src={src} alt="Photo: drag a box around each label" draggable={false} style={{ maxHeight: '44dvh', maxWidth: '100%' }} />
     {done.map((box, index) => <div key={index} className="crop-box-done" style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.width}%`, height: `${box.height}%` }}><span>{index + 1}</span></div>)}
-    {!locked && <div className="crop-selection" style={{ left: `${cur.x}%`, top: `${cur.y}%`, width: `${cur.width}%`, height: `${cur.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
+    {!locked && <div className="crop-selection" data-move="1" style={{ left: `${cur.x}%`, top: `${cur.y}%`, width: `${cur.width}%`, height: `${cur.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
   </div></div>;
 }
 
@@ -1002,15 +1039,14 @@ function BoxPad({ src, done, cur, setCur, locked }: { src: string; done: DrawnBo
  */
 function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClose: () => void; onApply: (results: { id: string; source: string; crops: SplitCrop[] }[]) => void }) {
   const [index, setIndex] = useState(0);
-  const [plans, setPlans] = useState<Record<string, DrawnBox[]>>({});
-  const [count, setCount] = useState(items[0]?.deviceCount || 2);
-  const [boxes, setBoxes] = useState<DrawnBox[]>([]);
+  const [plans, setPlans] = useState<Record<string, DrawnBox[]>>(() => readBulkPlans(items.map(entry => entry.id)));
+  const [boxes, setBoxes] = useState<DrawnBox[]>(() => readBulkPlans(items.map(entry => entry.id))[items[0]?.id] || []);
   const [cur, setCur] = useState<DrawnBox>(FULL_BOX);
   const [phase, setPhase] = useState<'draw' | 'summary'>('draw');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
-  useBackLayer(true, () => { if (!busy) onClose(); }, 'bulk-crop');
+  useBackLayer(true, () => { if (!busy) closeKeeping(); }, 'bulk-crop');
   useEffect(() => () => { void workerRef.current?.terminate(); workerRef.current = null; }, []);
   const item = items[index];
   const planned = items.filter(entry => plans[entry.id]?.length);
@@ -1018,12 +1054,12 @@ function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClos
   const worker = async () => workerRef.current ||= await newOcrWorker();
   function open(next: number) {
     const target = items[next], plan = plans[target.id] || [];
-    setIndex(next); setBoxes(plan); setCount(plan.length || target.deviceCount || 2); setCur(FULL_BOX); setPhase('draw'); setMessage('');
+    setIndex(next); setBoxes(plan); setCur(FULL_BOX); setPhase('draw'); setMessage('');
   }
   function remember(list: DrawnBox[]) { setPlans(old => { const copy = { ...old }; if (list.length) copy[item.id] = list; else delete copy[item.id]; return copy; }); }
   function next(list: DrawnBox[]) { remember(list); if (index < items.length - 1) open(index + 1); else setPhase('summary'); }
   function addBox() {
-    if (boxes.length >= count) return;
+    if (boxes.length >= MAX_BOXES) return;
     if (cur.width <= 0 || cur.height <= 0 || cur.x + cur.width > 100.001 || cur.y + cur.height > 100.001) { setMessage('Draw a box inside the photo first.'); return; }
     if (cur.width >= 99.99 && cur.height >= 99.99) { setMessage('Draw a box around one label first.'); return; }
     const clash = overlapsBox(boxes, cur);
@@ -1034,9 +1070,9 @@ function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClos
     setBusy('Detecting labels…'); setMessage('');
     try {
       const found = await autoDetectBoxes(await worker(), item.source);
-      if (found.boxes.length >= 2) { setCount(found.boxes.length); setBoxes(found.boxes); setCur(FULL_BOX); setMessage(`Found ${found.boxes.length} labels. Check the numbered boxes, use Undo to redraw one, or go on.`); }
-      else if (found.devices >= 2) { setCount(found.devices); setMessage(`Found ${found.devices} labels but could not place the boxes. Draw them yourself.`); }
-      else setMessage('Found only one label. If you see more, enter the number and draw the boxes.');
+      if (found.boxes.length >= 2) { setBoxes(found.boxes); setCur(FULL_BOX); setMessage(`Found ${found.boxes.length} labels. Check the numbered boxes, use Undo to redraw one, or go on.`); }
+      else if (found.devices >= 2) { setMessage(`Found ${found.devices} labels but could not place the boxes. Draw them yourself.`); }
+      else setMessage('Found only one label. If you see more, draw the boxes.');
     } catch (error) { console.error(error); setMessage('Auto-detect did not work on this photo. Draw the boxes yourself.'); }
     finally { setBusy(''); }
   }
@@ -1053,24 +1089,34 @@ function BulkCropDialog({ items, onClose, onApply }: { items: BulkItem[]; onClos
       onApply(results);
     } catch (error) { console.error(error); setMessage('Could not process every photo. Nothing was changed.'); setBusy(''); }
   }
-  const complete = boxes.length === count;
+  // Every box you draw goes into the plan straight away (not only when you tap Save), so closing the window loses nothing.
+  useEffect(() => { if (item) remember(boxes); }, [boxes]);
+  // Boxes you draw are kept on this phone if you close the window, so you can continue later.
+  useEffect(() => { writeBulkPlans(items.map(entry => entry.id), plans); }, [plans]);
+  /** Close the window, saving every drawn box first (not depending on effects having run). */
+  function closeKeeping() {
+    const latest = { ...plans };
+    if (item) { if (boxes.length) latest[item.id] = boxes; else delete latest[item.id]; }
+    writeBulkPlans(items.map(entry => entry.id), latest);
+    onClose();
+  }
   return <div className="modal-backdrop bulk-backdrop"><section className="modal bulk-modal" role="dialog" aria-modal="true" aria-label="Bulk cropping">
-    <div className="modal-head"><h2>Bulk crop</h2><button className="subtle-btn" disabled={!!busy} onClick={onClose}>Close</button></div>
+    <div className="modal-head"><h2>Bulk crop</h2><button className="subtle-btn" disabled={!!busy} onClick={closeKeeping}>Close</button></div>
     {phase === 'draw' && item && <>
       <p className="bulk-step"><strong>Photo {index + 1} of {items.length}</strong> · {item.name}</p>
-      <p className="copy-hint">Step 1: draw the boxes for every photo. Nothing is read until you tap Process all at the end.</p>
+      <p className="copy-hint">Step 1: draw a box around each label (drag inside a box to move it, drag a corner to resize). The box count is the product count. Nothing is read until you tap Process all, and your boxes are kept if you close this window.</p>
       <div className="review-split-start">
-        <label>Labels in this photo <input type="number" inputMode="numeric" min={1} max={20} value={count} disabled={!!busy} onChange={event => { const value = Math.max(1, Math.min(20, Number(event.target.value) || 1)); setCount(value); setBoxes(old => old.slice(0, value)); }} /></label>
+
         <button className="subtle-btn" disabled={!!busy} onClick={() => void auto()}>{busy || 'Auto-detect'}</button>
       </div>
-      <BoxPad src={item.source} done={boxes} cur={cur} setCur={setCur} locked={complete || !!busy} />
+      <BoxPad src={item.source} done={boxes} cur={cur} setCur={setCur} locked={!!busy} />
       {message && <p role="status" className="bulk-message">{message}</p>}
       <div className="share-toolbar bulk-actions">
-        {!complete ? <button className="primary" disabled={!!busy} onClick={addBox}>Add box {boxes.length + 1} of {count}</button>
-          : <button className="primary" disabled={!!busy} onClick={() => next(boxes)}>{index < items.length - 1 ? 'Save · next photo' : 'Save · review all'}</button>}
+        <button className="primary" disabled={!!busy} onClick={addBox}>Add box {boxes.length + 1}</button>
+        {boxes.length > 0 && <button className="primary" disabled={!!busy} onClick={() => next(boxes)}>{index < items.length - 1 ? `Save ${boxes.length} · next photo` : `Save ${boxes.length} · review all`}</button>}
         {boxes.length > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { setCur(boxes[boxes.length - 1]); setBoxes(boxes.slice(0, -1)); }}>Undo box {boxes.length}</button>}
         <button className="subtle-btn" disabled={!!busy} onClick={() => next([])}>Skip this photo</button>
-        {index > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { remember(complete ? boxes : plans[item.id] || []); open(index - 1); }}>← Previous photo</button>}
+        {index > 0 && <button className="subtle-btn" disabled={!!busy} onClick={() => { remember(boxes.length ? boxes : plans[item.id] || []); open(index - 1); }}>← Previous photo</button>}
       </div>
     </>}
     {phase === 'summary' && <>
@@ -1714,8 +1760,11 @@ export default function App() {
   const [manualSerial, setManualSerial] = useState('');
   const [manualImei2, setManualImei2] = useState('');
   /** What you typed for pictures you moved past without saving. Decided at the end: save all or discard. */
-  const [reviewDrafts, setReviewDrafts] = useState<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
-  const draftsRef = useRef<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, DraftFields>>(() => readSavedDrafts().fields);
+  const draftsRef = useRef<Record<string, DraftFields>>(reviewDrafts);
+  /** Boxes drawn for a split that was saved for later, per record. */
+  const [savedBoxes, setSavedBoxes] = useState<Record<string, DrawnBox[]>>(() => readSavedDrafts().boxes);
+  const savedBoxesRef = useRef<Record<string, DrawnBox[]>>(savedBoxes);
   const [finishOpen, setFinishOpen] = useState(false);
   /** A warning that must be seen: shown as a pop-up with OK instead of a small message. */
   const [warning, setWarning] = useState('');
@@ -1965,6 +2014,15 @@ export default function App() {
     setReviewSource(selected?.originalDataUrl || selected?.dataUrl || '');
     setCropEditorOpen(cropRequestedId.current === selected?.id);
     cropRequestedId.current = null;
+    // A split saved for later: bring the drawn boxes back.
+    const keptBoxes = selected ? savedBoxesRef.current[selected.id] : undefined;
+    if (selected && keptBoxes?.length) {
+      setCropEditorOpen(true);
+      setReviewSplit({ recordId: selected.id, target: MAX_BOXES, boxes: keptBoxes, crops: [] });
+      const { [selected.id]: _kept, ...rest } = savedBoxesRef.current;
+      setSavedBoxList(rest);
+      setToast(`Restored your ${keptBoxes.length} unfinished box${keptBoxes.length === 1 ? '' : 'es'}.`);
+    }
     if (selected && androidBridge?.sourceImage && !selected.originalDataUrl) {
       const original = androidBridge.sourceImage(selected.id);
       if (original) setReviewSource(original);
@@ -1988,6 +2046,10 @@ export default function App() {
   function drawCrop(event: ReactPointerEvent<HTMLDivElement>) {
     if (!cropStart.current) return;
     const point = cropPoint(event), start = cropStart.current;
+    if (start.edge === 'move' && start.initial) {
+      setManualCrop({ ...start.initial, x: Math.max(0, Math.min(100 - start.initial.width, start.initial.x + (point.x - start.x))), y: Math.max(0, Math.min(100 - start.initial.height, start.initial.y + (point.y - start.y))) });
+      return;
+    }
     if (start.edge && start.initial) {
       const right = start.initial.x + start.initial.width;
       const bottom = start.initial.y + start.initial.height;
@@ -2031,6 +2093,15 @@ export default function App() {
   useBackLayer(!!warning, () => setWarning(''), 'warning');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(!!confirmDupes, () => setConfirmDupes(null), 'confirm-dupes');
+  // Drafts and boxes saved for a record that no longer exists (deleted, split) are dropped once the records have loaded.
+  useEffect(() => {
+    if (!inventoryLoaded) return;
+    const ids = new Set(records.map(row => row.id));
+    const fields = Object.fromEntries(Object.entries(draftsRef.current).filter(([id]) => ids.has(id)));
+    if (Object.keys(fields).length !== Object.keys(draftsRef.current).length) setDrafts(fields);
+    const boxes = Object.fromEntries(Object.entries(savedBoxesRef.current).filter(([id]) => ids.has(id)));
+    if (Object.keys(boxes).length !== Object.keys(savedBoxesRef.current).length) setSavedBoxList(boxes);
+  }, [inventoryLoaded, records.length]);
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
@@ -3310,7 +3381,7 @@ export default function App() {
           if (barcodeLines.length) { lines = [...lines, ...barcodeLines]; raw += '\n' + barcodeLines.map(line => line.text).join('\n'); }
         }
         // The person said there are several products but fewer were found: look closer, tile by tile.
-        const targetProducts = Math.min(6, expectedProducts || countModelLabels(lines));
+        const targetProducts = Math.min(12, expectedProducts || countModelLabels(lines));
         if (targetProducts > 1 && scanMode !== 'fast') {
           const known = deviceAnchors(lines, sourceWidth, sourceHeight, color.getContext('2d')?.getImageData(0, 0, sourceWidth, sourceHeight)).length;
           if (known < targetProducts) {
@@ -3334,7 +3405,7 @@ export default function App() {
         let croppedPhotos=new Map<string,string>();
         if(regions.length>1){try{croppedPhotos=await createCroppedPhotos(color,regions,sourceWidth,sourceHeight);}catch(error){console.error('Unable to split labels',error);}}
         if (expectedProducts > 1 && regions.length > 1 && regions.length < expectedProducts) shortPhotos++;
-        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&(multiText||expectedProducts>1));
+        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&(multiText||targetProducts>1));
         const cropKeys=croppedPhotos.size?[...croppedPhotos.keys()]:[''];
 
         const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
@@ -3347,6 +3418,14 @@ export default function App() {
           let text = await cameraBarcodeText(cropDataUrl || dataUrl, cropResult.raw, cropResult.lines, codesInside(cropDataUrl ? region : undefined));
           if (scanMode !== 'fast' && !cropNeedsReview) text = await refineCropText(w, cropDataUrl || dataUrl, text, cropResult.lines);
           if (!cropNeedsReview && !extractPreferredImei(text) && !extractSerial(text)) { const serialRaw = await readSerialPhoto(w, cropDataUrl || dataUrl); if (serialRaw) text = serialRaw; }
+          // Still no valid IMEI 1: read this crop again with the most thorough pass and keep that reading only if it finds one.
+          if (cropDataUrl && scanMode !== 'fast' && scanMode !== 'detailed' && !cropNeedsReview && !extractPreferredImei(text)) {
+            try {
+              const again = await readCropImei(w, cropDataUrl, 'detailed');
+              const retried = await cameraBarcodeText(cropDataUrl, again.raw, again.lines, codesInside(region));
+              if (extractPreferredImei(retried)) text = retried;
+            } catch (error) { console.warn('Retry of a low-confidence crop failed', error); }
+          }
           return text;
         };
         const cropTexts = new Map<string, string>();
@@ -3386,7 +3465,7 @@ export default function App() {
           // A crop whose IMEI is barcode-confirmed is trusted even if a box edge was unclear.
           cropNeedsReview: cropNeedsReview || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
           imei2: recordImeiPair({ imei, raw: cropRaw } as RecordItem).imei2,
-          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length, expectedProducts), deviceImeis: found }; })() : {}),
+          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length, targetProducts), deviceImeis: found }; })() : {}),
           model,
           ...serialReading(cropRaw),
           imei,
@@ -3468,7 +3547,8 @@ export default function App() {
   type ReviewFields = { model: string; imei: string; imei2: string; serial: string };
   const currentFields = (): ReviewFields => ({ model: manualModel, imei: manualImei, imei2: manualImei2, serial: manualSerial });
   const fieldsDiffer = (record: RecordItem, fields: ReviewFields) => fields.model !== exportModel(record.model) || fields.imei !== record.imei || fields.imei2 !== recordImeiPair(record).imei2 || fields.serial !== recordSerial(record);
-  function setDrafts(next: Record<string, ReviewFields>) { draftsRef.current = next; setReviewDrafts(next); }
+  function setDrafts(next: Record<string, ReviewFields>) { draftsRef.current = next; setReviewDrafts(next); writeSavedDrafts({ fields: next, boxes: savedBoxesRef.current }); }
+  function setSavedBoxList(next: Record<string, DrawnBox[]>) { savedBoxesRef.current = next; setSavedBoxes(next); writeSavedDrafts({ fields: draftsRef.current, boxes: next }); }
   /** Keep what was typed for this picture so you can move on and decide at the end. */
   function stashDraft() {
     if (!selected) return draftsRef.current;
@@ -3485,8 +3565,9 @@ export default function App() {
   }
   /** After the last picture, or when closing: ask what to do with unsaved changes. */
   function finishReview() {
-    if (adjustingCrop || rotatingPhoto || reviewSplit) return;
-    if (Object.keys(stashDraft()).length) setFinishOpen(true); else closePhotoReviewNow();
+    if (adjustingCrop || rotatingPhoto) return;
+    const unfinishedSplit = !!reviewSplit && (reviewSplit.boxes.length > 0 || reviewSplit.crops.length > 0);
+    if (Object.keys(stashDraft()).length || unfinishedSplit) setFinishOpen(true); else closePhotoReviewNow();
   }
   function buildReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem> } | { error: string } {
     if (fields.imei && !/^\d{15}$/.test(fields.imei)) return { error: 'Enter all 15 IMEI digits or leave it empty.' };
@@ -3529,8 +3610,16 @@ export default function App() {
     const count = Object.keys(patches).length;
     setToast(`Saved ${count} picture${count === 1 ? '' : 's'}.`);
   }
+  /** Keep everything unsaved (typed fields and drawn boxes) on this phone and close; opening the record continues where you stopped. */
+  function saveForLater() {
+    const fields = stashDraft();
+    if (selected && reviewSplit && reviewSplit.recordId === selected.id && reviewSplit.boxes.length) setSavedBoxList({ ...savedBoxesRef.current, [selected.id]: reviewSplit.boxes });
+    else writeSavedDrafts({ fields, boxes: savedBoxesRef.current });
+    setFinishOpen(false); closePhotoReviewNow();
+    setToast('Saved for later. Open the record, or use the banner above the records, to continue.');
+  }
   function discardAllDrafts() {
-    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
+    setDrafts({}); setSavedBoxList({}); setFinishOpen(false); closePhotoReviewNow();
     setToast('Changes discarded.');
   }
   const pendingChanges = Object.keys(reviewDrafts).filter(id => id !== selected?.id).length + (selected && fieldsDiffer(selected, currentFields()) ? 1 : 0);
@@ -3636,6 +3725,14 @@ export default function App() {
     setToast(`Box ${boxes.length} drawn: ${boxes.length} product${boxes.length === 1 ? '' : 's'} so far. Draw another, or tap Process.`);
   }
 
+  /** Take a drawn box back to the live selection so it can be moved or resized, then added again. */
+  function editDrawnBox(index: number) {
+    if (!reviewSplit || adjustingCrop) return;
+    const box = reviewSplit.boxes[index];
+    setReviewSplit({ ...reviewSplit, boxes: reviewSplit.boxes.filter((_, position) => position !== index) });
+    setManualCrop(box);
+    setToast(`Box ${index + 1} is ready: drag it to move, drag a corner to resize, then tap Add box.`);
+  }
   /** Delete one drawn box (its number, not the last one). */
   function removeDrawnBox(index: number) {
     if (!reviewSplit || adjustingCrop) return;
@@ -4054,13 +4151,14 @@ export default function App() {
       </header>
 
       {settingsOpen && <SettingsPanel onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
-      {finishOpen && <div className="modal-backdrop finish-backdrop"><section className="modal finish-modal" role="alertdialog" aria-modal="true" aria-label="Save or discard changes">
-        <h2>Save your changes?</h2>
-        <p>You changed {Object.keys(reviewDrafts).length} picture{Object.keys(reviewDrafts).length === 1 ? '' : 's'} and did not save {Object.keys(reviewDrafts).length === 1 ? 'it' : 'them'} yet. Save everything, discard it, or go back and keep editing.</p>
+      {finishOpen && <div className="modal-backdrop finish-backdrop"><section className="modal finish-modal" role="alertdialog" aria-modal="true" aria-label="Unsaved changes">
+        <h2>You have unsaved changes</h2>
+        <p>{Object.keys(reviewDrafts).length ? `${Object.keys(reviewDrafts).length} picture${Object.keys(reviewDrafts).length === 1 ? ' has' : 's have'} edits that are not saved yet. ` : ''}{reviewSplit && reviewSplit.boxes.length ? `${reviewSplit.boxes.length} drawn box${reviewSplit.boxes.length === 1 ? ' is' : 'es are'} not processed yet. ` : ''}Save for later keeps everything on this phone so you can continue; Discard throws it away.</p>
         <div className="finish-actions">
-          <button type="button" className="primary" onClick={saveAllDrafts}>Save all ({Object.keys(reviewDrafts).length})</button>
-          <button type="button" className="subtle-btn danger" onClick={discardAllDrafts}>Discard changes</button>
-          <button type="button" className="subtle-btn" autoFocus onClick={() => setFinishOpen(false)}>Keep editing</button>
+          {Object.keys(reviewDrafts).length > 0 && <button type="button" className="primary" onClick={saveAllDrafts}>Save all ({Object.keys(reviewDrafts).length})</button>}
+          <button type="button" className={Object.keys(reviewDrafts).length > 0 ? 'subtle-btn' : 'primary'} onClick={saveForLater}>Save for later</button>
+          <button type="button" className="subtle-btn danger" onClick={discardAllDrafts}>Discard</button>
+          <button type="button" className="subtle-btn" autoFocus onClick={() => setFinishOpen(false)}>Continue editing</button>
         </div>
       </section></div>}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
@@ -4236,7 +4334,7 @@ export default function App() {
               <span>Products in each photo</span>
               <select value={expectedProducts} disabled={busy} onChange={event => setExpectedProducts(Number(event.target.value))}>
                 <option value={0}>Auto · find them myself</option>
-                {[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
               </select>
             </label>
             {expectedProducts > 1 && <p className="scan-mode-note">If fewer than {expectedProducts} are found the first time, the app reads the photo again in enlarged pieces to find the rest, then straightens each crop. Photos that still cannot be split are marked for review.</p>}
@@ -4502,6 +4600,12 @@ export default function App() {
             </div>
           </div>
 
+          {!selected && Object.keys(reviewDrafts).length + Object.keys(savedBoxes).length > 0 && <div className="draft-banner" role="status">
+            <span>{Object.keys(reviewDrafts).length + Object.keys(savedBoxes).length} record{Object.keys(reviewDrafts).length + Object.keys(savedBoxes).length === 1 ? '' : 's'} with edits saved for later.</span>
+            <button type="button" className="subtle-btn" onClick={() => { const id = Object.keys(reviewDrafts)[0] || Object.keys(savedBoxes)[0]; const record = records.find(row => row.id === id); if (record) openReview(record); else discardAllDrafts(); }}>Continue</button>
+            {Object.keys(reviewDrafts).length > 0 && <button type="button" className="subtle-btn" onClick={saveAllDrafts}>Save all</button>}
+            <button type="button" className="subtle-btn danger" onClick={discardAllDrafts}>Discard</button>
+          </div>}
           {!simpleView && recordsTab === 'records' && <div className="filters filters-compact">
             <label className="filter-select">Model
               <select aria-label="Filter by model" value={filter === 'All' || modelGroups.some(group => group.key === filter) ? filter : 'All'} onChange={event => setFilter(event.target.value)}>
@@ -4935,16 +5039,17 @@ export default function App() {
             <details id="crop-editor-panel" className="crop-workspace" open={cropEditorOpen}>
               <summary onClick={event => { if (cropEditorOpen) event.preventDefault(); else setCropEditorOpen(true); }}>Adjust crop</summary>
               <button className="subtle-btn crop-back" onClick={closeCropEditor}>← Back to record</button>
-              <p>{reviewSplit ? reviewSplit.crops.length === reviewSplit.target ? 'Review each picture and its IMEI and model, then save the set.' : reviewSplit.boxes.length === reviewSplit.target ? `All ${reviewSplit.target} boxes are drawn. Check them on the photo, then tap Process all ${reviewSplit.target}.` : `Draw box ${reviewSplit.boxes.length + 1} of ${reviewSplit.target}: drag around the whole sticker or box face, including the IMEI and barcode. Draw all ${reviewSplit.target} boxes first; they are read together afterwards.` : 'Drag around the whole sticker or box face, including the IMEI and barcode. Save this crop, or add another.'}</p>
+              <p className="crop-hint">{reviewSplit ? reviewSplit.crops.length ? 'Check each picture, then save.' : `Drag around each label. ${reviewSplit.boxes.length} box${reviewSplit.boxes.length === 1 ? '' : 'es'} so far.` : 'Drag around the label, then save.'}</p>
+              <details className="crop-help"><summary>How to crop</summary><p>Drag around the whole sticker or box face, including the IMEI and barcode. Drag inside the box to move it; drag a corner to resize it. Draw every box first; they are read together when you tap Process. Use − / + Zoom to place boxes precisely.</p></details>
               {selected.cropDataUrl && <div className="crop-saved-preview"><strong>Saved crop for this record</strong><img src={selected.cropDataUrl} alt="Saved crop for this record" /></div>}
               {(!reviewSplit || reviewSplit.crops.length < reviewSplit.target) && <><div className="crop-zoom-controls"><button className="subtle-btn" onClick={() => setCropZoom(old => Math.max(1, old - 0.5))} disabled={cropZoom <= 1}>− Zoom</button><span>{Math.round(cropZoom * 100)}%</span><button className="subtle-btn" onClick={() => setCropZoom(old => Math.min(3, old + 0.5))} disabled={cropZoom >= 3}>+ Zoom</button><button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶ Rotate</button><button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷ Rotate</button></div>
-              <div className="crop-viewport"><div className="crop-editor" style={{ maxWidth: cropZoom > 1 ? 'none' : '100%' }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const point = cropPoint(event); const edge = (event.target as HTMLElement).dataset.edge; cropStart.current = { ...point, edge, initial: { ...manualCrop } }; if (!edge) drawCrop(event); }} onPointerMove={drawCrop} onPointerUp={event => { drawCrop(event); cropStart.current = null; }} onPointerCancel={() => { cropStart.current = null; }}>
+              <div className="crop-viewport"><div className="crop-editor" style={{ maxWidth: cropZoom > 1 ? 'none' : '100%' }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const point = cropPoint(event); const target = event.target as HTMLElement; const whole = manualCrop.width >= 99.9 && manualCrop.height >= 99.9; const edge = target.dataset.edge || (target.dataset.move && !whole ? 'move' : undefined); cropStart.current = { ...point, edge, initial: { ...manualCrop } }; if (!edge) drawCrop(event); }} onPointerMove={drawCrop} onPointerUp={event => { drawCrop(event); cropStart.current = null; }} onPointerCancel={() => { cropStart.current = null; }}>
                 <img src={reviewSource || selected.dataUrl} alt="Original photo: drag to select the whole sticker or box" draggable={false} style={{ maxHeight: `${cropZoom * 44}dvh`, maxWidth: cropZoom > 1 ? 'none' : '100%' }} />
                 {reviewSplit?.boxes.map((box, index) => <div key={index} className="crop-box-done" style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.width}%`, height: `${box.height}%` }}><span>{index + 1}</span></div>)}
-                {(!reviewSplit || reviewSplit.boxes.length < reviewSplit.target) && <div className="crop-selection" style={{ left: `${manualCrop.x}%`, top: `${manualCrop.y}%`, width: `${manualCrop.width}%`, height: `${manualCrop.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
+                {(!reviewSplit || reviewSplit.boxes.length < reviewSplit.target) && <div className="crop-selection" data-move="1" style={{ left: `${manualCrop.x}%`, top: `${manualCrop.y}%`, width: `${manualCrop.width}%`, height: `${manualCrop.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
               </div></div>
               {cropDraftPreview && <div className="crop-draft-preview"><strong>Selected picture</strong><img src={cropDraftPreview} alt="Preview of selected crop" /></div>}
-              {reviewSplit && reviewSplit.boxes.length > 0 && !reviewSplit.crops.length && <div className="box-chips" aria-label="Drawn boxes">{reviewSplit.boxes.map((_, index) => <span key={index} className="box-chip">Box {index + 1} <button className="subtle-btn" aria-label={`Delete box ${index + 1}`} disabled={adjustingCrop} onClick={() => removeDrawnBox(index)}>✕</button></span>)}<small>{reviewSplit.boxes.length} box{reviewSplit.boxes.length === 1 ? '' : 'es'} = {reviewSplit.boxes.length} product{reviewSplit.boxes.length === 1 ? '' : 's'}</small></div>}
+              {reviewSplit && reviewSplit.boxes.length > 0 && !reviewSplit.crops.length && <div className="box-chips" aria-label="Drawn boxes">{reviewSplit.boxes.map((_, index) => <span key={index} className="box-chip">Box {index + 1} <button className="subtle-btn" aria-label={`Move or resize box ${index + 1}`} disabled={adjustingCrop} onClick={() => editDrawnBox(index)}>✎</button><button className="subtle-btn" aria-label={`Delete box ${index + 1}`} disabled={adjustingCrop} onClick={() => removeDrawnBox(index)}>✕</button></span>)}<small>{reviewSplit.boxes.length} box{reviewSplit.boxes.length === 1 ? '' : 'es'} = {reviewSplit.boxes.length} product{reviewSplit.boxes.length === 1 ? '' : 's'}</small></div>}
               <button className="subtle-btn" onClick={() => setManualCrop({ x: 0, y: 0, width: 100, height: 100 })}>Reset selection</button>
               <details><summary>Fine-tune selection</summary><div className="manual-crop-controls">
                 {(['x', 'y', 'width', 'height'] as const).map(key => (

@@ -549,3 +549,15 @@ body{touch-action:pan-y pinch-zoom}
 
 /* Crop: boxes drawn so far, each with a delete button */
 .box-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}.box-chip{display:inline-flex;align-items:center;gap:4px;background:#0d1828;border:1px solid #27394d;border-radius:8px;padding:4px 6px;font-size:12px}.box-chip button{min-height:26px;min-width:26px;padding:0 6px}.box-chips small{color:#8fa0b4;font-size:12px}
+
+/* Compact crop editor: short hint, details folded, full screen on phones */
+.crop-hint{margin:4px 0;font-size:13px;color:#c5d0dd}.crop-help{margin:2px 0 6px;font-size:12px}.crop-help summary{cursor:pointer;color:#65dcb5}.crop-help p{margin:6px 0;color:#9eb0c4;line-height:1.5}
+.crop-saved-preview img,.crop-draft-preview img{max-height:90px;width:auto;max-width:100%;object-fit:contain}
+.crop-saved-preview,.crop-draft-preview{display:flex;align-items:center;gap:10px;font-size:12px}
+.crop-selection{cursor:move}.crop-handle{cursor:nwse-resize}
+.draft-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 22px;padding:10px 12px;border:1px solid #6a5a2a;border-radius:10px;background:#2a2410;color:#f3dca0;font-size:13px}.draft-banner span{flex:1;min-width:160px}
+@media(max-width:700px){.modal-backdrop:has(.crop-mode){padding:0}.modal.crop-mode{width:100%;height:100dvh;max-height:100dvh;border-radius:0;border:0;padding:8px 10px 0}.modal.crop-mode .crop-editor img{max-height:60dvh}.crop-mode .crop-zoom-controls{flex-wrap:wrap}}
+
+/* The selection box itself takes the pointer so it can be dragged (moved); the dimming shadow is not clickable */
+.crop-selection{pointer-events:auto;cursor:move}
+.crop-mode .crop-selection{pointer-events:auto;cursor:move}

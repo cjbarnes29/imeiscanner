@@ -37,4 +37,11 @@ assert.equal(m.needsOrientationCheck(2),true,'weak read of junk is still checked
 assert.equal(m.needsOrientationCheck(8),false,'a clear read is not turned');
 const M=(t,x,y)=>({text:t,bbox:{x0:x,y0:y,x1:x+300,y1:y+40}});
 assert.equal(m.countModelLabels([M('Model : SM-A165F/DS',50,50),M('Model : SM-A165F/DS',52,52),M('Model : SM-A165F/DS',50,900),M('SM-A165FZADMEA',50,130)]),2,'two labels (repeat of the same line counts once)');
+// 7-12 products
+for(const [n,expect] of [[7,8],[8,8],[9,9],[10,12],[12,12]]){const tiles=m.tileRects(4000,3000,n);assert.equal(tiles.length,expect,n+' products: '+expect+' tiles');for(const x of tiles)assert.ok(x.x>=0&&x.y>=0&&x.x+x.width<=4000&&x.y+x.height<=3000,'tiles stay inside the photo');}
+assert.ok(m.tileRects(4000,3000,10).length>=10,'at least one tile per product for 10');
+// Other once-per-label lines count labels when "Model" is misread
+assert.equal(m.countModelLabels([M('vodel - §M-A 65F/D5',50,50),M('4GB |128GB',50,300),M('S/N : RFGLS',900,300),M('4GB |128GB',1500,300),M('S/N : RFGL8',2300,300)]),2,'two labels from the storage / S/N lines');
+assert.equal(m.countModelLabels([M('Model : SM-A165F/DS',50,50),M('SM-A165FZADMEA',50,130),M('Gray',50,200),M('4GB |128GB',50,300),M('S/N : RFGL81NKELD',900,300)]),1,'one label stays one (no double counting across line kinds)');
+assert.equal(m.countModelLabels([]),0);
 console.log('PASS: tilt estimation (0, 6, -9, 12 degrees), blank picture, overlapping tile plans for 2-6 products, merging repeated lines from tiles.');

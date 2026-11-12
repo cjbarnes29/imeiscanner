@@ -3,10 +3,16 @@
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
 ## Unreleased (web app only; the APK is not rebuilt)
-- **Crop without a count:** the “How many labels?” step is gone. Tap Start cropping and draw one box per label; the number of boxes is the number of products. Each drawn box can be deleted from the box list (Box 1 ✕ …).
+- **Crop without a count:** the "How many labels?" step is gone. Tap Start cropping and draw one box per label; the number of boxes is the number of products. The same in **Bulk crop**.
+- **Move, resize, delete boxes:** drag inside a box to move it, drag a corner to resize it, ✎ on the box list takes a drawn box back to edit it, ✕ deletes it. (Before, only the box corners could be dragged: the box body ignored the pointer.)
 - **Process, then save:** Process reads every drawn box at once; Save then writes one record per box.
-- **The original photo is removed after a split:** each crop keeps only its own picture. The full photo is no longer copied into every product record, and its stored copy is cleaned up. Your gallery is never touched.
-- **Known limits:** boxes cannot be moved or resized after drawing (delete and redraw); there is no exit prompt yet; the Android app still keeps its native copy until the next APK.
+- **The original photo is removed after a split:** each crop keeps only its own picture (the full photo is no longer copied into every product record) and its stored copy is cleaned up. Your gallery is never touched. Fixed: split records used to keep the original photo too.
+- **Exit prompt, Save for later and draft recovery:** closing the review with unsaved typed edits or unprocessed boxes asks **Save all / Save for later / Discard / Continue editing**. Saved-for-later edits and boxes survive closing or reloading the app; a banner above the records offers Continue / Save all / Discard. Bulk-crop boxes are kept when the window is closed.
+- **Compact crop editor:** a short hint instead of long instructions (the details are under "How to crop"), a smaller box preview, and a full-screen layout on phones.
+- **More products per photo:** *Products in each photo* goes up to 10 and 12 (tile plans for 7-12), and the automatic count now also uses the S/N, storage and long model-code lines, so one misread "Model" line no longer hides a label. A photo that shows several labels but could not be split is flagged for review ("1 device or N?") instead of being saved quietly as one phone.
+- **Low-confidence retry:** a crop with no valid IMEI 1 after the normal passes is read again with the most thorough pass and kept only if that finds a valid IMEI.
+- **Tested in a real browser:** `scripts/e2e-crop.mjs` drives the crop flow (21 checks) and `scripts/e2e-scan.mjs` runs the real scan on photos in `test-photos`. Neither is part of `npm test`.
+- **Known limits:** photos with cut-off or heavily glared labels still need a manual look (they are flagged); the Android app keeps its native copy of a split photo until the next APK, and the web-only changes above reach the app with it.
 
 ## 1.19.1 — the background scanner looks closer for missed products
 - **Choose photos and scan** counts the "Model : SM-…" labels it can see. When that is more than the products it found, it reads the photo again in overlapping pieces (halves, thirds, 2×2 or 3×2) and separates the products again. The same idea as the in-app scanner's tiled re-read.
