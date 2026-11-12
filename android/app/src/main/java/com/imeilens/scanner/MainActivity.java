@@ -64,6 +64,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         cleanStaleCache();
+        if (state == null) handleShare(getIntent());
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         webView = new WebView(this);
@@ -207,6 +208,58 @@ public final class MainActivity extends Activity {
         return queue;
     }
 
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleShare(intent);
+    }
+
+    /** Photos shared from WhatsApp, Gallery and other apps: copy them here (the sender's access ends soon), then scan. */
+    private void handleShare(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        boolean single = Intent.ACTION_SEND.equals(action), many = Intent.ACTION_SEND_MULTIPLE.equals(action);
+        if (!single && !many) return;
+        String type = intent.getType();
+        if (type != null && !type.startsWith("image/") && !"*/*".equals(type)) return;
+        ArrayList<Uri> uris = new ArrayList<>();
+        if (single) {
+            Uri one = androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri.class);
+            if (one != null) uris.add(one);
+        } else {
+            ArrayList<Uri> list = androidx.core.content.IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri.class);
+            if (list != null) uris.addAll(list);
+        }
+        ClipData clips = intent.getClipData();
+        if (uris.isEmpty() && clips != null) for (int i = 0; i < clips.getItemCount(); i++) if (clips.getItemAt(i).getUri() != null) uris.add(clips.getItemAt(i).getUri());
+        setIntent(new Intent(this, MainActivity.class)); // handled: do not run again if the screen is recreated
+        if (uris.isEmpty()) return;
+        final String person = getSharedPreferences("app-state", MODE_PRIVATE).getString("active-person", selectedPerson);
+        new Thread(() -> {
+            File folder = new File(ScanStore.root(this), "shared");
+            if (!folder.exists() && !folder.mkdirs()) return;
+            JSONArray queue = new JSONArray();
+            for (Uri uri : uris) {
+                if (queue.length() >= 500) break;
+                File copy = new File(folder, "shared-" + UUID.randomUUID() + ".jpg");
+                try (InputStream input = getContentResolver().openInputStream(uri); FileOutputStream output = new FileOutputStream(copy)) {
+                    if (input == null) continue;
+                    byte[] chunk = new byte[16384]; int count;
+                    while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
+                } catch (Exception error) { copy.delete(); continue; }
+                try { queue.put(new JSONObject().put("uri", Uri.fromFile(copy).toString()).put("name", displayName(uri))); }
+                catch (Exception ignored) { copy.delete(); }
+            }
+            if (queue.length() == 0) return;
+            if (ScanStore.start(this, queue, person)) {
+                WorkManager.getInstance(this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+            } else ScanStore.addPending(this, queue, person);
+            notifyWeb();
+            final int shared = queue.length();
+            runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-shared',{detail:{count:" + shared + "}}))", null));
+        }).start();
+    }
+
     private String displayName(Uri uri) {
         try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
@@ -313,6 +366,12 @@ public final class MainActivity extends Activity {
                     return "data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP);
                 } finally { source.recycle(); }
             } catch (Exception error) { return ""; }
+        }
+
+        /** The web page tells the app which person new scans belong to, so shared photos go to the same person. */
+        @JavascriptInterface public void setActivePerson(String personId) {
+            if (personId == null || personId.length() > 80) return;
+            getSharedPreferences("app-state", MODE_PRIVATE).edit().putString("active-person", personId).apply();
         }
 
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }

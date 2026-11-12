@@ -77,6 +77,7 @@ type AndroidBridge = {
   abortFolder?(token: string): void;
   // Android share menu (APK 1.7+): send the staged files through Bluetooth, Quick Share, WhatsApp and so on.
   shareFolder?(token: string, title: string): boolean;
+  setActivePerson?(personId: string): void;
   // Delete every saved scan result and cropped photo kept by the Android app (APK 1.8+).
   resetScans?(): boolean;
 };
@@ -1685,6 +1686,18 @@ export default function App() {
     window.addEventListener('android-export-result', report);
     return () => window.removeEventListener('android-export-result', report);
   }, []);
+
+  useEffect(() => {
+    if (!androidBridge) return;
+    const shared = (event: Event) => {
+      const count = (event as CustomEvent<{ count: number }>).detail?.count || 0;
+      setMainView('scan');
+      setToast(`Scanning ${count} shared photo${count === 1 ? '' : 's'}. Results appear in Records.`);
+    };
+    window.addEventListener('android-shared', shared);
+    return () => window.removeEventListener('android-shared', shared);
+  }, []);
+  useEffect(() => { androidBridge?.setActivePerson?.(activePersonId); }, [activePersonId]);
 
   useEffect(() => { localStorage.setItem('imei-lens-laptop-url', laptopUrl); }, [laptopUrl]);
   useEffect(() => {
