@@ -446,6 +446,18 @@ public final class MainActivity extends Activity {
                 .putString("scan-speed", clean).putInt("scan-expected", Math.max(0, Math.min(ImageScanner.MAX_PRODUCTS, expected))).apply();
         }
 
+        /** The crop queue's progress. While active, an ongoing notification and a wake lock keep the app working when minimized. */
+        @JavascriptInterface public void queueStatus(int done, int total, boolean active) {
+            if (active) QueueService.show(MainActivity.this, done, total); else QueueService.hide(MainActivity.this);
+        }
+
+        /** True once if the notification's Pause button was tapped. */
+        @JavascriptInterface public boolean queueStopRequested() {
+            boolean value = QueueService.stopRequested;
+            QueueService.stopRequested = false;
+            return value;
+        }
+
         @JavascriptInterface public String status() {
             try { return ScanStore.json(MainActivity.this); }
             catch (Exception error) { return "{\"status\":\"error\",\"error\":\"Cannot read saved scan\",\"records\":[]}"; }

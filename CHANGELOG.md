@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.25.0 — the crop queue keeps working when the app is minimized (Android)
+**Android code changed (new APK).**
+- While the background crop queue runs, the app shows an ongoing notification ("IMEI Lens is cropping photos · 3 of 12 done", progress bar, tap to open, **Pause**) and holds a wake lock, so Android does not stop it when you minimize the app or the screen turns off (new `QueueService`, foreground service of type media processing; bridge `queueStatus` / `queueStopRequested`). Pause in the notification pauses the queue; *Continue* in the app banner resumes it.
+- The queue is still saved on the phone and offered for resuming if Android stops the app anyway.
+- **Not verified:** this needs a physical phone (no phone or emulator here): the code compiles and the manifest/bridge are in the APK, but how long a given phone keeps the page running while minimized is untested; some makers' battery savers kill apps regardless (set IMEI Lens to "unrestricted" battery use). The page itself may run slower while minimized.
+- **Next step (planned):** move cropping and reading into the phone's own scanner (like *Choose photos and scan*), which survives minimizing, locking and closing without any of these caveats.
 ## 1.24.0 — background crop queue, faster Crop Studio start, responsive Save all
 - **Background crop queue (Bulk crop or Crop photo):** *Queue this photo & next →* sends the photo you just boxed to a queue and opens the next one; *Queue all in background (N)* queues every photo (photos with no boxes are cut automatically). The editor closes at once and the queue is read one photo at a time while you keep using the app. A banner shows "n of N done" with Pause / Continue and Cancel. Each original is replaced only after its crops were read; crops that are not certain are flagged, and a **Review N** button opens just those. A photo with no separate products found is left as it is (counted in the banner).
 - **The queue survives closing the app:** record ids and box positions are kept on the phone; after a restart a banner offers **Resume** or **Discard** (it never starts reading silently). The queue runs on the page, so it pauses when the app is closed or in the background; the photo being read at that moment starts again.

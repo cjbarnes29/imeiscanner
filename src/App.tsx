@@ -80,6 +80,10 @@ type AndroidBridge = {
   choosePhotos(personId: string): void;
   /** APK 1.22+: scan speed and products per photo for the background scanner. Optional so older APKs keep working. */
   setScanOptions?(speed: string, expected: number): void;
+  /** APK 1.25+: progress of the crop queue; while active the app shows a notification and holds a wake lock so it keeps working minimized. */
+  queueStatus?(done: number, total: number, active: boolean): void;
+  /** True once after the notification's Pause button was tapped. */
+  queueStopRequested?(): boolean;
   status(): string;
   image(id: string): string;
   sourceImage(id: string): string;
@@ -3794,6 +3798,17 @@ export default function App() {
     void old.then(w => w.terminate()).catch(() => undefined);
   }, [cropQueue.length, queueStats.done, queueStats.failed]);
   useEffect(() => { if (!bulkCropOpen && !bulkDraft) bulkRowsRef.current = null; }, [bulkCropOpen, bulkDraft]);
+  // While the queue runs, the phone shows a notification and keeps the app awake, so minimizing does not stop it.
+  useEffect(() => {
+    androidBridge?.queueStatus?.(queueStats.done + queueStats.failed, queueStats.total, cropQueue.length > 0 && !queuePaused);
+  }, [cropQueue.length, queuePaused, queueStats.done, queueStats.failed, queueStats.total]);
+  useEffect(() => () => { androidBridge?.queueStatus?.(0, 0, false); }, []);
+  // The notification's Pause button.
+  useEffect(() => {
+    if (!androidBridge?.queueStopRequested || !cropQueue.length || queuePaused) return;
+    const timer = window.setInterval(() => { if (androidBridge.queueStopRequested!()) { setQueuePaused(true); setToast('Background cropping paused. Tap Continue in the banner.'); } }, 1500);
+    return () => window.clearInterval(timer);
+  }, [cropQueue.length, queuePaused]);
   const queueFlagged = records.filter(row => row.cropNeedsReview && queueStats.startedAt && Date.parse(row.createdAt) >= queueStats.startedAt);
   const queueActive = cropQueue.length > 0;
   const queueFinished = !queueActive && queueStats.total > 0 && queueStats.done + queueStats.failed >= queueStats.total;

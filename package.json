@@ -1,7 +1,7 @@
 {
   "name": "imei-photo-scanner",
   "private": true,
-  "version": "1.24.0",
+  "version": "1.25.0",
   "type": "module",
   "scripts": {
     "predev": "node scripts/write-version.mjs && node scripts/copy-ocr-assets.mjs",
