@@ -2,6 +2,14 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.18.1 — audit: one scan path, one catalog, consistent duplicates (web only; the Android app gets it with the next APK)
+- **One way to scan gallery photos in the Android app:** *Choose photos and scan* (the phone's own text reader, keeps running in the background). The browser drop zone and *Quick scan … while open* are gone from the app; the website keeps its browser upload. Simple mode's *Choose photos* now uses the same background scan on Android (it used the browser scanner before). Photos left in the queue after a failed camera scan still show with a scan button.
+- **Samsung catalog in one place:** the catalog panel moved from the scan screen into **Settings → Downloaded Samsung catalog → Official product details**. It no longer downloads the catalog a second time when the app opens, and its name box (a duplicate of Check catalog's edit) is gone. Both use one download routine.
+- **Duplicates use one rule everywhere:** editing an IMEI in the records list or saving in review now warns when the IMEI exists in *any* earlier scan, matching the Duplicate flag and Remove duplicates (before, only the same upload or the latest batch was checked).
+- **Background scans learn too:** model corrections and repeated model references now also apply to results from *Choose photos and scan*.
+- Removed unused code (an old IMEI reader, unused share/section helpers, an unused Google sign-in helper, a scan-time text region that was computed and never used, a model-series count recalculated on every screen update).
+- New regression tests for duplicates across scans.
+
 ## 1.18.0 — confidence score, learning from corrections
 - **Confidence score** for every record (0–100, high / medium / low) shown at the top of the review window; hover for the reasons (checksum valid, barcode confirmed, IMEI 2, serial, catalog match, crop, duplicate). A record with no IMEI never scores above 45.
 - **Learns from verified corrections:** when you change a model code in review (for example a misread `SM-A1O5F` to `SM-A165F`), the same misread is fixed automatically in later scans on this phone.

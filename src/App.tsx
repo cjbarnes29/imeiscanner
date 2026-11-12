@@ -16,13 +16,13 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import {
   UploadCloud, ScanLine, Download, Search, Trash2,
   CheckCircle2, AlertTriangle, Copy, Smartphone, Image as ImageIcon,
-  X, LoaderCircle, ExternalLink, RefreshCw, Eye,
+  X, LoaderCircle, Eye,
   CloudUpload, Camera, Pencil, Share2, Settings
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
-import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './scan-layout';
+import { exportModel, type CropRegion, type OcrLine } from './scan-layout';
 import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
-import { SamsungCatalog, catalogModel } from './SamsungCatalog';
+import { catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
 import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
@@ -128,7 +128,6 @@ function readNativeImportedIds(): Set<string> {
 
 const STORE = 'imei-lens-records-v1';
 const PEOPLE_STORE = 'imei-lens-people-v1';
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 const digits = (s: string) => s.replace(/\D/g, '');
 
@@ -168,6 +167,10 @@ function markDuplicateRecords(rows: RecordItem[]) {
     const duplicate = /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1;
     return row.duplicate === duplicate ? row : { ...row, duplicate };
   });
+}
+/** True when another record (any scan, any person) already has this 15-digit IMEI. Same rule as the Duplicate flag. */
+function imeiTakenElsewhere(imei: string, id: string, rows: { id: string; imei: string }[]) {
+  return /^\d{15}$/.test(imei) && rows.some(row => row.id !== id && row.imei === imei);
 }
 /** Which records to delete so that every IMEI is kept once: the most complete copy stays (serial, known model, no review needed, saved crop, then the earliest). */
 function duplicateRemovalIds(rows: RecordItem[]): string[] {
@@ -242,41 +245,6 @@ function luhnValid(value: string) {
   }
 
   return sum % 10 === 0;
-}
-
-function extractImei1(text: string) {
-  const lines = text.split(/\r?\n/);
-
-  for (let i = 0; i < lines.length; i++) {
-    if (/imei\s*1|imei1/i.test(lines[i])) {
-      const near = [lines[i], lines[i + 1] || ''].join(' ');
-      const match = near.match(/(?:\d[\s-]*){15,17}/);
-
-      if (match) {
-        const d = digits(match[0]);
-        if (d.length === 15) return d;
-      }
-    }
-  }
-
-  const labelled = text.match(
-    /IMEI[\s:#-]*(?:1|01)[^\d]{0,18}((?:\d[\s-]*){15,17})/i
-  );
-
-  if (labelled) {
-    const d = digits(labelled[1]);
-    if (d.length === 15) return d;
-  }
-
-  const candidates = [
-    ...text.matchAll(/(?:\d[\s-]*){15,17}/g)
-  ]
-    .map(m => digits(m[0]))
-    .filter(d => d.length === 15);
-
-  const unique = [...new Set(candidates)];
-
-  return unique.length === 1 ? unique[0] : '';
 }
 
 function extractImei1s(text: string) {
@@ -1678,7 +1646,6 @@ export default function App() {
     setCollapsedPanels(old => old.filter(key => key !== 'records'));
     requestAnimationFrame(() => document.getElementById('records')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
-  function goToPanel(id: string) { setCollapsedPanels(old => old.filter(key => key !== id)); requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'})); }
 
   const hostedScanner = import.meta.env.VITE_HOSTED_SCANNER === 'true' || window.location.hostname.endsWith('.onrender.com');
   const [records, setRecords] = useState<RecordItem[]>([]);
@@ -1801,8 +1768,6 @@ export default function App() {
   const closeWelcome = () => { markWhatsNewSeen(); setWelcome(''); };
   const [confirmDupes, setConfirmDupes] = useState<string[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; fromReview: boolean } | null>(null);
-  const [detailedView, setDetailedView] = useState(false);
-  const queueInputRef = useRef<HTMLInputElement>(null);
   const [personDraft, setPersonDraft] = useState('');
   // Samsung catalog (bundled, refreshed in the background): turns model codes into phone names.
   const [catalogEntries, setCatalogEntries] = useState<CatalogEntry[]>(() => readCatalogEntries());
@@ -1954,6 +1919,8 @@ export default function App() {
           const ids = new Set(old.map(row => row.id));
           const seenImeis = new Set(old.filter(row => row.uploadBatchId === job.id).map(row => row.imei).filter(imei => /^\d{15}$/.test(imei)));
           let number = old.reduce((highest, row) => Math.max(highest, row.number), 2) + 1;
+          // Background (native) scans get the same model learning as browser scans: corrections and repeated references.
+          const learned = readLearned(), knownModels = old.map(row => row.model);
           const unique = added.filter(row => {
             if (ids.has(row.id)) return false;
             ids.add(row.id);
@@ -1962,6 +1929,8 @@ export default function App() {
               seenImeis.add(row.imei);
             }
             row.number = number++;
+            row.model = refineModel(row.model, knownModels, learned).model;
+            knownModels.push(row.model);
             return true;
           });
           return unique.length ? markDuplicateRecords([...old, ...unique]) : old;
@@ -2120,12 +2089,6 @@ export default function App() {
 
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [records]);
-  // Phone series (S26 series, Fold series, ...) with how many phones each holds.
-  const seriesCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    records.forEach(r => { const series = infoOf(r).series; m.set(series, (m.get(series) || 0) + 1); });
-    return [...m.entries()].sort((a, b) => /^Unknown/.test(a[0]) ? 1 : /^Unknown/.test(b[0]) ? -1 : b[0].localeCompare(a[0], undefined, { numeric: true }));
-  }, [records, catalogEntries, knownByTac]);
 
   /** One group per phone model: the same model code with different endings (SM-A376B, SM-A376B/DS) is one model. */
   const modelKeyOf = (r: RecordItem) => { const info = infoOf(r); if (info.series === 'Unknown phones') return exportModel(r.model) ? r.model.trim() : 'unknown'; return isGenericName(info.name) ? (modelCode4(r.model) || info.name) : info.name; };
@@ -2268,16 +2231,6 @@ export default function App() {
     })),
   });
   const WHATSAPP_NOTICE = 30;
-  /** A person's phones as share-text input: grouped by model, with the labels used everywhere else. */
-  function sectionForRows(name: string, rows: RecordItem[]) {
-    const items = new Map<string, { label: string; count: number; ids: string[] }>();
-    for (const row of rows) {
-      const key = modelKeyOf(row);
-      const item = items.get(key) || { label: modelGroups.find(group => group.key === key)?.label || 'Unknown model', count: 0, ids: [] };
-      item.count++; item.ids.push(row.id); items.set(key, item);
-    }
-    return { name, items: [...items.values()] };
-  }
   /** IMEI and serial numbers only, one per line, in the same order as the pictures. */
   function waNumbersText(rows: RecordItem[]) {
     return rows.flatMap(row => {
@@ -3414,11 +3367,6 @@ export default function App() {
           if(seenSerials.has(serialChoice.serial)||records.some(row=>!row.imei&&recordSerial(row)===serialChoice.serial)){skippedSerials++;continue;}
           seenSerials.add(serialChoice.serial);fileSerials.add(serialChoice.serial);
         }
-        const regionText = region && cropDataUrl ? lines.filter(line => {
-          const x = (line.bbox.x0 + line.bbox.x1) / 2;
-          const y = (line.bbox.y0 + line.bbox.y1) / 2;
-          return x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height;
-        }).map(line => line.text).join('\n') : raw;
         const model = refineModel(identifyModel(cropRaw, file.name, mostlyWhite), [...records, ...newRows].map(row => row.model), readLearned()).model;
         newRows.push({
           id: newId(),
@@ -3540,8 +3488,7 @@ export default function App() {
     if (fields.imei && !/^\d{15}$/.test(fields.imei)) return { error: 'Enter all 15 IMEI digits or leave it empty.' };
     if (fields.imei2 && !/^\d{15}$/.test(fields.imei2)) return { error: 'Enter all 15 IMEI 2 digits or leave it empty.' };
     const imeiChanged = fields.imei !== record.imei;
-    const latestBatch = records.filter(r => r.uploadBatchId).reduce<RecordItem | undefined>((current, row) => !current || row.createdAt > current.createdAt ? row : current, undefined)?.uploadBatchId;
-    const duplicate = !!fields.imei && !!latestBatch && record.uploadBatchId === latestBatch && records.some(r => r.id !== record.id && r.uploadBatchId === latestBatch && r.imei === fields.imei);
+    const duplicate = imeiTakenElsewhere(fields.imei, record.id, records);
     return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
   }
   function saveReviewFields(advance = false) {
@@ -3560,7 +3507,7 @@ export default function App() {
       setSelected({ ...selected, ...patch });
       setManualModel(exportModel(patch.model || ''));
     }
-    if (patch.duplicate) setWarning('This IMEI is already in this batch. It was saved and flagged as a duplicate; both pictures are kept.');
+    if (patch.duplicate) setWarning('This IMEI is already in your records. It was saved and flagged as a duplicate; both pictures are kept. Use Remove duplicates to keep one.');
     else if (patch.status === 'Invalid') setWarning('Saved, but the IMEI checksum is not valid. Check the digits against the label.');
     else setToast('Saved.');
   }
@@ -3754,33 +3701,6 @@ export default function App() {
     setCropEditorOpen(false);
     setSelected(null);
     setToast(`${replacements.length} cropped records saved. The original record was replaced.`);
-  }
-
-  function requestGoogleToken(onToken: (token: string) => void) {
-    if (!CLIENT_ID) {
-      setToast('Google Sheets and Drive links need Google setup. Turn off Drive links to export locally.');
-      return;
-    }
-
-    const w = window as any;
-    if (!w.google?.accounts?.oauth2) {
-      setToast('Google authorization is not available. Check the Google setup and refresh.');
-      return;
-    }
-
-    const client = w.google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
-      callback: async (resp: any) => {
-        if (resp.access_token) {
-          onToken(resp.access_token);
-        } else {
-          setToast('Google authorization was not completed.');
-        }
-      }
-    });
-
-    client.requestAccessToken();
   }
 
   async function performExport(rows: RecordItem[], token?: string, folderChoice?: Promise<any>) {
@@ -4044,7 +3964,6 @@ export default function App() {
   function bulkPictureFiles(batch:RecordItem[]){
     return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}.jpg`,{type:entry.file.type}));
   }
-  const shareLine=(row:RecordItem,index:number)=>{const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');return `${line||'No number detected'}`;};
   function nativeShareBulk(kind:'pictures'|'text',batchIndex=0){
     if(sharing)return;
     try{
@@ -4224,13 +4143,11 @@ export default function App() {
               {androidJob?.error && <p>{androidJob.error}</p>}
             </div>}
 
-            {androidBridge && <p className="micro">The browser upload below runs only while this screen is open. Use the button above for background scans.</p>}
-
-            <SamsungCatalog />
 </>)}
 {!simpleView && (<>
             <button className="subtle-btn" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}>Scan with camera</button>
 
+            {!androidBridge && <>
             <div
               className="dropzone"
               onDragOver={e => e.preventDefault()}
@@ -4265,6 +4182,7 @@ export default function App() {
                 Multiple images · OCR runs in your browser
               </span>
             </div>
+            </>}
 
             {files.length > 0 && (
               <div className="queue">
@@ -4312,13 +4230,14 @@ export default function App() {
               </select>
             </label>
             {expectedProducts > 1 && <p className="scan-mode-note">If fewer than {expectedProducts} are found the first time, the app reads the photo again in enlarged pieces to find the rest, then straightens each crop. Photos that still cannot be split are marked for review.</p>}
+            {androidBridge && <p className="scan-mode-note">Scan speed and Products in each photo apply to <b>Scan with camera</b>. <b>Choose photos and scan</b> uses the phone’s own text reader and keeps going in the background.</p>}
             <p className="scan-mode-note">
               {scanMode === 'fast' ? 'One OCR pass per photo. Review missed or unclear IMEIs manually.' :
                 scanMode === 'standard' ? 'Runs another pass only when the first result needs it.' :
                   'Checks every photo twice and retries unclear crops. Best for photos with several labels.'}
             </p>
 
-            <button
+            {(!androidBridge || files.length > 0) && <button
               className="primary scan-button"
               disabled={!files.length || busy || laptopUploading || (useBackgroundByDefault && !!laptopJobId) || !inventoryLoaded}
               onClick={() => useBackgroundByDefault ? void startLaptopScan() : void scan()}
@@ -4331,15 +4250,16 @@ export default function App() {
               ) : (
                 <>
                   <ScanLine size={17} />
-                  {androidBridge ? `Quick scan ${files.length || 0} photo(s) while open` : useBackgroundByDefault ? `Scan ${files.length || 0} photo(s) in background` : `Extract IMEI from ${files.length || 0} photo(s)`}
+                  {useBackgroundByDefault ? `Scan ${files.length || 0} photo(s) in background` : `Extract IMEI from ${files.length || 0} photo(s)`}
                 </>
               )}
-            </button>
+            </button>}
 
 </>)}
             {simpleView && <div className="simple-scan-buttons">
               <button type="button" className="primary big" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}><Camera size={22} /> Take photo</button>
-              <button type="button" className="primary big alt" disabled={busy || !inventoryLoaded} onClick={() => simpleChooseRef.current?.click()}><UploadCloud size={22} /> Choose photos</button>
+              <button type="button" className="primary big alt" disabled={busy || !inventoryLoaded || androidJob?.status === 'queued' || androidJob?.status === 'processing'} onClick={() => androidBridge ? androidBridge.choosePhotos(activePersonId) : simpleChooseRef.current?.click()}><UploadCloud size={22} /> Choose photos</button>
+              {androidBridge && androidJob && androidJob.status !== 'idle' && <p className="android-progress" role="status">{androidJob.completed} of {androidJob.count} photos scanned · {androidJob.status}{androidJob.failed ? ` · ${androidJob.failed} failed` : ''}</p>}
               <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const chosen = Array.from(event.target.files || []), picked = chosen.filter(isImageFile); event.target.value = ''; if (chosen.length && picked.length < chosen.length) setToast(picked.length ? `${chosen.length - picked.length} file(s) were not photos and were skipped.` : 'Those files are not photos. Choose JPG, PNG, WEBP or HEIC pictures.'); if (picked.length) void scan(picked); }} />
             </div>}
             <button type="button" className="subtle-btn reset-entries" disabled={busy || laptopUploading} onClick={resetForNewEntries} title="Clears the upload queue, search, filters and selection so you can start new entries. Saved records are not deleted.">↺ Reset for new entries</button>
@@ -4800,7 +4720,7 @@ export default function App() {
                           onChange={e => {
                             const imei = digits(e.target.value).slice(0, 15);
 
-                            if (imei.length === 15 && r.uploadBatchId && records.some(other => other.id !== r.id && other.uploadBatchId === r.uploadBatchId && other.imei === imei)) setToast('Matching IMEI in this upload flagged. Both pictures are kept.');
+                            if (imeiTakenElsewhere(imei, r.id, records)) setToast('This IMEI is already in your records. Both are flagged as duplicates.');
 
                             updateRow(r.id, {
                               imei,
@@ -4901,7 +4821,7 @@ export default function App() {
             <div className={cropEditorOpen ? undefined : 'review-sticky'}>
             <div className="modal-head">
               <div>
-                <div className="eyebrow" title={recordConfidence(selected).reasons.join('; ')}>IMAGE REVIEW · {recordConfidence(selected).score}% sure ({recordConfidence(selected).level})</div>
+                {(() => { const sure = recordConfidence(selected); return <div className="eyebrow" title={sure.reasons.join('; ')}>IMAGE REVIEW · {sure.score}% sure ({sure.level})</div>; })()}
                 <h2>{selected.name}</h2>
               </div>
 

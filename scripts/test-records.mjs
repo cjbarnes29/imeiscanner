@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair', 'pictureWebLink'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'imeiTakenElsewhere', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair', 'pictureWebLink'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -79,6 +79,11 @@ try {
   assert.equal(f.recordPhoto(row),row.cropDataUrl);
   assert.equal(f.markDuplicateRecords([row])[0],row, 'Unchanged records retain identity for storage performance');
   assert.ok(f.markDuplicateRecords([row,{...row,id:'duplicate'}]).every(r=>r.duplicate));
+  // Regression: duplicates are found across scans, not only inside one upload batch.
+  assert.ok(f.markDuplicateRecords([row,{...row,id:'older',uploadBatchId:'old-scan'}]).every(r=>r.duplicate),'same IMEI in different scans is a duplicate');
+  assert.equal(f.imeiTakenElsewhere(row.imei,'new',[{id:'older',imei:row.imei}]),true,'editing warns about an IMEI from an earlier scan');
+  assert.equal(f.imeiTakenElsewhere(row.imei,'older',[{id:'older',imei:row.imei}]),false,'a record is not a duplicate of itself');
+  assert.equal(f.imeiTakenElsewhere('123','x',[{id:'y',imei:'123'}]),false,'partial IMEIs are ignored');
   const people=[{id:'p',label:'Person 1',name:'Test'}];
   const html=f.createPhotoGalleryHtml([row,blank],people);
   assert.equal((html.match(/<article /g)||[]).length,2);

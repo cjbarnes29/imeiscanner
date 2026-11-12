@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
 import { SAMSUNG_MODELS } from './samsung-models';
-import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
+import { CATALOG_AUTO_KEY, readCatalogEntries, SamsungCatalog } from './SamsungCatalog';
 import { CatalogDialog } from './CatalogDialog';
 import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
 import { readTextSize, saveTextSize, TEXT_SIZES, type TextSizeId } from './text-size';
@@ -336,6 +336,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
       <button className="primary" onClick={() => setCatalogOpen(true)}>Check catalog ({catalogCount})</button>
       <button className="subtle-btn danger" disabled={!catalogCount} onClick={deleteCatalog}>Delete downloaded catalog</button>
     </div>
+    <SamsungCatalog onUpdated={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />
     <small className="settings-help">Deleting the catalog does not touch your models, your scanned phones or the built-in list.</small>
     {catalogOpen && <CatalogDialog onClose={() => setCatalogOpen(false)} onChanged={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />}
     {guide === 'new' && <WhatsNewDialog onClose={() => setGuide('')} onTutorials={() => setGuide('tutorials')} />}
