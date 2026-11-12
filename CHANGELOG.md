@@ -2,6 +2,16 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.20.0 — Crop Studio, safer IMEI reading, drafts (web app only; the APK is not rebuilt)
+- **Crop Studio:** one compact editor (full screen on phones, a popup on desktop). Draw a box per label; the count in the header is the number of boxes, there is no count step. Move, resize (corner handles), delete (×), Select several / Select all, Undo, zoom (1×–4×) and Pan. **Auto-detect** adds boxes it finds (it never doubles a box you already have, and it now levels tilted photos first).
+- **Many photos at once:** thumbnail strip, **Save all (N crops, M photos)** and **Save for later**. Boxes are saved as a draft on this phone/computer; a banner offers **Resume** or **Discard** after a reload.
+- **Exit confirmation:** closing with unsaved work asks **Save for later / Discard / Continue editing**. The Back button does the same.
+- **Original removed after a crop:** each crop becomes its own record with its own IMEI, serial, model and the same person. The full photo is not copied into the crops and its stored copy is released. The check screen warns before this happens. Your gallery is never touched.
+- **No mixing between products:** every box is read on its own; the model is taken from the crop's own text first, and an old record's IMEI/serial is only inherited for a single-product, single-crop split. The same IMEI found in two boxes is flagged.
+- **More accurate reading:** extra picture treatments (contrast, sharpening, even light, black/white, inverted) in several passes; Luhn check on every IMEI; lookalike letters (O/0, I/1, S/5, B/8…) repaired; digits voted across passes; a repaired number is only accepted when exactly one fix matches a known model prefix, and is still flagged. Weak labels are read again automatically (up to 4 passes) and, when still uncertain, shown with a ⚠ and “Did you mean” choices for manual review. Nothing is guessed silently.
+- **Build fix:** the OCR engine files are copied into the build again (they were missing from published builds since 1.19).
+- **Known limits:** very blurry + tilted + low-contrast photos may need manual typing (they are flagged, not guessed); the Android app still keeps its native copy until the next APK; tests use generated photos, not a physical camera.
+
 ## 1.19.1 — the background scanner looks closer for missed products
 - **Choose photos and scan** counts the "Model : SM-…" labels it can see. When that is more than the products it found, it reads the photo again in overlapping pieces (halves, thirds, 2×2 or 3×2) and separates the products again. The same idea as the in-app scanner's tiled re-read.
 - Sharing: the *Share {person}* pop-up and the Share tab both stay (the pop-up is for hand-picked selections, the Share tab for whole people).
