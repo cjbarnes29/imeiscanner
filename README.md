@@ -160,6 +160,7 @@ Besides `npm test` there are scripts that drive the built app in headless Edge/C
 |---|---|
 | `node scripts/e2e-review.mjs [folder]` | Review sheet at phone size: fits the screen, no overlap between header/body/footer, fields not clipped, compact preview that enlarges on tap, typing kept, Save, Previous/Next/Finish, unsaved-changes prompt (writes screenshots to the folder when given) |
 | `node scripts/eval-labeled.mjs [folder] [filter] [--products=truth] [--speed=..] [--split] [--verbose]` | Accuracy on labeled photos (`node scripts/make-composites.mjs` builds them from `test-photos`): IMEI 1 found / invented / mixed, serial, IMEI 2, model, flagged |
+| `node scripts/e2e-queue.mjs` | Background crop queue: queue all, banner, originals replaced, resume offer, discard |
 | `node scripts/e2e-studio.mjs` | Crop Studio: automatic count, Save for later, Resume, exit prompt, Save all, original replaced |
 | `node scripts/e2e-camera.mjs` | Camera: live advice, tap-to-focus ring and shot check, with a sharp and a blurred photo as the fake camera |
 | `node scripts/e2e-scan.mjs 01 02 …` | The real scan on `test-photos/multi-NN.jpg`: records, valid IMEIs, IMEI 1/2 agreement, review flags, seconds |

@@ -9,7 +9,7 @@ export type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 export const DRAFT_KEY = 'imei-lens-crop-draft-v1';
 
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
-const cleanBox = (value: unknown): Box | null => {
+export const cleanBox = (value: unknown): Box | null => {
   const b = value as Partial<Box> | null;
   if (!b || !finite(b.x) || !finite(b.y) || !finite(b.width) || !finite(b.height)) return null;
   const box = { x: b.x, y: b.y, width: b.width, height: b.height };
