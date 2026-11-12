@@ -2422,6 +2422,9 @@ export default function App() {
     if (!oneByOne) return;
     const row = oneByOne.rows[obState.index];
     if (!row) return;
+    // Copy first, while the tap is still fresh, so the phone allows it.
+    const imei = recordImeiPair(row).imei1;
+    const copiedPromise = imei ? copyText(imei) : Promise.resolve(false);
     if (canSaveSilently()) {
       if (!(await ensureSaveFolder())) { setToast('No folder was chosen. Nothing was saved.'); return; }
       const token = androidBridge!.beginFolder!('imei-one');
@@ -2436,6 +2439,7 @@ export default function App() {
       }
     } else saveDirectFile(dataUrlBlob(recordPhoto(row)), orderedPhotoName(row, obState.index + 1));
     obSet({ done: [...new Set([...obState.done, row.id])], index: Math.min(oneByOne.rows.length - 1, obState.index + 1) });
+    setToast((await copiedPromise) ? `Picture saved and IMEI ${imei} copied.` : imei ? 'Picture saved. Could not copy the IMEI.' : 'Picture saved. No IMEI to copy.');
   }
   async function obSaveRemaining() {
     if (!oneByOne) return;
@@ -5026,11 +5030,10 @@ export default function App() {
           </div>
           <div className="review-float">
             <div className="review-tools ob-tools">
-              <button type="button" className="subtle-btn" disabled={!pair.imei1} onClick={() => void copyText(pair.imei1).then(ok => setToast(ok ? 'IMEI copied.' : 'Could not copy.'))}><Copy size={16} /> Copy IMEI</button>
               <button type="button" className="subtle-btn" disabled={!serial} onClick={() => void copyText(serial).then(ok => setToast(ok ? 'Serial copied.' : 'Could not copy.'))}>Copy S/N</button>
             </div>
             <div className="ob-actions">
-              <button type="button" className="primary" onClick={obDownloadNext}><Download size={16} /> {last ? 'Download · last one' : 'Download & next →'}</button>
+              <button type="button" className="primary" onClick={obDownloadNext}><Download size={16} /> {last ? 'Download image + copy IMEI · last one' : 'Download image + copy IMEI & next →'}</button>
               <div className="ob-nav">
                 <button type="button" className="subtle-btn" disabled={obState.index === 0} onClick={() => obSet({ ...obState, index: obState.index - 1 })}>← Back</button>
                 <button type="button" className="subtle-btn" disabled={last} onClick={() => obSet({ ...obState, index: obState.index + 1 })}>Skip →</button>

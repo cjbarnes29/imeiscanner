@@ -2,6 +2,9 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.14.1 — one tap in One by one
+- **One by one:** the main button is now **Download image + copy IMEI & next**. One tap saves the picture, copies IMEI 1 and goes to the next phone. The separate Copy IMEI button is gone; Copy S/N stays.
+
 ## 1.14.0 — clean pictures, text size
 - Pictures sent or saved (WhatsApp, Bluetooth, Save to my phone, One by one) have **no text written on them**. They are resized to 1600 px and sharpened with a little extra contrast. The numbers stay in the caption and `numbers.txt`.
 - The tick-box *Also write the IMEI / serial on each picture* is gone.
