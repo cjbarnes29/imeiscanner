@@ -16,7 +16,7 @@ type Props = {
 };
 
 type SpeedBridge = { speedInfo?: () => string; setSpeedMode?: (mode: string) => boolean };
-type SpeedInfo = { mode: string; label: string; startWorkers: number; maxWorkers: number; capacity: number; cores: number; ramGb: number; lastRate: number; lastWorkers: number; lastMode: string };
+type SpeedInfo = { mode: string; label: string; startWorkers: number; maxWorkers: number; capacity: number; cores: number; ramGb: number; lastRate: number; lastWorkers: number; lastMode: string; batterySaver?: boolean; hot?: boolean; lowRam?: boolean; androidVersion?: string; device?: string };
 const SPEED_MODES = [
   { id: 'auto', name: 'Auto', hint: 'Starts gently, speeds up while the phone keeps up (recommended)' },
   { id: 'turbo', name: 'Turbo', hint: 'Most photos at once. Phone may get warm' },
@@ -42,6 +42,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   const [message, setMessage] = useState('');
   const [speed, setSpeed] = useState<SpeedInfo | null>(readSpeed);
   const [bulk, setBulk] = useState('');
+  const [listOpen, setListOpen] = useState(false);
   const [auto, setAuto] = useState(() => localStorage.getItem(CATALOG_AUTO_KEY) !== 'off');
   const fileInput = useRef<HTMLInputElement>(null);
   const [devFilter, setDevFilter] = useState<'missing' | 'all'>('missing');
@@ -169,6 +170,11 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
       <div className="speed-modes" role="group" aria-label="Phone scanning power">
         {SPEED_MODES.map(option => <button key={option.id} type="button" className={`subtle-btn ${speed.mode === option.id ? 'active' : ''}`} aria-pressed={speed.mode === option.id} onClick={() => chooseSpeed(option.id)}>{option.name}<small>{option.hint}</small></button>)}
       </div>
+      <div className="speed-device">
+        <strong>{speed.device || 'This phone'}</strong>{speed.androidVersion ? ` · Android ${speed.androidVersion}` : ''}
+        <span>{speed.lowRam ? 'Low-memory phone: scans one photo at a time.' : speed.batterySaver ? 'Battery saver is on: Auto is limited to 2 photos at once.' : speed.hot ? 'The phone is hot: scanning will slow down to cool it.' : 'Ready: Auto starts with 2 photos at once and grows to the limit below while the phone stays cool.'}</span>
+        <button type="button" className="subtle-btn" onClick={() => { setSpeed(readSpeed()); setMessage('Checked this phone again.'); }}>Check this phone again</button>
+      </div>
       <div className="speed-stats"><span>{speed.cores} CPU cores</span><span>{speed.ramGb} GB memory</span><span>Up to {speed.maxWorkers} photo{speed.maxWorkers === 1 ? '' : 's'} at once</span>{speed.lastRate > 0 && <span>Last scan: {speed.lastRate} photos/min ({speed.lastMode}, up to {speed.lastWorkers} at once)</span>}</div>
     </>}
 
@@ -204,7 +210,9 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     </div>
     {key && <small className="settings-help">{customModels[key] ? `SM-${key} is already yours: ${customModels[key]}.` : builtIn ? `SM-${key} is built in as ${builtIn}. Adding it uses your name instead.` : `SM-${key} is not in the built-in list.`}</small>}
 
-    {Object.keys(customModels).length > 0 && <>
+    {Object.keys(customModels).length > 0 && <button type="button" className="subtle-btn view-models-btn" onClick={() => setListOpen(true)}>Check models ({Object.keys(customModels).length})</button>}
+    {listOpen && Object.keys(customModels).length > 0 && <div className="modal-backdrop"><section className="modal models-dialog" role="dialog" aria-modal="true" aria-label="Check models">
+      <div className="modal-head"><h2>Check models ({Object.keys(customModels).length})</h2><button className="subtle-btn" onClick={() => setListOpen(false)}>Close</button></div>
       {Object.keys(customModels).length > 6 && <input className="settings-search" aria-label="Search my models" placeholder="Search my models" value={search} onChange={event => setSearch(event.target.value)} />}
       <ul className="settings-list">
         {entries.map(([codeKey, label]) => <li key={codeKey}>
@@ -223,7 +231,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
         </li>)}
         {!entries.length && <li><em>No match.</em></li>}
       </ul>
-    </>}
+    </section></div>}
     {Object.keys(customModels).length === 0 && <p className="settings-help"><em>You have not added any models yet.</em></p>}
 
     <div className="settings-bulk">

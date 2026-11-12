@@ -123,6 +123,33 @@ final class ScanStore {
         } catch (Exception error) { throw new IllegalStateException(error); }
     }
 
+    /** A scan is already running: keep these photos and scan them as soon as it finishes. */
+    static synchronized void addPending(Context context, JSONArray queue, String personId) {
+        JSONObject job = load(context);
+        try {
+            JSONArray pending = job.optJSONArray("pending");
+            if (pending == null) pending = new JSONArray();
+            for (int index = 0; index < queue.length(); index++) pending.put(queue.get(index));
+            job.put("pending", pending);
+            job.put("pendingPerson", personId);
+            save(context, true);
+        } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
+    /** Start the photos that were shared during the last scan. True when a new scan was started. */
+    static synchronized boolean promotePending(Context context) {
+        JSONObject job = load(context);
+        JSONArray pending = job.optJSONArray("pending");
+        if (pending == null || pending.length() == 0 || job.optString("id").isEmpty()) return false;
+        String person = job.optString("pendingPerson", "person-1");
+        try {
+            job.remove("pending"); job.remove("pendingPerson");
+            String status = job.optString("status");
+            if ("queued".equals(status) || "processing".equals(status)) job.put("status", "completed");
+        } catch (Exception error) { throw new IllegalStateException(error); }
+        return start(context, pending, person);
+    }
+
     static synchronized void update(Context context, int completed, int failed, JSONArray additions) {
         JSONObject job = load(context);
         // A scan that was reset has no job id: late results from it must not come back.
@@ -151,6 +178,8 @@ final class ScanStore {
     static synchronized void clear(Context context) {
         File[] images = new File(root(context), "images").listFiles();
         if (images != null) for (File image : images) image.delete();
+        File[] shared = new File(root(context), "shared").listFiles();
+        if (shared != null) for (File item : shared) item.delete();
         cache = empty(); snapshot = null;
         write(context, cache);
     }

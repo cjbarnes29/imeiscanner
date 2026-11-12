@@ -20,6 +20,7 @@ import { exportModel, planImeiCrops, type CropRegion, type OcrLine } from './sca
 import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
 import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
+import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
@@ -76,6 +77,7 @@ type AndroidBridge = {
   abortFolder?(token: string): void;
   // Android share menu (APK 1.7+): send the staged files through Bluetooth, Quick Share, WhatsApp and so on.
   shareFolder?(token: string, title: string): boolean;
+  setActivePerson?(personId: string): void;
   // Delete every saved scan result and cropped photo kept by the Android app (APK 1.8+).
   resetScans?(): boolean;
 };
@@ -1684,6 +1686,18 @@ export default function App() {
     window.addEventListener('android-export-result', report);
     return () => window.removeEventListener('android-export-result', report);
   }, []);
+
+  useEffect(() => {
+    if (!androidBridge) return;
+    const shared = (event: Event) => {
+      const count = (event as CustomEvent<{ count: number }>).detail?.count || 0;
+      setMainView('scan');
+      setToast(`Scanning ${count} shared photo${count === 1 ? '' : 's'}. Results appear in Records.`);
+    };
+    window.addEventListener('android-shared', shared);
+    return () => window.removeEventListener('android-shared', shared);
+  }, []);
+  useEffect(() => { androidBridge?.setActivePerson?.(activePersonId); }, [activePersonId]);
 
   useEffect(() => { localStorage.setItem('imei-lens-laptop-url', laptopUrl); }, [laptopUrl]);
   useEffect(() => {
@@ -4256,7 +4270,7 @@ export default function App() {
 
             {!cropEditorOpen && <div className="manual-imei-entry">
               <label className="review-model" htmlFor="manual-model">Device model</label>
-              <input id="manual-model" value={manualModel} onChange={event => setManualModel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); document.getElementById('manual-imei')?.focus(); } }} />
+              <ModelPicker id="manual-model" value={manualModel} onChange={setManualModel} customModels={customModels} catalogEntries={catalogEntries} scannedModels={records.map(row => row.model)} onAddModel={(code, name) => { const next = { ...customModels, [code]: name }; if (!writeCustomModels(next)) return false; setCustomModels(next); return true; }} onEnter={() => document.getElementById('manual-imei')?.focus()} />
               {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries, customModels).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries, customModels).name}</small>}
               <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
               <label htmlFor="manual-imei">IMEI 1</label>

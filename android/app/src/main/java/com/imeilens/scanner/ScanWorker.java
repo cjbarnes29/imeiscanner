@@ -160,6 +160,10 @@ public final class ScanWorker extends Worker {
             long seconds = Math.max(1, (android.os.SystemClock.elapsedRealtime() - started) / 1000);
             DeviceProfile.rememberRun(context, (int) ((queue.length() - completed) * 60L / seconds), peak, profile.label);
             ScanStore.finish(context, "completed", "");
+            if (ScanStore.promotePending(context)) {
+                androidx.work.WorkManager.getInstance(context).enqueueUniqueWork("imei-lens-background-scan",
+                    androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE, new androidx.work.OneTimeWorkRequest.Builder(ScanWorker.class).build());
+            }
             return Result.success();
         } catch (Exception error) {
             ScanStore.finish(context, "queued", "Scan paused; Android will retry it.");

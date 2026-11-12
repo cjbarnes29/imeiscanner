@@ -36,17 +36,31 @@ final class ImageScanner {
         Bitmap bitmap = decode(context, uri, maxEdge);
         try {
             Text full = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)));
+            // No valid IMEI read: the photo may be sideways or upside down. Try the other turns and keep the best.
+            int rotation = 0, best = score(full);
+            if (best < 100) {
+                for (int turn : new int[]{90, 270, 180}) {
+                    Bitmap turned = rotate(bitmap, turn);
+                    Text candidate;
+                    try { candidate = Tasks.await(recognizer.process(InputImage.fromBitmap(turned, 0))); }
+                    catch (Exception error) { turned.recycle(); throw error; }
+                    int value = score(candidate);
+                    if (value > best + 10) { bitmap.recycle(); bitmap = turned; full = candidate; best = value; rotation = turn; }
+                    else turned.recycle();
+                    if (best >= 100) break;
+                }
+            }
             List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer, full));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer, full, rotation));
                 return output;
             }
             List<Rect> regions = boxRegions(bitmap, labels);
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation));
                 return output;
             }
             boolean perspectiveReview = false;
@@ -54,7 +68,7 @@ final class ImageScanner {
                 if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
             for (Rect region : regions) {
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation)); }
                 finally { crop.recycle(); }
             }
             return output;
@@ -62,7 +76,7 @@ final class ImageScanner {
     }
 
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
-                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known) throws Exception {
+                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation) throws Exception {
         // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
         Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
         String raw = ocr.getText();
@@ -88,18 +102,38 @@ final class ImageScanner {
         clock.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
         row.put("createdAt", clock.format(new java.util.Date()));
         row.put("raw", raw);
-        if (known != null) { JSONObject focus = focusBox(ocr, photo.getWidth(), photo.getHeight()); if (focus != null) row.put("focus", focus); }
+        if (rotation != 0) row.put("rotation", rotation);
+        if (known != null) { JSONObject focus = focusBox(ocr, photo); if (focus != null) row.put("focus", focus); }
         row.put("number", 0);
         return row;
     }
 
     private static final Pattern LABEL_TEXT = Pattern.compile("(?i)IM[E3][I1!|l]|\\bS/?N\\b|SERIAL|MODEL|SM-[A-Z]\\d{3}|(?<!\\d)(?:\\d[\\s-]*){15}(?!\\d)");
 
+    /** How much label text was read: a valid IMEI counts most, then label words, then amount of text. */
+    private static int score(Text text) {
+        String raw = text.getText().replace('\n', ' ');
+        int total = 0;
+        Matcher numbers = NUMBER.matcher(raw);
+        while (numbers.find()) if (luhn(numbers.group().replaceAll("\\D", ""))) total += 100;
+        Matcher words = LABEL_TEXT.matcher(raw);
+        while (words.find()) total += 10;
+        return total + Math.min(raw.length() / 20, 10);
+    }
+
+    static Bitmap rotate(Bitmap source, int degrees) {
+        Matrix matrix = new Matrix();
+        matrix.postRotate(degrees);
+        return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
+    }
+
     /**
-     * Where the label text sits in the photo, as fractions of its width and height, so the review
-     * screen can open zoomed in on the label. Null when no label text was found or it fills the photo.
+     * Where the phone box is in the photo, as fractions of its width and height, so the review screen can open
+     * on the whole box. It grows outward from the label text over pixels of the same colour as the label paper.
+     * Falls back to a generous area around the text. Null when no label text was found or the box fills the photo.
      */
-    static JSONObject focusBox(Text text, int width, int height) {
+    static JSONObject focusBox(Text text, Bitmap photo) {
+        int width = photo.getWidth(), height = photo.getHeight();
         Rect union = null;
         for (Text.TextBlock block : text.getTextBlocks()) for (Text.Line line : block.getLines()) {
             Rect box = line.getBoundingBox();
@@ -107,14 +141,80 @@ final class ImageScanner {
             if (union == null) union = new Rect(box); else union.union(box);
         }
         if (union == null || width <= 0 || height <= 0) return null;
-        int padX = Math.max(union.width() / 4, width / 20), padY = Math.max(union.height(), height / 12);
-        double left = Math.max(0, union.left - padX), top = Math.max(0, union.top - padY);
-        double right = Math.min(width, union.right + padX), bottom = Math.min(height, union.bottom + padY);
+        union.intersect(0, 0, width, height);
+        double left, top, right, bottom;
+        Rect whole = wholeBox(photo, union);
+        if (whole != null) {
+            int padX = Math.max(4, width / 33), padY = Math.max(4, height / 33);
+            left = Math.max(0, whole.left - padX); top = Math.max(0, whole.top - padY);
+            right = Math.min(width, whole.right + padX); bottom = Math.min(height, whole.bottom + padY);
+        } else {
+            int padX = Math.max(union.width() * 35 / 100, width / 16), padY = Math.max(union.height() * 80 / 100, height / 12);
+            left = Math.max(0, union.left - padX); top = Math.max(0, union.top - padY);
+            right = Math.min(width, union.right + padX); bottom = Math.min(height, union.bottom + padY);
+        }
         double w = (right - left) / width, h = (bottom - top) / height;
-        if (w * h > 0.7 || w < 0.05 || h < 0.03) return null;
+        if (w * h > 0.75 || w < 0.05 || h < 0.03) return null;
         try {
             return new JSONObject().put("x", left / width).put("y", top / height).put("w", w).put("h", h);
         } catch (Exception error) { return null; }
+    }
+
+    private static Rect wholeBox(Bitmap photo, Rect text) {
+        int width = photo.getWidth(), height = photo.getHeight();
+        int step = Math.max(2, Math.max(width, height) / 160);
+        int gw = (width + step - 1) / step, gh = (height + step - 1) / step;
+        int[] colors = new int[gw * gh];
+        for (int gy = 0; gy < gh; gy++) for (int gx = 0; gx < gw; gx++)
+            colors[gy * gw + gx] = photo.getPixel(Math.min(width - 1, gx * step + step / 2), Math.min(height - 1, gy * step + step / 2));
+        int tx0 = Math.max(0, text.left / step), tx1 = Math.min(gw - 1, text.right / step);
+        int ty0 = Math.max(0, text.top / step), ty1 = Math.min(gh - 1, text.bottom / step);
+        if (tx1 < tx0 || ty1 < ty0) return null;
+        // Label paper colour: the average of the brighter half of the pixels under the text.
+        List<Integer> lums = new ArrayList<>();
+        for (int gy = ty0; gy <= ty1; gy++) for (int gx = tx0; gx <= tx1; gx++) lums.add(lum(colors[gy * gw + gx]));
+        if (lums.isEmpty()) return null;
+        java.util.Collections.sort(lums);
+        int median = lums.get(lums.size() / 2);
+        long sr = 0, sg = 0, sb = 0, count = 0;
+        for (int gy = ty0; gy <= ty1; gy++) for (int gx = tx0; gx <= tx1; gx++) {
+            int c = colors[gy * gw + gx];
+            if (lum(c) < median) continue;
+            sr += c >> 16 & 255; sg += c >> 8 & 255; sb += c & 255; count++;
+        }
+        if (count == 0) return null;
+        int rr = (int) (sr / count), gg = (int) (sg / count), bb = (int) (sb / count);
+        boolean[] paper = new boolean[gw * gh];
+        for (int index = 0; index < paper.length; index++) {
+            int c = colors[index];
+            paper[index] = Math.abs((c >> 16 & 255) - rr) + Math.abs((c >> 8 & 255) - gg) + Math.abs((c & 255) - bb) < 110;
+        }
+        boolean[] seen = new boolean[gw * gh];
+        int[] queue = new int[gw * gh];
+        int head = 0, tail = 0, minX = gw, minY = gh, maxX = -1, maxY = -1, cells = 0;
+        for (int gy = ty0; gy <= ty1; gy++) for (int gx = tx0; gx <= tx1; gx++) {
+            int index = gy * gw + gx;
+            if (paper[index] && !seen[index]) { seen[index] = true; queue[tail++] = index; }
+        }
+        while (head < tail) {
+            int index = queue[head++], x = index % gw, y = index / gw;
+            minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); cells++;
+            if (x > 0 && paper[index - 1] && !seen[index - 1]) { seen[index - 1] = true; queue[tail++] = index - 1; }
+            if (x < gw - 1 && paper[index + 1] && !seen[index + 1]) { seen[index + 1] = true; queue[tail++] = index + 1; }
+            if (y > 0 && paper[index - gw] && !seen[index - gw]) { seen[index - gw] = true; queue[tail++] = index - gw; }
+            if (y < gh - 1 && paper[index + gw] && !seen[index + gw]) { seen[index + gw] = true; queue[tail++] = index + gw; }
+        }
+        if (maxX < 0) return null;
+        Rect found = new Rect(minX * step, minY * step, Math.min(width, (maxX + 1) * step), Math.min(height, (maxY + 1) * step));
+        found.union(text);
+        double area = (double) found.width() * found.height() / ((double) width * height);
+        // Too large: the colour leaked into the table or wall. Too small: only the text patch was found.
+        if (area > 0.6 || found.width() * found.height() < text.width() * text.height() * 1.3) return null;
+        return found;
+    }
+
+    private static int lum(int color) {
+        return ((color >> 16 & 255) * 3 + (color >> 8 & 255) * 6 + (color & 255)) / 10;
     }
 
     private static String pictureId() { return "PIC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT); }
