@@ -55,5 +55,14 @@ for(const deg of [9,-6,14]){
   const p0={x:123,y:77},q=m.levelledPoint(p0,deg,W0,H0),p1=m.originalPoint(q,deg,W0,H0);
   assert.ok(Math.hypot(p1.x-p0.x,p1.y-p0.y)<1e-6,`point round trip at ${deg}°`);
 }
+// 7-12 products
+for (const [n, expect] of [[7, 8], [8, 8], [9, 9], [10, 12], [12, 12]]) { const tiles = m.tileRects(4000, 3000, n); assert.equal(tiles.length, expect, n + ' products: ' + expect + ' tiles'); for (const x of tiles) assert.ok(x.x >= 0 && x.y >= 0 && x.x + x.width <= 4000 && x.y + x.height <= 3000, 'tiles stay inside the photo'); }
+// Other once-per-label lines count labels when "Model" is misread
+{
+  const L2 = (text, x, y) => ({ text, bbox: { x0: x, y0: y, x1: x + 300, y1: y + 40 } });
+  assert.equal(m.countModelLabels([L2('vodel - §M-A 65F/D5', 50, 50), L2('4GB |128GB', 50, 300), L2('S/N : RFGLS', 900, 300), L2('4GB |128GB', 1500, 300), L2('S/N : RFGL8', 2300, 300)]), 2, 'two labels from the storage / S/N lines');
+  assert.equal(m.countModelLabels([L2('Model : SM-A165F/DS', 50, 50), L2('SM-A165FZADMEA', 50, 130), L2('Gray', 50, 200), L2('4GB |128GB', 50, 300), L2('S/N : RFGL81NKELD', 900, 300)]), 1, 'one label stays one (no double counting across line kinds)');
+  assert.equal(m.countModelLabels([]), 0);
+}
 console.log('PASS: boxes found on a levelled copy of a tilted photo map back onto the original (9, -6, 14 degrees).');
 

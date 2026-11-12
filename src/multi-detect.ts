@@ -77,7 +77,7 @@ export async function straightenDataUrl(dataUrl: string, quality = 0.9): Promise
 /** Overlapping tiles to read one by one: 2 products → 2 halves, 3 → thirds, 4 → 2×2, 5-6 → 3×2 (long side first). */
 export function tileRects(width: number, height: number, products: number, overlap = 0.14): Rect[] {
   const landscape = width >= height;
-  const [along, across] = products <= 2 ? [2, 1] : products === 3 ? [3, 1] : products === 4 ? [2, 2] : [3, 2];
+  const [along, across] = products <= 2 ? [2, 1] : products === 3 ? [3, 1] : products === 4 ? [2, 2] : products <= 6 ? [3, 2] : products <= 8 ? [4, 2] : products === 9 ? [3, 3] : [4, 3];
   const cols = landscape ? along : across, rows = landscape ? across : along;
   const tiles: Rect[] = [];
   const tw = width / cols, th = height / rows;
@@ -113,16 +113,30 @@ export function shouldTurn(currentScore: number, bestScore: number): boolean {
 /** The photo needs an orientation check unless the current read already looks like a label (several label words / numbers found). */
 export function needsOrientationCheck(score: number): boolean { return score < 4; }
 
-/** Products visible in a photo, guessed from the "Model : SM-…" lines (one per label); lines at the same height count once. */
+/**
+ * Products visible in a photo, guessed from lines printed once per label: "Model : SM-…", the long model code
+ * (SM-A165FZADMEA), the storage line (4GB | 128GB) and the "S/N :" line. Each kind is counted (lines in the same
+ * place count once) and the highest count wins, so one misread line does not hide a label.
+ */
+const ONE_PER_LABEL = [
+  /m[o0]del\s*[:;.]?\s*s\s*m/i,
+  /s\s*m\s*-\s*[a-z0-9]{4,5}[a-z]{2,}/i,
+  /\b\d{1,2}\s*gb\s*[|!Il]\s*\d{2,4}\s*gb\b/i,
+  /\bs\s*[/|]\s*n\s*[:;.]/i,
+];
 export function countModelLabels(lines: OcrLine[]): number {
-  const found: number[] = [], xs: number[] = [];
-  for (const line of lines) {
-    if (!/m[o0]del\s*[:;.]?\s*s\s*m/i.test(line.text) || !line.bbox) continue;
-    const y = (line.bbox.y0 + line.bbox.y1) / 2, h = Math.max(1, line.bbox.y1 - line.bbox.y0);
-    const x = (line.bbox.x0 + line.bbox.x1) / 2;
-    if (!found.some((_, i) => Math.abs(found[i] - y) < h * 1.5 && Math.abs(xs[i] - x) < h * 6)) { found.push(y); xs.push(x); }
+  let best = 0;
+  for (const pattern of ONE_PER_LABEL) {
+    const found: { y: number; x: number }[] = [];
+    for (const line of lines) {
+      if (!pattern.test(line.text) || !line.bbox) continue;
+      const y = (line.bbox.y0 + line.bbox.y1) / 2, h = Math.max(1, line.bbox.y1 - line.bbox.y0);
+      const x = (line.bbox.x0 + line.bbox.x1) / 2;
+      if (!found.some(known => Math.abs(known.y - y) < h * 1.5 && Math.abs(known.x - x) < h * 6)) found.push({ y, x });
+    }
+    best = Math.max(best, found.length);
   }
-  return found.length;
+  return best;
 }
 
 /** Tilt of a whole canvas (degrees, positive: text runs downward to the right) and how sure the estimate is. */

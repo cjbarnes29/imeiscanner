@@ -3307,7 +3307,7 @@ export default function App() {
           if (barcodeLines.length) { lines = [...lines, ...barcodeLines]; raw += '\n' + barcodeLines.map(line => line.text).join('\n'); }
         }
         // The person said there are several products but fewer were found: look closer, tile by tile.
-        const targetProducts = Math.min(6, expectedProducts || countModelLabels(lines));
+        const targetProducts = Math.min(12, expectedProducts || countModelLabels(lines));
         if (targetProducts > 1 && scanMode !== 'fast') {
           const known = deviceAnchors(lines, sourceWidth, sourceHeight, color.getContext('2d')?.getImageData(0, 0, sourceWidth, sourceHeight)).length;
           if (known < targetProducts) {
@@ -3331,7 +3331,7 @@ export default function App() {
         let croppedPhotos=new Map<string,string>();
         if(regions.length>1){try{croppedPhotos=await createCroppedPhotos(color,regions,sourceWidth,sourceHeight);}catch(error){console.error('Unable to split labels',error);}}
         if (expectedProducts > 1 && regions.length > 1 && regions.length < expectedProducts) shortPhotos++;
-        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&(multiText||expectedProducts>1));
+        const cropNeedsReview=(anchors.length>1&&regions.length<2)||(regions.length>1&&croppedPhotos.size!==regions.length)||(regions.length<2&&(multiText||targetProducts>1));
         const cropKeys=croppedPhotos.size?[...croppedPhotos.keys()]:[''];
 
         const pictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
@@ -3390,7 +3390,7 @@ export default function App() {
           // A crop whose IMEI is barcode-confirmed is trusted even if a box edge was unclear.
           cropNeedsReview: cropNeedsReview || repairedImei || (!!region?.needsReview && barcodeImei(cropRaw, 1) !== imei) || imeiReadingsDisagree(cropRaw, imei),
           imei2: recordImeiPair({ imei, raw: cropRaw } as RecordItem).imei2,
-          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length, expectedProducts), deviceImeis: found }; })() : {}),
+          ...(cropNeedsReview ? (() => { const found = extractImei1s(raw).filter(luhnValid); return { deviceCount: Math.max(2, anchors.length, found.length, targetProducts), deviceImeis: found }; })() : {}),
           model,
           ...serialReading(cropRaw),
           imei,
@@ -4145,7 +4145,7 @@ export default function App() {
               <span>Products in each photo</span>
               <select value={expectedProducts} disabled={busy} onChange={event => setExpectedProducts(Number(event.target.value))}>
                 <option value={0}>Auto · find them myself</option>
-                {[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
               </select>
             </label>
             {expectedProducts > 1 && <p className="scan-mode-note">If fewer than {expectedProducts} are found the first time, the app reads the photo again in enlarged pieces to find the rest, then straightens each crop. Photos that still cannot be split are marked for review.</p>}

@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased (web app only) — label counting and review flags
+- **Better count of the products in a photo:** the number of labels is also taken from the S/N, storage (4GB | 128GB) and long model-code lines, not only “Model :”, so one misread line no longer hides a label.
+- **No quiet misses:** a photo that shows several labels but could not be split is flagged for review (“1 device or N?”) instead of being saved as one phone.
+- **Up to 12 products per photo:** *Products in each photo* now offers 7, 8, 9, 10 and 12, with tile plans for the re-read.
+- `scripts/e2e-scan.mjs` runs the real scan in headless Edge/Chrome on photos in `test-photos` (not part of `npm test`).
+
 ## 1.20.0 — Crop Studio, safer IMEI reading, drafts (web app only; the APK is not rebuilt)
 - **Crop Studio:** one compact editor (full screen on phones, a popup on desktop). Draw a box per label; the count in the header is the number of boxes, there is no count step. Move, resize (corner handles), delete (×), Select several / Select all, Undo, zoom (1×–4×) and Pan. **Auto-detect** adds boxes it finds (it never doubles a box you already have, and it now levels tilted photos first).
 - **Many photos at once:** thumbnail strip, **Save all (N crops, M photos)** and **Save for later**. Boxes are saved as a draft on this phone/computer; a banner offers **Resume** or **Discard** after a reload.
