@@ -4847,7 +4847,7 @@ export default function App() {
             {!cropEditorOpen && <details className="review-details"><summary>More details: status, serial, catalog, share</summary>
             <div className="modal-meta">
               <span>Picture ID: {selected.pictureId}</span>
-              <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button><p>Choose Samsung Promoter if it appears in your phone’s share menu. Otherwise copy the number and download the photo, then attach them in Sales Registration. Sharing does not confirm a sales submission. <a href="https://play.google.com/store/apps/details?id=com.samsung.promoter" target="_blank" rel="noreferrer">Samsung Promoter app details</a></p>
+              <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button>
               <span>Catalog: {catalogModel(selected.raw) || 'No confirmed catalog match — verify the model manually'}</span>
               <span>Serial: {recordSerial(selected) || 'Not detected'}</span><span>Status: {reviewStatus(selected)}</span>
               <span>IMEI: {selected.imei || 'Not detected'}</span>
