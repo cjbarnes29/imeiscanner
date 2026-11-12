@@ -546,3 +546,6 @@ body{touch-action:pan-y pinch-zoom}
 .review-sticky .photo-zoom-toggle{margin-top:4px;min-height:34px}
 .review-edit{border:1px solid #27394d;border-radius:10px;background:#0d1828;margin:8px 0;padding:0 10px 10px}
 .review-edit>summary{cursor:pointer;font-weight:700;font-size:14px;color:#65dcb5;padding:12px 0;list-style-position:inside}
+
+/* Crop: boxes drawn so far, each with a delete button */
+.box-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}.box-chip{display:inline-flex;align-items:center;gap:4px;background:#0d1828;border:1px solid #27394d;border-radius:8px;padding:4px 6px;font-size:12px}.box-chip button{min-height:26px;min-width:26px;padding:0 6px}.box-chips small{color:#8fa0b4;font-size:12px}

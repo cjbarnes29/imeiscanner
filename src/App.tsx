@@ -129,6 +129,9 @@ function readNativeImportedIds(): Set<string> {
 const STORE = 'imei-lens-records-v1';
 const PEOPLE_STORE = 'imei-lens-people-v1';
 
+/** Most boxes one photo can be split into while drawing. The number of boxes drawn is the number of products. */
+const MAX_BOXES = 20;
+
 const digits = (s: string) => s.replace(/\D/g, '');
 
 const IMAGE_NAME = /\.(jpe?g|png|webp|heic|heif|avif|bmp|gif|tiff?)$/i;
@@ -952,13 +955,14 @@ async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | n
 
 /** Records that replace `original` after it was split into crops. The first keeps its number. */
 function splitRecords(original: RecordItem, crops: SplitCrop[], source: string, firstNumber: number): RecordItem[] {
-  const sourcePictureId = original.sourcePictureId || `PIC-${newId().slice(0, 8).toUpperCase()}`;
+  // Each split gets its own source id, so the original photo's stored copy is no longer referenced and is cleaned up.
+  const sourcePictureId = `PIC-${newId().slice(0, 8).toUpperCase()}`;
   return crops.map((crop, index) => {
     const serial = serialReading(crop.raw);
     return {
       ...original, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
       sourcePictureId, number: index === 0 ? original.number : firstNumber + index - 1,
-      dataUrl: source, originalDataUrl: source, cropDataUrl: crop.cropDataUrl,
+      dataUrl: crop.cropDataUrl, cropDataUrl: crop.cropDataUrl, focus: undefined,
       ...serial, imei: crop.imei, imei2: recordImeiPair({ imei: crop.imei, raw: crop.raw } as RecordItem).imei2,
       model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
       cropNeedsReview: !crop.imei && !serial.serial, status: crop.imei ? (luhnValid(crop.imei) ? 'Valid' : 'Invalid') : 'Review',
@@ -3620,7 +3624,7 @@ export default function App() {
 
   /** Step 1: remember the box just drawn. Nothing is read yet. */
   function addDrawnBox() {
-    if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length >= reviewSplit.target) return;
+    if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length >= MAX_BOXES) return;
     const { x, y, width, height } = manualCrop;
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100.001 || y + height > 100.001) { setToast('Draw a box inside the photo first.'); return; }
     if (width >= 99.99 && height >= 99.99) { setToast('Draw a box around one label first.'); return; }
@@ -3629,9 +3633,15 @@ export default function App() {
     const boxes = [...reviewSplit.boxes, { x, y, width, height }];
     setReviewSplit({ ...reviewSplit, boxes });
     setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
-    setToast(boxes.length < reviewSplit.target ? `Box ${boxes.length} drawn. Draw box ${boxes.length + 1} of ${reviewSplit.target}.` : `All ${reviewSplit.target} boxes drawn. Tap Process all.`);
+    setToast(`Box ${boxes.length} drawn: ${boxes.length} product${boxes.length === 1 ? '' : 's'} so far. Draw another, or tap Process.`);
   }
 
+  /** Delete one drawn box (its number, not the last one). */
+  function removeDrawnBox(index: number) {
+    if (!reviewSplit || adjustingCrop) return;
+    setReviewSplit({ ...reviewSplit, boxes: reviewSplit.boxes.filter((_, position) => position !== index) });
+    setToast(`Box ${index + 1} deleted.`);
+  }
   function undoDrawnBox() {
     if (!reviewSplit || adjustingCrop || !reviewSplit.boxes.length) return;
     const last = reviewSplit.boxes[reviewSplit.boxes.length - 1];
@@ -3641,14 +3651,14 @@ export default function App() {
 
   /** Step 2: cut every drawn box and read them all, then show the results together. */
   async function processDrawnBoxes() {
-    if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length !== reviewSplit.target) return;
+    if (!selected || !reviewSplit || reviewSplit.recordId !== selected.id || adjustingCrop || reviewSplit.boxes.length < 1) return;
     setAdjustingCrop(true);
     try {
       const source = reviewSource || selected.originalDataUrl || selected.dataUrl;
       setSplitProgress('Preparing…');
       if (!guidedCropWorker.current) { try { guidedCropWorker.current = await newOcrWorker(); } catch (error) { console.warn('Text reading unavailable', error); } }
       const crops = await readBoxCrops(guidedCropWorker.current, source, reviewSplit.boxes, () => manualModel.trim() || selected.model, box => setSplitProgress(`Reading box ${box} of ${reviewSplit.boxes.length}…`));
-      setReviewSplit({ ...reviewSplit, crops });
+      setReviewSplit({ ...reviewSplit, target: reviewSplit.boxes.length, crops });
       setToast('All boxes read. Check each IMEI and model, then save.');
     } catch (error) {
       console.error(error);
@@ -3700,7 +3710,7 @@ export default function App() {
     setReviewSplit(null);
     setCropEditorOpen(false);
     setSelected(null);
-    setToast(`${replacements.length} cropped records saved. The original record was replaced.`);
+    setToast(`${replacements.length} cropped records saved. The original photo was removed from the app; each crop is kept on its own.`);
   }
 
   async function performExport(rows: RecordItem[], token?: string, folderChoice?: Promise<any>) {
@@ -4915,16 +4925,12 @@ export default function App() {
             )}
 
             {cropEditorOpen && !reviewSplit && <div className="review-split-prompt">
-              <label htmlFor="review-crop-count">How many IMEI labels do you see in this photo?</label>
-              <p>Choose a number, then draw one box per picture. Review the cropped photos before replacing the original record.</p>
-              <div className="review-split-start"><input id="review-crop-count" type="number" inputMode="numeric" min="1" max="20" value={reviewCountInput} onChange={event => setReviewCountInput(Number(event.target.value))} />
-                <button className="primary" disabled={adjustingCrop} onClick={() => {
-                  if (!Number.isInteger(reviewCountInput) || reviewCountInput < 1 || reviewCountInput > 20) { setToast('Enter a number from 1 to 20.'); return; }
-                  setReviewSplit({ recordId: selected.id, target: reviewCountInput, boxes: [], crops: [] });
-                  setManualCrop({ x: 0, y: 0, width: 100, height: 100 });
-                }}>Start cropping</button>
-                <button className="subtle-btn" disabled={adjustingCrop} onClick={() => void autoDetectInReview()}>{adjustingCrop && splitProgress ? splitProgress : 'Auto-detect'}</button></div>
-              <p className="copy-hint">Not sure how many? Tap Auto-detect: the scanner counts the labels and draws the boxes for you to check.</p>
+              <p>Draw a box around each label. The number of boxes is the number of products; nothing is read until you tap Process.</p>
+              <div className="review-split-start">
+                <button className="primary" disabled={adjustingCrop} onClick={() => { setReviewSplit({ recordId: selected.id, target: MAX_BOXES, boxes: [], crops: [] }); setManualCrop({ x: 0, y: 0, width: 100, height: 100 }); }}>Start cropping</button>
+                <button className="subtle-btn" disabled={adjustingCrop} onClick={() => void autoDetectInReview()}>{adjustingCrop && splitProgress ? splitProgress : 'Auto-detect'}</button>
+              </div>
+              <p className="copy-hint">Auto-detect counts the labels and draws the boxes for you to check, change or delete.</p>
             </div>}
             <details id="crop-editor-panel" className="crop-workspace" open={cropEditorOpen}>
               <summary onClick={event => { if (cropEditorOpen) event.preventDefault(); else setCropEditorOpen(true); }}>Adjust crop</summary>
@@ -4938,6 +4944,7 @@ export default function App() {
                 {(!reviewSplit || reviewSplit.boxes.length < reviewSplit.target) && <div className="crop-selection" style={{ left: `${manualCrop.x}%`, top: `${manualCrop.y}%`, width: `${manualCrop.width}%`, height: `${manualCrop.height}%` }}>{(['nw', 'ne', 'sw', 'se'] as const).map(edge => <span key={edge} data-edge={edge} className={`crop-handle ${edge}`} />)}</div>}
               </div></div>
               {cropDraftPreview && <div className="crop-draft-preview"><strong>Selected picture</strong><img src={cropDraftPreview} alt="Preview of selected crop" /></div>}
+              {reviewSplit && reviewSplit.boxes.length > 0 && !reviewSplit.crops.length && <div className="box-chips" aria-label="Drawn boxes">{reviewSplit.boxes.map((_, index) => <span key={index} className="box-chip">Box {index + 1} <button className="subtle-btn" aria-label={`Delete box ${index + 1}`} disabled={adjustingCrop} onClick={() => removeDrawnBox(index)}>✕</button></span>)}<small>{reviewSplit.boxes.length} box{reviewSplit.boxes.length === 1 ? '' : 'es'} = {reviewSplit.boxes.length} product{reviewSplit.boxes.length === 1 ? '' : 's'}</small></div>}
               <button className="subtle-btn" onClick={() => setManualCrop({ x: 0, y: 0, width: 100, height: 100 })}>Reset selection</button>
               <details><summary>Fine-tune selection</summary><div className="manual-crop-controls">
                 {(['x', 'y', 'width', 'height'] as const).map(key => (
@@ -4947,7 +4954,7 @@ export default function App() {
               </>}
               {reviewSplit && reviewSplit.crops.length > 0 && <div className="review-crop-list">{reviewSplit.crops.map((crop, index) => <div key={index} className="saved-crop-card"><img src={crop.cropDataUrl} alt={`Saved crop ${index + 1}`} /><strong>Crop {index + 1}</strong><label>IMEI<input inputMode="numeric" maxLength={15} value={crop.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); setReviewSplit(old => old ? { ...old, crops: old.crops.map((item, cropIndex) => cropIndex === index ? { ...item, imei } : item) } : old); }} /></label><label>Device model<input value={crop.model} onChange={event => { const model = event.target.value; setReviewSplit(old => old ? { ...old, crops: old.crops.map((item, cropIndex) => cropIndex === index ? { ...item, model } : item) } : old); }} /></label><small>{crop.imei ? luhnValid(crop.imei) ? 'Ready' : 'Check IMEI' : 'Needs review'}</small></div>)}</div>}
               <div className="crop-actions crop-sticky-actions">
-                {reviewSplit ? <><button className="primary" disabled={adjustingCrop} onClick={() => reviewSplit.crops.length === reviewSplit.target ? finishReviewSplit() : reviewSplit.boxes.length === reviewSplit.target ? void processDrawnBoxes() : addDrawnBox()}>{adjustingCrop ? (splitProgress || 'Reading…') : reviewSplit.crops.length === reviewSplit.target ? `Save ${reviewSplit.target} pictures` : reviewSplit.boxes.length === reviewSplit.target ? `Process all ${reviewSplit.target}` : `Add box ${reviewSplit.boxes.length + 1} of ${reviewSplit.target}`}</button>{reviewSplit.crops.length < reviewSplit.target && reviewSplit.boxes.length > 0 && <button className="subtle-btn" disabled={adjustingCrop} onClick={undoDrawnBox}>Undo box {reviewSplit.boxes.length}</button>}<button className="subtle-btn" disabled={adjustingCrop} onClick={closeCropEditor}>Cancel</button></> : <><button className="primary" disabled={adjustingCrop} onClick={() => void applyManualCrop(false)}>{adjustingCrop ? 'Reading crop…' : selected.cropDataUrl ? 'Save crop' : 'Save first crop'}</button>
+                {reviewSplit ? <><button className="primary" disabled={adjustingCrop} onClick={() => reviewSplit.crops.length ? finishReviewSplit() : addDrawnBox()}>{adjustingCrop ? (splitProgress || 'Reading…') : reviewSplit.crops.length ? `Save ${reviewSplit.crops.length} pictures` : `Add box ${reviewSplit.boxes.length + 1}`}</button>{!reviewSplit.crops.length && reviewSplit.boxes.length > 0 && <button className="primary" disabled={adjustingCrop} onClick={() => void processDrawnBoxes()}>Process {reviewSplit.boxes.length} box{reviewSplit.boxes.length === 1 ? '' : 'es'}</button>}{reviewSplit.crops.length < reviewSplit.target && reviewSplit.boxes.length > 0 && <button className="subtle-btn" disabled={adjustingCrop} onClick={undoDrawnBox}>Undo box {reviewSplit.boxes.length}</button>}<button className="subtle-btn" disabled={adjustingCrop} onClick={closeCropEditor}>Cancel</button></> : <><button className="primary" disabled={adjustingCrop} onClick={() => void applyManualCrop(false)}>{adjustingCrop ? 'Reading crop…' : selected.cropDataUrl ? 'Save crop' : 'Save first crop'}</button>
                 {selected.cropDataUrl && <button className="subtle-btn" disabled={adjustingCrop} onClick={() => void applyManualCrop(true)}>Add another crop</button>}</>}
                 {!reviewSplit && <button className="subtle-btn" onClick={closeCropEditor}>Cancel</button>}
               </div>
