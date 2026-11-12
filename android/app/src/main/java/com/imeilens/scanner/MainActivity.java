@@ -198,7 +198,7 @@ public final class MainActivity extends Activity {
         else if (data.getData() != null) uris.add(data.getData());
         JSONArray queue = new JSONArray();
         for (Uri uri : uris) {
-            if (queue.length() >= 500) break;
+            if (queue.length() >= ScanStore.MAX_PHOTOS) break;
             try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
             catch (SecurityException ignored) { continue; }
             JSONObject item = new JSONObject();
@@ -240,7 +240,7 @@ public final class MainActivity extends Activity {
             if (!folder.exists() && !folder.mkdirs()) return;
             JSONArray queue = new JSONArray();
             for (Uri uri : uris) {
-                if (queue.length() >= 500) break;
+                if (queue.length() >= ScanStore.MAX_PHOTOS) break;
                 File copy = new File(folder, "shared-" + UUID.randomUUID() + ".jpg");
                 try (InputStream input = getContentResolver().openInputStream(uri); FileOutputStream output = new FileOutputStream(copy)) {
                     if (input == null) continue;
@@ -258,6 +258,11 @@ public final class MainActivity extends Activity {
             final int shared = queue.length();
             runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-shared',{detail:{count:" + shared + "}}))", null));
         }).start();
+    }
+
+    private boolean packageInstalled(String name) {
+        try { getPackageManager().getPackageInfo(name, 0); return true; }
+        catch (Exception error) { return false; }
     }
 
     private String displayName(Uri uri) {
@@ -372,6 +377,39 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void setActivePerson(String personId) {
             if (personId == null || personId.length() > 80) return;
             getSharedPreferences("app-state", MODE_PRIVATE).edit().putString("active-person", personId).apply();
+        }
+
+        /** Like status(), but only the records from this index on (at most 200) and without the photo queue. */
+        @JavascriptInterface public String statusFrom(int from) {
+            try { return ScanStore.jsonFrom(MainActivity.this, from); }
+            catch (Exception error) { return "{\"status\":\"error\",\"error\":\"Cannot read saved scan\",\"records\":[],\"recordsFrom\":0,\"recordsTotal\":0}"; }
+        }
+
+        /** A long text (for example 1000 IMEI numbers) through the share menu: WhatsApp links are too short for it. */
+        @JavascriptInterface public boolean shareText(String title, String text) {
+            if (text == null || text.isEmpty()) return false;
+            runOnUiThread(() -> {
+                try {
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_TEXT, text);
+                    startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send numbers" : title));
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Share text failed", error); }
+            });
+            return true;
+        }
+
+        /** Which ways of sending this phone has: WhatsApp installed, Bluetooth present and switched on. */
+        @JavascriptInterface public String sendCapabilities() {
+            JSONObject json = new JSONObject();
+            try {
+                json.put("whatsapp", packageInstalled("com.whatsapp") || packageInstalled("com.whatsapp.w4b"));
+                android.bluetooth.BluetoothManager manager = (android.bluetooth.BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+                android.bluetooth.BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
+                json.put("bluetooth", adapter != null);
+                json.put("bluetoothOn", adapter != null && adapter.isEnabled());
+            } catch (Exception ignored) { }
+            return json.toString();
         }
 
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }
@@ -494,7 +532,15 @@ public final class MainActivity extends Activity {
         }
 
         /** Opens Android's share menu (Bluetooth, Quick Share, WhatsApp...) with the files staged under this token. */
-        @JavascriptInterface public boolean shareFolder(String token, String title) {
+        @JavascriptInterface public boolean shareFolder(String token, String title) { return shareFolderText(token, title, ""); }
+
+        /** Same as shareFolder, and also sends one text message (for example all IMEI and serial numbers) once. */
+        @JavascriptInterface public boolean shareFolderText(String token, String title, String text) { return shareStaged(token, title, text, null); }
+
+        /** Sends straight to the Bluetooth app when the phone has the standard one, otherwise opens the share menu. */
+        @JavascriptInterface public boolean shareFolderBluetooth(String token, String title) { return shareStaged(token, title, "", "com.android.bluetooth"); }
+
+        private boolean shareStaged(String token, String title, String text, String targetPackage) {
             File folder;
             synchronized (MainActivity.this) {
                 if (stagingFolder == null || !token.equals(stagingFolderToken)) return false;
@@ -514,8 +560,16 @@ public final class MainActivity extends Activity {
                 for (int index = 1; index < uris.size(); index++) clip.addItem(new ClipData.Item(uris.get(index)));
                 send.setClipData(clip);
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (text != null && !text.isEmpty()) send.putExtra(Intent.EXTRA_TEXT, text);
                 runOnUiThread(() -> {
-                    try { startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send phones" : title)); }
+                    try {
+                        if (targetPackage != null) {
+                            Intent direct = new Intent(send);
+                            direct.setPackage(targetPackage);
+                            if (direct.resolveActivity(getPackageManager()) != null) { startActivity(direct); return; }
+                        }
+                        startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send phones" : title));
+                    }
                     catch (Exception error) { android.util.Log.e("IMEI-Lens", "Share menu failed", error); deleteFolder(folder); }
                 });
                 return true;

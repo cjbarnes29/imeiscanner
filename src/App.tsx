@@ -2,6 +2,7 @@ import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickIm
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { useBackLayer } from './back-layer';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
+import { SAMSUNG_MODELS } from './samsung-models';
 import { planMove, planUnassign, planDeletePerson, planAllocation, formatModelReview, formatPersonShare, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
@@ -22,6 +23,7 @@ import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
 import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
+import { embedPhotoLimit } from './capacity';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
 type RecordItem = {
@@ -59,7 +61,7 @@ type PersonGroup = { id: string; label: string; name: string };
 /** People are shown by name only; the "Person 3" label is just an internal id and is never displayed. */
 const personName = (person: PersonGroup) => (person.name || '').trim() || 'Unnamed';
 type LaptopRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; photoIndex: number };
-type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string };
+type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; siblings?: number };
 type AndroidBridge = {
   choosePhotos(personId: string): void;
   status(): string;
@@ -77,6 +79,13 @@ type AndroidBridge = {
   abortFolder?(token: string): void;
   // Android share menu (APK 1.7+): send the staged files through Bluetooth, Quick Share, WhatsApp and so on.
   shareFolder?(token: string, title: string): boolean;
+  shareFolderText?(token: string, title: string, text: string): boolean;
+  // APK 1.11+: which ways of sending this phone has, and sending straight to Bluetooth.
+  sendCapabilities?(): string;
+  shareFolderBluetooth?(token: string, title: string): boolean;
+  // APK 1.10+: read the scan in slices (big scans) and share long text through the share menu.
+  statusFrom?(from: number): string;
+  shareText?(title: string, text: string): boolean;
   setActivePerson?(personId: string): void;
   // Delete every saved scan result and cropped photo kept by the Android app (APK 1.8+).
   resetScans?(): boolean;
@@ -423,6 +432,62 @@ async function downloadBlob(blob: Blob, filename: string): Promise<void> {
   a.remove();
 
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+const WA_PROGRESS_KEY = 'imei-lens-wa-progress-v1';
+/** Which pictures were already sent to WhatsApp, per person, so a long send can continue where it stopped. */
+function readWaProgress(sectionId: string): string[] {
+  try { const all = JSON.parse(localStorage.getItem(WA_PROGRESS_KEY) || '{}') as Record<string, string[]>; return Array.isArray(all[sectionId]) ? all[sectionId] : []; }
+  catch { return []; }
+}
+function writeWaProgress(sectionId: string, ids: string[]) {
+  try {
+    const all = JSON.parse(localStorage.getItem(WA_PROGRESS_KEY) || '{}') as Record<string, string[]>;
+    if (ids.length) all[sectionId] = ids; else delete all[sectionId];
+    localStorage.setItem(WA_PROGRESS_KEY, JSON.stringify(all));
+  } catch { /* progress is a convenience: ignore a full storage */ }
+}
+/** The picture with a band under it that shows its number and IMEI / serial, so each picture explains itself. */
+function labelledPhoto(dataUrl: string, lines: string[]): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+        const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const font = Math.max(24, Math.round(width / 20)), pad = Math.round(font * 0.45), line = Math.round(font * 1.3);
+        const band = pad * 2 + lines.length * line;
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height + band;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, 0, 0, width, height);
+        context.fillStyle = '#101827'; context.fillRect(0, height, width, band);
+        context.fillStyle = '#ffffff'; context.textBaseline = 'top'; context.font = `700 ${font}px sans-serif`;
+        lines.forEach((text, index) => context.fillText(text, pad, height + pad + index * line, width - pad * 2));
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not write the numbers on a picture.')), 'image/jpeg', 0.88);
+      } catch (error) { reject(error); }
+    };
+    image.onerror = () => reject(new Error('A picture could not be opened.'));
+    image.src = dataUrl;
+  });
+}
+
+const ONE_BY_ONE_KEY = 'imei-lens-onebyone-v1';
+type OneByOneState = { index: number; done: string[] };
+/** Where the one-by-one screen stopped for a person, and which pictures were already downloaded. */
+function readOneByOne(sectionId: string): OneByOneState {
+  try {
+    const all = JSON.parse(localStorage.getItem(ONE_BY_ONE_KEY) || '{}') as Record<string, OneByOneState>;
+    const saved = all[sectionId];
+    return saved && Array.isArray(saved.done) ? { index: Number(saved.index) || 0, done: saved.done } : { index: 0, done: [] };
+  } catch { return { index: 0, done: [] }; }
+}
+function writeOneByOne(sectionId: string, state: OneByOneState) {
+  try {
+    const all = JSON.parse(localStorage.getItem(ONE_BY_ONE_KEY) || '{}') as Record<string, OneByOneState>;
+    if (state.done.length || state.index) all[sectionId] = state; else delete all[sectionId];
+    localStorage.setItem(ONE_BY_ONE_KEY, JSON.stringify(all));
+  } catch { /* progress is a convenience */ }
 }
 
 function dataUrlBlob(dataUrl: string) {
@@ -1556,6 +1621,8 @@ export default function App() {
   const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
   const [androidJob, setAndroidJob] = useState<{ status: string; count: number; completed: number; failed: number; error?: string } | null>(null);
   const importedAndroidIds = useRef(readNativeImportedIds());
+  /** How many of the Android app's saved records this page has already gone through. */
+  const androidCursor = useRef(0);
   const importingAndroid = useRef(false);
   const phoneOnLaptopNetwork = window.matchMedia('(pointer: coarse)').matches && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(window.location.hostname);
   const useBackgroundByDefault = hostedScanner || phoneOnLaptopNetwork;
@@ -1577,6 +1644,12 @@ export default function App() {
   const [manualImei, setManualImei] = useState('');
   const [manualSerial, setManualSerial] = useState('');
   const [manualImei2, setManualImei2] = useState('');
+  /** What you typed for pictures you moved past without saving. Decided at the end: save all or discard. */
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
+  const draftsRef = useRef<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
+  const [finishOpen, setFinishOpen] = useState(false);
+  /** A warning that must be seen: shown as a pop-up with OK instead of a small message. */
+  const [warning, setWarning] = useState('');
   const [manualModel, setManualModel] = useState('');
   const [manualCrop, setManualCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
   const [reviewSource, setReviewSource] = useState('');
@@ -1739,22 +1812,33 @@ export default function App() {
     async function refreshAndroid() {
       if (!androidBridge || importingAndroid.current || cancelled) return;
       importingAndroid.current = true;
+      let more = false;
       try {
-        const job = JSON.parse(androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[] };
+        const sliced = !!androidBridge.statusFrom;
+        const job = JSON.parse(sliced ? androidBridge.statusFrom!(androidCursor.current) : androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[]; recordsFrom?: number; recordsTotal?: number };
         if (cancelled) return;
         setAndroidJob({ status: job.status, count: job.count, completed: job.completed, failed: job.failed, error: job.error });
+        // The app's list was cleared (reset): start reading from the beginning again.
+        if (sliced && (job.recordsTotal ?? 0) < androidCursor.current) { androidCursor.current = 0; more = true; return; }
         const scanned = job.records || [];
         const counts = new Map<string, number>();
         for (const item of scanned) counts.set(item.sourcePictureId || '', (counts.get(item.sourcePictureId || '') || 0) + 1);
-        const pending = scanned.filter(item => !importedAndroidIds.current.has(item.id)).slice(0, 6);
+        const wanted = scanned.filter(item => !importedAndroidIds.current.has(item.id));
+        const pending = wanted.slice(0, 12);
         const added: RecordItem[] = [];
         for (const item of pending) {
+          importedAndroidIds.current.add(item.id);
           const dataUrl = androidBridge.image(item.id);
           if (!dataUrl) continue;
-          const { imageName, ...row } = item;
-          added.push({ ...row, uploadBatchId: row.uploadBatchId || job.id, dataUrl, cropDataUrl: (counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
-          importedAndroidIds.current.add(item.id);
+          const { imageName, siblings, ...row } = item;
+          added.push({ ...row, uploadBatchId: row.uploadBatchId || job.id, dataUrl, cropDataUrl: (siblings || counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
         }
+        if (sliced) {
+          let advance = 0;
+          while (advance < scanned.length && importedAndroidIds.current.has(scanned[advance].id)) advance++;
+          androidCursor.current = (job.recordsFrom ?? 0) + advance;
+          more = androidCursor.current < (job.recordsTotal ?? 0);
+        } else more = wanted.length > pending.length;
         if (added.length) {
           try { localStorage.setItem(NATIVE_IMPORTED_STORE, JSON.stringify([...importedAndroidIds.current])); }
           catch (error) { console.error('Unable to save imported Android IDs', error); }
@@ -1776,7 +1860,10 @@ export default function App() {
           return unique.length ? markDuplicateRecords([...old, ...unique]) : old;
         });
       } catch (error) { console.error('Unable to read Android scan', error); }
-      finally { importingAndroid.current = false; }
+      finally {
+        importingAndroid.current = false;
+        if (more && !cancelled) window.setTimeout(() => void refreshAndroid(), 60);
+      }
     }
     void refreshAndroid();
     const timer = window.setInterval(() => void refreshAndroid(), 2500);
@@ -1790,10 +1877,11 @@ export default function App() {
     if (reviewModalRef.current) reviewModalRef.current.scrollTop = 0;
     setCropZoom(1);
     setReviewSplit(null);
-    setManualImei(selected?.imei || '');
-    setManualSerial(selected ? recordSerial(selected) : '');
-    setManualImei2(selected ? recordImeiPair(selected).imei2 : '');
-    setManualModel(selected ? exportModel(selected.model) : '');
+    const draft = selected ? draftsRef.current[selected.id] : undefined;
+    setManualImei(draft ? draft.imei : selected?.imei || '');
+    setManualSerial(draft ? draft.serial : selected ? recordSerial(selected) : '');
+    setManualImei2(draft ? draft.imei2 : selected ? recordImeiPair(selected).imei2 : '');
+    setManualModel(draft ? draft.model : selected ? exportModel(selected.model) : '');
     setReviewSource(selected?.originalDataUrl || selected?.dataUrl || '');
     setCropEditorOpen(cropRequestedId.current === selected?.id);
     cropRequestedId.current = null;
@@ -1848,14 +1936,19 @@ export default function App() {
     }
   }
 
-  function closePhotoReview() {
-    if (adjustingCrop || rotatingPhoto) return;
+  function closePhotoReviewNow() {
     closeCropEditor();
     setSelected(null);
+  }
+  function closePhotoReview() {
+    if (adjustingCrop || rotatingPhoto) return;
+    finishReview();
   }
 
   // Back button / swipe-back closes the top popup instead of leaving the app.
   useBackLayer(!!selected, closePhotoReview, 'review');
+  useBackLayer(finishOpen, () => setFinishOpen(false), 'finish-review');
+  useBackLayer(!!warning, () => setWarning(''), 'warning');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
@@ -2032,7 +2125,24 @@ export default function App() {
   }
   const [shareSerial, setShareSerial] = useState(false);
   /** A person with more than 10 phones is sent in groups of 10: one tap (one share menu) per group. */
-  const [waSend, setWaSend] = useState<{ name: string; rows: RecordItem[] } | null>(null);
+  const [waSend, setWaSend] = useState<{ id: string; name: string; rows: RecordItem[] } | null>(null);
+  /** Records already sent to WhatsApp for this person (remembered between visits). */
+  const [waSent, setWaSent] = useState<string[]>([]);
+  /** A send that was just opened: which pictures it carried, and how many the user says arrived. */
+  const [waAttempt, setWaAttempt] = useState<{ ids: string[]; arrived: number; channel: 'whatsapp' | 'bluetooth' } | null>(null);
+  /** What this phone can send with (from the Android app): WhatsApp installed, Bluetooth present and on. */
+  const [waCaps, setWaCaps] = useState<{ whatsapp?: boolean; bluetooth?: boolean; bluetoothOn?: boolean } | null>(null);
+  /** A reason WhatsApp did not work, so Bluetooth is offered instead. */
+  const [waProblem, setWaProblem] = useState('');
+  const [waPreferBluetooth, setWaPreferBluetooth] = useState(false);
+  const [waLabel, setWaLabel] = useState(true);
+  /** Add one caption with every IMEI / serial to the picture send (shown by WhatsApp once). */
+  const [waCaption, setWaCaption] = useState(true);
+  /** The one-by-one screen for a person: look at each phone, copy its numbers, download its picture. */
+  const [oneByOne, setOneByOne] = useState<{ id: string; name: string; rows: RecordItem[] } | null>(null);
+  const [obState, setObState] = useState<OneByOneState>({ index: 0, done: [] });
+  useBackLayer(!!oneByOne, () => setOneByOne(null), 'one-by-one');
+  const [waBusy, setWaBusy] = useState('');
   useBackLayer(!!waSend, () => setWaSend(null), 'whatsapp-groups');
   /** The text sent for one person: each phone's IMEI (and IMEI 2) on its own line; serial numbers only if ticked. */
   const sharePayload = (section: { name: string; items: { label: string; count: number; ids: string[] }[] }) => ({
@@ -2050,7 +2160,7 @@ export default function App() {
       }),
     })),
   });
-  const WHATSAPP_GROUP = 10;
+  const WHATSAPP_NOTICE = 30;
   /** A person's phones as share-text input: grouped by model, with the labels used everywhere else. */
   function sectionForRows(name: string, rows: RecordItem[]) {
     const items = new Map<string, { label: string; count: number; ids: string[] }>();
@@ -2061,34 +2171,187 @@ export default function App() {
     }
     return { name, items: [...items.values()] };
   }
-  /** One group: the phones' pictures plus the model and IMEI text, through the share menu (pick WhatsApp there). */
-  function sendGroup(name: string, batch: RecordItem[]) {
-    const text = formatPersonShare([sharePayload(sectionForRows(name, batch))]);
-    let files: File[] = [];
+  /** IMEI and serial numbers only, one per line, in the same order as the pictures. */
+  function waNumbersText(rows: RecordItem[]) {
+    return rows.flatMap(row => {
+      const pair = recordImeiPair(row), serial = recordSerial(row);
+      const lines = [pair.imei1, pair.imei2].filter(Boolean);
+      if (serial && (shareSerial || !lines.length)) lines.push(`S/N ${serial}`);
+      return lines.length ? lines : ['No number detected'];
+    }).join('\n');
+  }
+  /** IMEI / serial lines written on one picture: "#3 of 40", then IMEI 1, IMEI 2 and the serial when asked for. */
+  function pictureLines(row: RecordItem, position: number, total: number, forceSerial = false) {
+    const pair = recordImeiPair(row), serial = recordSerial(row);
+    const lines = [pair.imei1 && `IMEI 1: ${pair.imei1}`, pair.imei2 && `IMEI 2: ${pair.imei2}`, serial && (shareSerial || forceSerial || !pair.imei1) && `S/N: ${serial}`].filter(Boolean) as string[];
+    if (!lines.length) lines.push('No number detected');
+    lines[0] = `#${position} of ${total}  ${lines[0]}`;
+    return lines;
+  }
+  /** Send every picture that is not sent yet in one share. Nothing is marked as sent until you say how many arrived. */
+  async function sendWhatsAppPictures(channel: 'whatsapp' | 'bluetooth' = 'whatsapp') {
+    if (!waSend || waBusy) return;
+    const pending = waSend.rows.filter(row => !waSent.includes(row.id));
+    if (!pending.length) return;
+    const viaBluetooth = channel === 'bluetooth';
     try {
-      files = batch.map((row, index) => {
-        const blob = dataUrlBlob(recordPhoto(row)), extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
-        return new File([blob], `${recordImeiPair(row).imei1 || recordSerial(row) || row.number || index + 1}.${extension}`, { type: blob.type || 'image/jpeg' });
-      });
-    } catch { setToast('A picture is unavailable. Open that record and check its photo.'); return; }
-    const data: ShareData = { files, text };
-    if (typeof navigator.share === 'function' && navigator.canShare?.(data)) {
-      void navigator.share(data)
-        .then(() => setToast('Choose WhatsApp in the share menu. If the numbers did not come with the pictures, use Copy.'))
-        .catch(error => { if ((error as DOMException)?.name !== 'AbortError') setToast('Could not open the share menu. Use Copy, then attach the pictures.'); });
-      return;
+      setWaBusy('Preparing pictures…');
+      const files: File[] = [];
+      const numbers: string[] = [];
+      const captions: string[] = [];
+      for (const row of pending) {
+        const position = waSend.rows.indexOf(row) + 1;
+        const lines = pictureLines(row, position, waSend.rows.length, viaBluetooth);
+        const source = recordPhoto(row);
+        const blob = waLabel || viaBluetooth ? await labelledPhoto(source, lines) : dataUrlBlob(source);
+        files.push(new File([blob], `${String(position).padStart(3, '0')}.jpg`, { type: blob.type || 'image/jpeg' }));
+        numbers.push(lines.join('  '));
+        captions.push(captionLine(row, position));
+      }
+      // Bluetooth also carries a plain file with every IMEI and serial.
+      if (viaBluetooth) files.push(new File([numbers.join('\n')], 'numbers.txt', { type: 'text/plain' }));
+      setWaBusy('');
+      // One caption for the whole send: every IMEI / serial once, in the same order as the pictures.
+      const caption = !viaBluetooth && waCaption ? captions.join('\n') : '';
+      const shareData: ShareData = caption ? { files, text: caption } : { files };
+      if (androidBridge?.shareFolderText) await androidShareFiles(files, waSend.name, caption, viaBluetooth);
+      else if (typeof navigator.share === 'function' && navigator.canShare?.(shareData)) await navigator.share(shareData);
+      else {
+        files.forEach((file, index) => setTimeout(() => saveDirectFile(file, file.name), 300 + index * 400));
+        setToast('This browser cannot send pictures directly. The pictures are being saved; send them from your files.');
+      }
+      setWaAttempt({ ids: pending.map(row => row.id), arrived: viaBluetooth || pending.length <= WHATSAPP_NOTICE ? pending.length : WHATSAPP_NOTICE, channel });
+    } catch (error) {
+      setWaBusy('');
+      if ((error as DOMException)?.name !== 'AbortError') {
+        setToast(error instanceof Error ? error.message : 'Could not open the share menu.');
+        if (!viaBluetooth) { setWaProblem('WhatsApp could not open or take the pictures.'); setWarning('WhatsApp could not open or take the pictures. Use "Send by Bluetooth" instead: it sends the pictures, the IMEI and the serial.'); }
+      }
     }
-    // This browser cannot share pictures with text: open WhatsApp with the text and save the pictures to attach.
-    openWhatsApp(text);
-    files.forEach((file, index) => setTimeout(() => saveDirectFile(file, file.name), 600 + index * 400));
-    setToast('This browser cannot send pictures to WhatsApp directly. The text is in WhatsApp and the pictures are being saved; attach them there.');
+  }
+  /** The user says how many pictures reached WhatsApp; the app remembers where it stopped. */
+  function confirmWhatsAppArrived() {
+    if (!waSend || !waAttempt) return;
+    const next = [...new Set([...waSent, ...waAttempt.ids.slice(0, waAttempt.arrived)])];
+    setWaSent(next);
+    writeWaProgress(waSend.id, next);
+    const short = waAttempt.arrived < waAttempt.ids.length;
+    if (short && waAttempt.channel === 'whatsapp') {
+      const message = `WhatsApp took only ${waAttempt.arrived} of ${waAttempt.ids.length} pictures.`;
+      setWaProblem(message);
+      setWarning(`${message} Send the rest by Bluetooth instead, or continue in WhatsApp.`);
+    } else setWaProblem('');
+    setWaAttempt(null);
+    setToast(waAttempt.arrived ? `Saved: ${waAttempt.arrived} picture${waAttempt.arrived === 1 ? '' : 's'} sent. The app remembers where you stopped.` : 'Nothing saved as sent. You can send them again.');
+  }
+  /** One line per phone for the caption: "#3  IMEI 1  IMEI 2  S/N …". */
+  function captionLine(row: RecordItem, position: number) {
+    const pair = recordImeiPair(row), serial = recordSerial(row);
+    const parts = [pair.imei1, pair.imei2, serial && (shareSerial || !pair.imei1) ? `S/N ${serial}` : ''].filter(Boolean);
+    return `#${position}  ${parts.length ? parts.join('  ') : 'No number detected'}`;
+  }
+
+  /** Save a copy to this phone: a folder with every picture (IMEI / serial written on it) and a numbers.txt. */
+  async function saveToMyself(name: string, rows: RecordItem[]): Promise<boolean> {
+    if (!rows.length) return false;
+    const bridge = androidBridge;
+    const useFolder = !!(bridge?.beginFolder && bridge.appendFolderFile && bridge.finishFolder);
+    const folderName = `IMEI-${name || 'phones'}-${new Date().toISOString().slice(0, 10)}`.replace(/[\\/:*?"<>|]/g, '_');
+    const total = rows.length, numbers: string[] = [];
+    let token = '';
+    const append = async (file: File) => {
+      for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
+        const chunk = (await blobDataUrl(file.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
+        if (!bridge!.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
+        if (file.size === 0) break;
+      }
+    };
+    try {
+      if (useFolder) { token = bridge!.beginFolder!(folderName); if (!token) throw new Error('Finish or cancel the current save before saving again.'); }
+      for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        const lines = pictureLines(row, index + 1, total, true);
+        const blob = await labelledPhoto(recordPhoto(row), lines);
+        const file = new File([blob], `${String(index + 1).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, { type: 'image/jpeg' });
+        numbers.push(lines.join('  '));
+        if (useFolder) await append(file); else { saveDirectFile(file, file.name); await new Promise(resolve => setTimeout(resolve, 350)); }
+        if (index % 10 === 0) setToast(`Preparing ${index + 1} of ${total}…`);
+      }
+      const list = new File([numbers.join('\n')], 'numbers.txt', { type: 'text/plain' });
+      if (useFolder) { await append(list); if (!bridge!.finishFolder!(token)) throw new Error('Could not open the folder picker.'); setToast('Choose a folder and tap Save. A new folder is created with the pictures and numbers.txt.'); }
+      else { saveDirectFile(list, list.name); setToast(`Saved ${total} picture${total === 1 ? '' : 's'} and numbers.txt to your downloads.`); }
+      return true;
+    } catch (error) {
+      if (useFolder && token) bridge!.abortFolder?.(token);
+      setToast(error instanceof Error ? error.message : 'Could not save the report.');
+      return false;
+    }
+  }
+  const rowsOfSection = (id: string) => idsOfSection(id).map(rowId => records.find(row => row.id === rowId)).filter((row): row is RecordItem => !!row);
+
+  function startOneByOne(section: { id: string; name: string }) {
+    const rows = rowsOfSection(section.id);
+    if (!rows.length) return;
+    const saved = readOneByOne(section.id);
+    setObState({ done: saved.done, index: Math.max(0, Math.min(saved.index, rows.length - 1)) });
+    setOneByOne({ id: section.id, name: section.name, rows });
+  }
+  function obSet(next: OneByOneState) {
+    setObState(next);
+    if (oneByOne) writeOneByOne(oneByOne.id, next);
+  }
+  /** Download this picture, remember it, and show the next phone. */
+  function obDownloadNext() {
+    if (!oneByOne) return;
+    const row = oneByOne.rows[obState.index];
+    if (!row) return;
+    saveDirectFile(dataUrlBlob(recordPhoto(row)), photoFilename(row));
+    obSet({ done: [...new Set([...obState.done, row.id])], index: Math.min(oneByOne.rows.length - 1, obState.index + 1) });
+  }
+  async function obSaveRemaining() {
+    if (!oneByOne) return;
+    const remaining = oneByOne.rows.filter(row => !obState.done.includes(row.id));
+    if (!remaining.length) return;
+    if (await saveToMyself(oneByOne.name, remaining)) obSet({ done: oneByOne.rows.map(row => row.id), index: obState.index });
+  }
+
+  function resetWhatsAppProgress() {
+    if (!waSend) return;
+    setWaSent([]); setWaAttempt(null);
+    writeWaProgress(waSend.id, []);
+    setToast('Started over. Nothing is marked as sent.');
+  }
+  /** Android app: all pictures go through the phone's share sheet in a single send (optionally with one text). */
+  async function androidShareFiles(files: File[], title: string, text: string, bluetooth = false) {
+    const bridge = androidBridge;
+    if (!bridge?.beginFolder || !bridge.shareFolderText) return false;
+    const token = bridge.beginFolder('imei-share');
+    if (!token) throw new Error('Finish or cancel the current save before sharing.');
+    try {
+      for (const file of files) for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
+        const chunk = (await blobDataUrl(file.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
+        if (!bridge.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
+        if (file.size === 0) break;
+      }
+      const opened = bluetooth && bridge.shareFolderBluetooth ? bridge.shareFolderBluetooth(token, title) : bridge.shareFolderText(token, title, text);
+      if (!opened) throw new Error('Could not open the share menu.');
+      return true;
+    } catch (error) { bridge.abortFolder?.(token); throw error; }
   }
   /** The WhatsApp button on a person: up to 10 phones go at once, more are offered in groups. */
-  function startWhatsApp(section: { id: string; name: string }) {
+  function startWhatsApp(section: { id: string; name: string }, preferBluetooth = false) {
     const rows = idsOfSection(section.id).map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row);
     if (!rows.length) return;
-    if (rows.length <= WHATSAPP_GROUP) sendGroup(section.name, rows);
-    else setWaSend({ name: section.name, rows });
+    setWaSent(readWaProgress(section.id));
+    setWaAttempt(null);
+    setWaBusy('');
+    setWaProblem('');
+    setWaPreferBluetooth(preferBluetooth);
+    let caps: { whatsapp?: boolean; bluetooth?: boolean; bluetoothOn?: boolean } | null = null;
+    try { caps = androidBridge?.sendCapabilities ? JSON.parse(androidBridge.sendCapabilities()) : null; } catch { caps = null; }
+    setWaCaps(caps);
+    if (caps?.whatsapp === false && !preferBluetooth) setWarning('WhatsApp is not installed on this phone. Use "Send by Bluetooth": it sends the pictures, the IMEI and the serial.');
+    setWaSend({ id: section.id, name: section.name, rows });
   }
   const shareSections = [
     ...personGroups.map(person => ({ id: person.id, name: personName(person), items: personModels.get(person.id) || [] })),
@@ -2168,6 +2431,31 @@ export default function App() {
   /** Models the app could not name: they need a name typed once so every phone of that model reads correctly. */
   const unknownGroups = modelGroups.filter(group => group.key === 'unknown' || group.label.endsWith('(not recognised)'));
   const [unknownDrafts, setUnknownDrafts] = useState<Record<string, string>>({});
+  const [unknownCodes, setUnknownCodes] = useState<Record<string, string>>({});
+  /** Every model name the app knows: built-in list, downloaded catalog and your own names. */
+  const knownModels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [code, name] of Object.entries(SAMSUNG_MODELS)) map.set(code, name);
+    for (const entry of catalogEntries) { const code = modelCode4(entry.modelCode); if (code && entry.name) map.set(code, entry.name); }
+    for (const [code, name] of Object.entries(customModels)) map.set(code, name);
+    return map;
+  }, [catalogEntries, customModels]);
+  /** Likely answers for an unknown code: a known code one character away (the scanner may have misread it), then nearby models. */
+  function suggestionsFor(code: string) {
+    if (code.length !== 4) return [] as { code: string; name: string; kind: 'fix' | 'near' }[];
+    const fixes: { code: string; name: string; kind: 'fix' | 'near' }[] = [];
+    for (const [known, name] of knownModels) {
+      if (known === code) continue;
+      let different = 0;
+      for (let index = 0; index < 4; index++) if (known[index] !== code[index]) different++;
+      if (different === 1) fixes.push({ code: known, name, kind: 'fix' });
+    }
+    const number = Number(code.slice(1));
+    const near = [...knownModels].filter(([known]) => known !== code && known[0] === code[0] && !fixes.some(item => item.code === known))
+      .map(([known, name]) => ({ code: known, name, kind: 'near' as const, gap: Math.abs(Number(known.slice(1)) - number) }))
+      .filter(item => Number.isFinite(item.gap) && item.gap <= 20).sort((a, b) => a.gap - b.gap);
+    return [...fixes.slice(0, 2), ...near.slice(0, 3)].slice(0, 4);
+  }
   function saveUnknownName(group: { key: string; code: string }) {
     const code = normalizeCode(group.code), label = cleanName(unknownDrafts[group.key] || '');
     if (!code || !label) { setToast('Type the name for this model first.'); return; }
@@ -2177,58 +2465,79 @@ export default function App() {
     setUnknownDrafts(old => { const { [group.key]: _done, ...rest } = old; return rest; });
     setToast(`Saved SM-${code}: ${label}.`);
   }
+  function fixGroupCode(group: { key: string; code: string }, typed: string) {
+    const from = modelCode4(group.code), to = normalizeCode(typed);
+    if (!from || !to || from === to) { setToast('Type a model code such as SM-S954.'); return; }
+    const count = changeModelCode(from, to);
+    setUnknownCodes(old => { const { [group.key]: _done, ...rest } = old; return rest; });
+    setToast(count ? `Changed SM-${from} to SM-${to} on ${count} phone${count === 1 ? '' : 's'}.` : 'No phones changed.');
+  }
+  function setGroupModel(ids: string[], model: string) {
+    const wanted = new Set(ids);
+    setRecords(old => old.map(row => wanted.has(row.id) ? { ...row, model } : row));
+    setToast(`Model set on ${ids.length} phone${ids.length === 1 ? '' : 's'}.`);
+  }
   const unknownTab = (
     <div className="give-tab unknown-tab">
-      <p className="settings-help">{unknownGroups.length ? 'These models have no name yet. Type the name once and every phone of that model is updated.' : 'Every scanned model has a name. Nothing to fill in.'}</p>
+      <p className="settings-help">{unknownGroups.length ? 'These models have no name yet. The phones are listed under each one: tap a phone to open it. Type the name once, or pick a suggestion, and every phone of that model is updated.' : 'Every scanned model has a name. Nothing to fill in.'}</p>
       <ul className="models-list">
-        {unknownGroups.map(group => <li key={group.key} className="give-card">
-          <div className="give-head"><strong>{group.code || 'No model code read'}</strong><small>{group.ids.length} phone{group.ids.length === 1 ? '' : 's'}</small></div>
-          {group.code
-            ? <div className="unknown-fill">
-              <input aria-label={`Name for ${group.code}`} value={unknownDrafts[group.key] || ''} maxLength={80} placeholder="Name, for example Galaxy A27" onChange={event => setUnknownDrafts(old => ({ ...old, [group.key]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') saveUnknownName(group); }} />
-              <button type="button" className="primary" disabled={!cleanName(unknownDrafts[group.key] || '')} onClick={() => saveUnknownName(group)}>Save name</button>
-            </div>
-            : <p className="settings-help">The model could not be read from these photos. Open the phones and type the model code.</p>}
-          <button type="button" className="subtle-btn" onClick={() => jumpTo('records', group.key)}>Show these phones</button>
-        </li>)}
+        {unknownGroups.map(group => {
+          const phones = group.ids.map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row);
+          const code = modelCode4(group.code);
+          const suggestions = code ? suggestionsFor(code) : [];
+          return <li key={group.key} className="give-card">
+            <div className="give-head"><strong>{group.code || 'No model code read'}</strong><small>{phones.length} phone{phones.length === 1 ? '' : 's'}</small></div>
+            <ul className="unknown-phones" aria-label={`Phones with ${group.code || 'no model code'}`}>
+              {phones.slice(0, 6).map(row => <li key={row.id}><button type="button" className="unknown-phone" onClick={() => openReview(row)}>
+                <img src={recordPhoto(row)} alt="" />
+                <span><b>{recordImeiPair(row).imei1 || recordSerial(row) || 'No number read'}</b><small>{row.name}</small></span>
+              </button></li>)}
+            </ul>
+            {phones.length > 6 && <button type="button" className="subtle-btn" onClick={() => jumpTo('records', group.key)}>Show all {phones.length} phones</button>}
+            {group.code
+              ? <div className="unknown-fill">
+                <input aria-label={`Name for ${group.code}`} value={unknownDrafts[group.key] || ''} maxLength={80} placeholder="Name, for example Galaxy A27" onChange={event => setUnknownDrafts(old => ({ ...old, [group.key]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') saveUnknownName(group); }} />
+                <button type="button" className="primary" disabled={!cleanName(unknownDrafts[group.key] || '')} onClick={() => saveUnknownName(group)}>Save name</button>
+              </div>
+              : <p className="settings-help">The model could not be read from these photos. Open a phone, or pick the model for all of them below.</p>}
+            {suggestions.length > 0 && <div className="unknown-suggest" role="group" aria-label="Suggestions">
+              <small>Suggestions</small>
+              <div>{suggestions.map(item => item.kind === 'fix'
+                ? <button key={item.code} type="button" className="chip-btn" title="The scanner may have misread the code. Use this code for these phones." onClick={() => fixGroupCode(group, `SM-${item.code}`)}>Misread? Use SM-{item.code} · {item.name}</button>
+                : <button key={item.code} type="button" className="chip-btn" title="Fill the name with a similar model" onClick={() => setUnknownDrafts(old => ({ ...old, [group.key]: item.name }))}>{item.name} (SM-{item.code})</button>)}</div>
+            </div>}
+            <details className="review-details"><summary>More options for these phones</summary>
+              <div className="unknown-options">
+                {group.code && <label>Fix the model code
+                  <span className="unknown-fill"><input aria-label="Correct model code" value={unknownCodes[group.key] || ''} maxLength={24} autoCapitalize="characters" placeholder={group.code} onChange={event => setUnknownCodes(old => ({ ...old, [group.key]: event.target.value }))} />
+                    <button type="button" className="subtle-btn" disabled={!normalizeCode(unknownCodes[group.key] || '')} onClick={() => fixGroupCode(group, unknownCodes[group.key] || '')}>Change code</button></span>
+                </label>}
+                <label>Pick the model for all {phones.length} phones
+                  <ModelPicker value="" onChange={model => setGroupModel(group.ids, model)} customModels={customModels} catalogEntries={catalogEntries} scannedModels={records.map(row => row.model)} onAddModel={(newCode, name) => { const next = { ...customModels, [newCode]: name }; if (!writeCustomModels(next)) return false; setCustomModels(next); return true; }} />
+                </label>
+                <label>Move these phones to
+                  <select aria-label="Move these phones to a person" value="" onChange={event => { if (event.target.value) moveRecords(group.ids, ownerOf(event.target.value)); }}>
+                    <option value="">Choose person</option>
+                    {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+                    <option value="unassigned">Unassigned</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+          </li>;
+        })}
       </ul>
-      <button type="button" className="subtle-btn" onClick={() => setSettingsOpen(true)}>Add many names at once (Settings)</button>
+      <div className="unknown-more">
+        <strong>More you can do</strong>
+        <button type="button" className="subtle-btn" onClick={() => setSettingsOpen(true)}>Add many names at once (Settings)</button>
+        <button type="button" className="subtle-btn" onClick={() => jumpTo('records', 'Review')}>Show phones that need review</button>
+      </div>
     </div>
   );
-  /** Pictures plus a numbers file through the phone's share menu, which lists Bluetooth, Quick Share and chat apps. */
-  async function shareNearby(name: string, batch: RecordItem[]) {
-    if (!batch.length) return;
-    try {
-      const files: File[] = batch.map((row, index) => {
-        const blob = dataUrlBlob(recordPhoto(row)), extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
-        return new File([blob], `${String(index + 1).padStart(2, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || row.number}.${extension}`, { type: blob.type || 'image/jpeg' });
-      });
-      const text = formatPersonShare([sharePayload(sectionForRows(name, batch))]);
-      files.push(new File([text], 'numbers.txt', { type: 'text/plain' }));
-      if (androidBridge?.beginFolder && androidBridge.shareFolder) {
-        const token = androidBridge.beginFolder('imei-share');
-        if (!token) throw new Error('Finish or cancel the current save before sharing.');
-        try {
-          for (const file of files) for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
-            const chunk = (await blobDataUrl(file.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
-            if (!androidBridge.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
-            if (file.size === 0) break;
-          }
-          if (!androidBridge.shareFolder(token, name)) throw new Error('Could not open the share menu.');
-        } catch (error) { androidBridge.abortFolder?.(token); throw error; }
-        setToast('Choose Bluetooth (or Quick Share) in the menu, then the nearby device.');
-        return;
-      }
-      if (typeof navigator.share === 'function' && navigator.canShare?.({ files })) { await navigator.share({ files, title: name }); return; }
-      setToast('This browser cannot share files. Use the Android app, or Download all pictures.');
-    } catch (error) {
-      if ((error as DOMException)?.name !== 'AbortError') setToast(error instanceof Error ? error.message : 'Could not open the share menu.');
-    }
-  }
   const shareTab = (
     <div className="share-tab">
       {shareSections.length === 0 ? <p>No phones yet.</p> : <>
-        <p className="settings-help">WhatsApp sends a person's pictures with the model and IMEI numbers. Bluetooth / nearby opens your phone's share menu with the pictures and a numbers file, so you can pick Bluetooth or Quick Share.</p>
+        <p className="settings-help">WhatsApp: one send with all of a person's pictures and one caption listing every IMEI and serial. Bluetooth / nearby opens your phone's share menu with the pictures and a plain numbers file.</p>
         <div className="share-toolbar">
           <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp text — everyone</button>
           <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
@@ -2242,7 +2551,9 @@ export default function App() {
             <div className="share-toolbar">
               <button className="primary whatsapp-btn" aria-label={`WhatsApp ${section.name}: pictures and IMEI`} onClick={() => startWhatsApp(section)}>WhatsApp · pictures + IMEI</button>
               <button className="subtle-btn" aria-label={`Text only for ${section.name}`} onClick={() => openWhatsApp(formatPersonShare([sharePayload(section)]))}>Text only</button>
-              <button className="subtle-btn" aria-label={`Bluetooth or nearby share for ${section.name}`} onClick={() => void shareNearby(section.name, idsOfSection(section.id).map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row))}>Bluetooth / nearby</button>
+              <button className="subtle-btn" aria-label={`Bluetooth or nearby share for ${section.name}`} onClick={() => startWhatsApp(section, true)}>Bluetooth / nearby</button>
+              <button className="subtle-btn" aria-label={`One by one for ${section.name}`} onClick={() => startOneByOne(section)}>One by one</button>
+              <button className="subtle-btn" aria-label={`Save ${section.name} to my phone`} onClick={() => void saveToMyself(section.name, rowsOfSection(section.id))}>Save to my phone</button>
               <button className="subtle-btn" aria-label={`Copy ${section.name}`} onClick={() => void copyText(formatPersonShare([sharePayload(section)])).then(ok => setToast(ok ? `${section.name}'s list copied.` : 'Copy failed.'))}>Copy</button>
             </div>
           </li>)}
@@ -2252,6 +2563,7 @@ export default function App() {
   );
   async function shareOrCopyText(text: string, what: string) {
     if (!text) return;
+    if (androidBridge?.shareText) { androidBridge.shareText(what, text); setToast(`${what} sent to the share menu. Choose WhatsApp.`); return; }
     if (typeof navigator.share === 'function') {
       try { await navigator.share({ text }); setToast(`${what} sent to the share menu.`); return; }
       catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
@@ -2303,9 +2615,8 @@ export default function App() {
       if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName || '')) return;
       const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
       if (!direction || reviewIndex < 0 || adjustingCrop || rotatingPhoto || reviewSplit) return;
-      if (manualModel !== exportModel(selected!.model) || manualImei !== selected!.imei) { setToast('Save changes before moving to another record.'); return; }
-      const next = reviewRecords[reviewIndex + direction];
-      if (next) { event.preventDefault(); setSelected(next); }
+      event.preventDefault();
+      goReview(direction > 0 ? 1 : -1);
     }
     document.addEventListener('keydown', handleReviewKeys);
     return () => document.removeEventListener('keydown', handleReviewKeys);
@@ -2360,6 +2671,7 @@ export default function App() {
   function resetEverything() {
     if (androidBridge?.resetScans && !androidBridge.resetScans()) { setToast('Could not clear the scans saved by the app. Nothing was deleted.'); setResetOpen(false); return; }
     importedAndroidIds.current.clear();
+    androidCursor.current = 0;
     try { localStorage.removeItem(NATIVE_IMPORTED_STORE); } catch { /* nothing stored */ }
     setRecords([]); setFiles([]); setProgress(''); setCompletedFiles(0); setLaptopMessage('');
     setQuery(''); setFilter('All'); setPersonFilter('All'); setSelectedIds([]); setSelectedOnly(false); setRecordPage(1);
@@ -2942,15 +3254,45 @@ export default function App() {
     });
   }
 
+  type ReviewFields = { model: string; imei: string; imei2: string; serial: string };
+  const currentFields = (): ReviewFields => ({ model: manualModel, imei: manualImei, imei2: manualImei2, serial: manualSerial });
+  const fieldsDiffer = (record: RecordItem, fields: ReviewFields) => fields.model !== exportModel(record.model) || fields.imei !== record.imei || fields.imei2 !== recordImeiPair(record).imei2 || fields.serial !== recordSerial(record);
+  function setDrafts(next: Record<string, ReviewFields>) { draftsRef.current = next; setReviewDrafts(next); }
+  /** Keep what was typed for this picture so you can move on and decide at the end. */
+  function stashDraft() {
+    if (!selected) return draftsRef.current;
+    const next = { ...draftsRef.current };
+    if (fieldsDiffer(selected, currentFields())) next[selected.id] = currentFields(); else delete next[selected.id];
+    setDrafts(next);
+    return next;
+  }
+  function goReview(direction: 1 | -1) {
+    if (reviewIndex < 0 || adjustingCrop || rotatingPhoto || reviewSplit) return;
+    stashDraft();
+    const next = reviewRecords[reviewIndex + direction];
+    if (next) setSelected(next);
+  }
+  /** After the last picture, or when closing: ask what to do with unsaved changes. */
+  function finishReview() {
+    if (adjustingCrop || rotatingPhoto || reviewSplit) return;
+    if (Object.keys(stashDraft()).length) setFinishOpen(true); else closePhotoReviewNow();
+  }
+  function buildReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem> } | { error: string } {
+    if (fields.imei && !/^\d{15}$/.test(fields.imei)) return { error: 'Enter all 15 IMEI digits or leave it empty.' };
+    if (fields.imei2 && !/^\d{15}$/.test(fields.imei2)) return { error: 'Enter all 15 IMEI 2 digits or leave it empty.' };
+    const imeiChanged = fields.imei !== record.imei;
+    const latestBatch = records.filter(r => r.uploadBatchId).reduce<RecordItem | undefined>((current, row) => !current || row.createdAt > current.createdAt ? row : current, undefined)?.uploadBatchId;
+    const duplicate = !!fields.imei && !!latestBatch && record.uploadBatchId === latestBatch && records.some(r => r.id !== record.id && r.uploadBatchId === latestBatch && r.imei === fields.imei);
+    return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
+  }
   function saveReviewFields(advance = false) {
     if (!selected || adjustingCrop || rotatingPhoto || reviewSplit) return;
-    if (manualImei && !/^\d{15}$/.test(manualImei)) { setToast('Enter all 15 IMEI digits or leave it empty.'); return; }
-    if (manualImei2 && !/^\d{15}$/.test(manualImei2)) { setToast('Enter all 15 IMEI 2 digits or leave it empty.'); return; }
-    const imeiChanged = manualImei !== selected.imei;
-    const latestBatch = records.filter(r => r.uploadBatchId).reduce<RecordItem | undefined>((current, row) => !current || row.createdAt > current.createdAt ? row : current, undefined)?.uploadBatchId;
-    const duplicate = !!manualImei && !!latestBatch && selected.uploadBatchId === latestBatch && records.some(r => r.id !== selected.id && r.uploadBatchId === latestBatch && r.imei === manualImei);
-    const patch: Partial<RecordItem> = { imei2: manualImei2, serial: manualSerial.trim(), serialNeedsReview: false, model: manualModel.trim() || 'Unknown unit — review', imei: manualImei, duplicate, status: manualImei ? (luhnValid(manualImei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && manualImei ? { cropNeedsReview: false } : {}) };
+    const built = buildReviewPatch(selected, currentFields());
+    if ('error' in built) { setWarning(built.error); return; }
+    const { patch } = built;
     updateRow(selected.id, patch);
+    const { [selected.id]: _saved, ...rest } = draftsRef.current;
+    setDrafts(rest);
     if (advance && reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1) {
       setSelected(reviewRecords[reviewIndex + 1]);
       document.getElementById('manual-model')?.focus();
@@ -2958,8 +3300,29 @@ export default function App() {
       setSelected({ ...selected, ...patch });
       setManualModel(exportModel(patch.model || ''));
     }
-    setToast(duplicate ? 'Saved. Duplicate IMEI flagged; both pictures are kept.' : patch.status === 'Invalid' ? 'Saved. The IMEI checksum needs review.' : 'Saved.');
+    if (patch.duplicate) setWarning('This IMEI is already in this batch. It was saved and flagged as a duplicate; both pictures are kept.');
+    else if (patch.status === 'Invalid') setWarning('Saved, but the IMEI checksum is not valid. Check the digits against the label.');
+    else setToast('Saved.');
   }
+  function saveAllDrafts() {
+    const patches: Record<string, Partial<RecordItem>> = {};
+    for (const [id, fields] of Object.entries(draftsRef.current)) {
+      const record = records.find(row => row.id === id);
+      if (!record) continue;
+      const built = buildReviewPatch(record, fields);
+      if ('error' in built) { setFinishOpen(false); setSelected(record); setWarning(`${record.name}: ${built.error}`); return; }
+      patches[id] = built.patch;
+    }
+    setRecords(old => markDuplicateRecords(old.map(row => patches[row.id] ? { ...row, ...patches[row.id] } : row)));
+    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
+    const count = Object.keys(patches).length;
+    setToast(`Saved ${count} picture${count === 1 ? '' : 's'}.`);
+  }
+  function discardAllDrafts() {
+    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
+    setToast('Changes discarded.');
+  }
+  const pendingChanges = Object.keys(reviewDrafts).filter(id => id !== selected?.id).length + (selected && fieldsDiffer(selected, currentFields()) ? 1 : 0);
 
   async function applyManualCrop(addAnother = false) {
     if (!selected || adjustingCrop) return;
@@ -3389,7 +3752,7 @@ export default function App() {
   const currentShareText=currentShareRow?shareNumberText({imei:currentShareRow.imei,serial:recordSerial(currentShareRow)},shareMode):'';
   function openSharing(ids:string[]){setShareIds(ids);setShareIndex(0);setShareStep('picture');setShareStatus('');setShareOneByOne(false);}
   const bulkShare=shareRows.length>1&&!shareOneByOne;
-  const SHARE_BATCH=10;
+  const SHARE_BATCH=100000;
   const shareBatches=Array.from({length:Math.ceil(shareRows.length/SHARE_BATCH)},(_,i)=>shareRows.slice(i*SHARE_BATCH,(i+1)*SHARE_BATCH));
   /** One message with every number, numbered in the same order as the pictures. */
   const bulkShareText=shareRows.map((row,index)=>{
@@ -3400,20 +3763,16 @@ export default function App() {
     return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}.jpg`,{type:entry.file.type}));
   }
   const shareLine=(row:RecordItem,index:number)=>{const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');return `${line||'No number detected'}`;};
-  /** One tap: a group of pictures plus their numbers (as the message text) in a single share. */
-  function nativeShareTogether(batchIndex:number){
-    if(sharing)return;
-    try{
-      const batch=shareBatches[batchIndex];
-      const data:ShareData={files:bulkPictureFiles(batch),text:batch.map((row,i)=>shareLine(row,batchIndex*SHARE_BATCH+i)).join('\n')};
-      if(!navigator.share||!navigator.canShare?.(data)){setShareStatus('This browser cannot send pictures and text together. Use Step 1 and Step 2 below.');return;}
-      setSharing(true);
-      void navigator.share(data).then(()=>setShareStatus(`Records ${batchIndex*SHARE_BATCH+1}-${batchIndex*SHARE_BATCH+batch.length} sent to the share menu. If a chat app dropped the numbers, use Step 2 below. Delivery is not confirmed.`)).catch(error=>setShareStatus(error?.name==='AbortError'?'Share menu cancelled. Nothing is marked as sent.':'Could not open sharing. Use Step 1 and Step 2 below.')).finally(()=>setSharing(false));
-    }catch(error){setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
-  }
   function nativeShareBulk(kind:'pictures'|'text',batchIndex=0){
     if(sharing)return;
     try{
+      if(androidBridge?.shareFolderText){
+        if(kind==='text'){openWhatsApp(bulkShareText);return;}
+        setSharing(true);
+        const named=bulkPictureFiles(shareBatches[batchIndex]).map((file,index)=>new File([file],`${String(batchIndex*SHARE_BATCH+index+1).padStart(3,'0')}.jpg`,{type:file.type}));
+        void androidShareFiles(named,'Phones','').then(()=>setShareStatus('Choose WhatsApp and the chat. Then share the numbers once (Step 2). Delivery is not confirmed.')).catch(error=>setShareStatus(error instanceof Error?error.message:'Could not open the share menu.')).finally(()=>setSharing(false));
+        return;
+      }
       let data:ShareData;
       if(kind==='pictures'){
         data={files:bulkPictureFiles(shareBatches[batchIndex])};
@@ -3484,6 +3843,20 @@ export default function App() {
       </header>
 
       {settingsOpen && <SettingsPanel onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {finishOpen && <div className="modal-backdrop finish-backdrop"><section className="modal finish-modal" role="alertdialog" aria-modal="true" aria-label="Save or discard changes">
+        <h2>Save your changes?</h2>
+        <p>You changed {Object.keys(reviewDrafts).length} picture{Object.keys(reviewDrafts).length === 1 ? '' : 's'} and did not save {Object.keys(reviewDrafts).length === 1 ? 'it' : 'them'} yet. Save everything, discard it, or go back and keep editing.</p>
+        <div className="finish-actions">
+          <button type="button" className="primary" onClick={saveAllDrafts}>Save all ({Object.keys(reviewDrafts).length})</button>
+          <button type="button" className="subtle-btn danger" onClick={discardAllDrafts}>Discard changes</button>
+          <button type="button" className="subtle-btn" autoFocus onClick={() => setFinishOpen(false)}>Keep editing</button>
+        </div>
+      </section></div>}
+      {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
+        <h2>Check this</h2>
+        <p>{warning}</p>
+        <button type="button" className="primary" autoFocus onClick={() => setWarning('')}>OK</button>
+      </section></div>}
       {resetOpen && <div className="modal-backdrop"><section className="modal reset-modal" role="alertdialog" aria-modal="true" aria-label="Reset all scanned IMEIs">
         <h2>Delete all scanned IMEIs?</h2>
         <p>This permanently deletes {records.length} scanned record{records.length === 1 ? '' : 's'} and their photos from this device. Your people, model names and settings are kept. This cannot be undone, so export first if you still need them.</p>
@@ -3755,6 +4128,7 @@ export default function App() {
                 <option value="person_photo">IMEI, model, person and photos</option>
               </select>
             </label>
+            {reportLayout === 'person_photo' && records.length > embedPhotoLimit() && <div className="wa-warning" role="note"><strong>{records.length} photos inside one file is a lot for this phone.</strong><p>Up to about {embedPhotoLimit()} fit comfortably (estimate from this phone's memory). For more, choose "IMEI and model only", or "IMEI + picture with download button" to save the pictures in a folder.</p></div>}
             {reportLayout === 'imei_photo' && (
               <div className="download-status">{exportFormat === 'excel'
                 ? (androidBridge?.beginFolder || typeof (window as any).showDirectoryPicker === 'function'
@@ -4215,7 +4589,7 @@ export default function App() {
         </section>
 
         <footer>
-          <span>IMEI LENS <i>•</i> Browser-based OCR</span>
+          <span>IMEI LENS <i>•</i> Browser-based OCR <i>•</i> by CJB</span>
           <span>
             IMEI extraction is automated; always verify results against the device label.
           </span>
@@ -4249,24 +4623,11 @@ export default function App() {
               <div><button className="subtle-btn" onClick={() => setDeleteReviewConfirm(false)}>Cancel</button><button className="subtle-btn danger" onClick={() => deleteRecord(selected, true, true)}>Delete record</button></div>
             </div>}
 
+
             {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} />{focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}</div>}
 
-            {!cropEditorOpen && reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
-              <button className="subtle-btn" disabled={reviewIndex === 0 || adjustingCrop || rotatingPhoto || !!reviewSplit || manualModel !== exportModel(selected.model) || manualImei !== selected.imei} onClick={() => setSelected(reviewRecords[reviewIndex - 1])}>← Previous</button>
-              <span>{reviewIndex + 1} of {reviewRecords.length}</span>
-              <button className="subtle-btn" disabled={reviewIndex === reviewRecords.length - 1 || adjustingCrop || rotatingPhoto || !!reviewSplit || manualModel !== exportModel(selected.model) || manualImei !== selected.imei} onClick={() => setSelected(reviewRecords[reviewIndex + 1])}>Next →</button>
-            </div>}
 
-            {!cropEditorOpen && <div className="review-fixed-actions">
-              <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
-              <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), photoFilename(selected))}><Download size={16} /> Download photo</button>
-              <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
-            </div>}
 
-            {!cropEditorOpen && <div className="crop-actions" aria-label="Rotate photo">
-              <button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶ Rotate left</button>
-              <button className="subtle-btn" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷ Rotate right</button>
-            </div>}
 
             {!cropEditorOpen && <div className="manual-imei-entry">
               <label className="review-model" htmlFor="manual-model">Device model</label>
@@ -4279,11 +4640,31 @@ export default function App() {
               <select id="review-person" value={selected.personId || 'unassigned'} onChange={event => { const plan = assignPerson(selected.id, event.target.value); if (plan.moved.length) setSelected({ ...selected, personId: ownerOf(event.target.value) }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
               <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
               <input id="manual-imei2" inputMode="numeric" maxLength={15} value={manualImei2} onChange={event => setManualImei2(digits(event.target.value).slice(0, 15))} />
-              <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
               <small>Enter moves to the next field, then saves and opens the next record. Use arrow keys to navigate when not typing.</small>
-              {(manualModel !== exportModel(selected.model) || manualImei !== selected.imei) && <small>Save changes before moving to another record.</small>}
             </div>}
 
+            {!cropEditorOpen && <div className="review-float">
+              {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
+                <button className="subtle-btn" disabled={reviewIndex === 0 || adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => goReview(-1)}>← Previous</button>
+                <span>{reviewIndex + 1} of {reviewRecords.length}</span>
+                {reviewIndex === reviewRecords.length - 1
+                  ? <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={finishReview}>Finish ✓</button>
+                  : <button className="subtle-btn" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => goReview(1)}>Next →</button>}
+              </div>}
+              <div className="review-tools">
+                <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
+                <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), photoFilename(selected))}><Download size={16} /> Photo</button>
+                <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
+                <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶</button>
+                <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷</button>
+              </div>
+{selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !reviewSplit && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices: crop each</button></div></div>}{selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && !reviewSplit && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}<div className="review-save-bar" role="group" aria-label="Save this record">
+              <button className="primary" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields()}>Save</button>
+              {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={adjustingCrop || rotatingPhoto || !!reviewSplit} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
+              <span className="review-save-state" role="status">{pendingChanges ? `${pendingChanges} unsaved` : 'All saved'}</span>
+            </div></div>}
+
+            {!cropEditorOpen && <details className="review-details"><summary>More details: status, serial, catalog, share</summary>
             <div className="modal-meta">
               <span>Picture ID: {selected.pictureId}</span>
               <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button><p>Choose Samsung Promoter if it appears in your phone’s share menu. Otherwise copy the number and download the photo, then attach them in Sales Registration. Sharing does not confirm a sales submission. <a href="https://play.google.com/store/apps/details?id=com.samsung.promoter" target="_blank" rel="noreferrer">Samsung Promoter app details</a></p>
@@ -4297,6 +4678,7 @@ export default function App() {
               <span>Duplicate: {selected.duplicate ? 'Yes' : 'No'}</span>
               {selected.cropNeedsReview && <span>Automatic cropping needs review; adjust the crop if needed.</span>}
             </div>
+            </details>}
 
             {selected.cropDataUrl && (
               <details>
@@ -4305,14 +4687,6 @@ export default function App() {
               </details>
             )}
 
-            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !cropEditorOpen && !reviewSplit && <div className="review-split-prompt device-question" role="group" aria-label="How many devices are in this photo">
-              <strong>Is this 1 device or {selected.deviceCount}?</strong>
-              <p>The scanner found {selected.deviceCount} possible devices{selected.deviceImeis?.length ? ` (IMEI 1: ${selected.deviceImeis.join(', ')})` : ''} but no clear gap between them, so it did not cut the photo.</p>
-              <div className="review-split-start">
-                <button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button>
-                <button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices — crop each</button>
-              </div>
-            </div>}
             {cropEditorOpen && !reviewSplit && <div className="review-split-prompt">
               <label htmlFor="review-crop-count">How many IMEI labels do you see in this photo?</label>
               <p>Choose a number, then draw one box per picture. Review the cropped photos before replacing the original record.</p>
@@ -4364,11 +4738,8 @@ export default function App() {
        <div className="modal-head"><h2>{shareIds.length>1?`Share ${shareIds.length} records`:"Share record"}</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>
        <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI (or serial if no IMEI)</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
        {bulkShare?<div className="share-bulk">
-        <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
+        <p><strong>{shareRows.length} records.</strong> Step 1: share all the pictures to the same chat.{shareRows.length>30&&' WhatsApp may take only about 30 at once. If some are missing, use Download all pictures and attach the rest.'} Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
         <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
-        <strong>One tap · Pictures + numbers together</strong>
-        <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareTogether(index)}>Share {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length} with numbers</button>)}</div>
-        <p className="copy-hint">Sends each group of {SHARE_BATCH} pictures with their numbers as the message. Some chat apps keep only the pictures; then use Step 1 and Step 2.</p>
         <strong>Step 1 · Pictures</strong>
         <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareBulk('pictures',index)}>Share pictures {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length}</button>)}</div>
         <button className="subtle-btn" onClick={()=>void downloadBulkPictures(shareRows)}>Download all {shareRows.length} pictures instead</button>
@@ -4437,16 +4808,88 @@ export default function App() {
           </ul>
         </>}
       </section></div>}
-      {waSend && <div className="modal-backdrop"><section className="modal wa-groups-modal" role="dialog" aria-modal="true" aria-label={`Send ${waSend.name}'s phones`}>
-        <div className="modal-head"><h2>Send {waSend.name}</h2><button className="subtle-btn" onClick={() => setWaSend(null)}>Close</button></div>
-        <p>{waSend.rows.length} phones. They go in groups of {WHATSAPP_GROUP}: tap a group, choose WhatsApp, send, then come back for the next one.</p>
-        <div className="delete-person-choices">
-          {Array.from({ length: Math.ceil(waSend.rows.length / WHATSAPP_GROUP) }, (_, index) => {
-            const batch = waSend.rows.slice(index * WHATSAPP_GROUP, (index + 1) * WHATSAPP_GROUP);
-            return <button key={index} className="primary whatsapp-btn" onClick={() => sendGroup(waSend.name, batch)}>Send phones {index * WHATSAPP_GROUP + 1}–{index * WHATSAPP_GROUP + batch.length}<small>{batch.length} pictures + model and IMEI</small></button>;
-          })}
-        </div>
-      </section></div>}
+      {waSend && (() => {
+        const total = waSend.rows.length;
+        const sentSet = new Set(waSent);
+        const done = waSend.rows.filter(row => sentSet.has(row.id)).length;
+        const remaining = total - done;
+        const nextPosition = waSend.rows.findIndex(row => !sentSet.has(row.id)) + 1;
+        const noWhatsApp = waCaps?.whatsapp === false;
+        const bluetoothFirst = waPreferBluetooth || noWhatsApp;
+        const problem = noWhatsApp ? 'WhatsApp is not installed on this phone.' : waProblem || (remaining > WHATSAPP_NOTICE ? `WhatsApp may not take all ${remaining} pictures at once.` : '');
+        const whatsappButton = <button type="button" className={bluetoothFirst ? 'subtle-btn' : 'primary whatsapp-btn'} disabled={!!waBusy || noWhatsApp} onClick={() => void sendWhatsAppPictures('whatsapp')}>{waBusy || (done === 0 ? `Send all ${total} pictures by WhatsApp` : `WhatsApp · continue with pictures ${nextPosition}–${total}`)}<small>{noWhatsApp ? 'WhatsApp is not installed.' : `One send with all the pictures${waCaption ? ' and one caption listing every IMEI / serial' : ''}.${waLabel ? ' Numbers also written on each picture.' : ''}`}</small></button>;
+        const bluetoothButton = <button type="button" className={bluetoothFirst || problem ? 'primary' : 'subtle-btn'} disabled={!!waBusy || waCaps?.bluetooth === false} onClick={() => void sendWhatsAppPictures('bluetooth')}>Send {remaining} by Bluetooth{bluetoothFirst ? '' : ' instead'}<small>{waCaps?.bluetooth === false ? 'This phone has no Bluetooth.' : `Pictures with IMEI / serial written on them, plus a numbers.txt file.${waCaps?.bluetoothOn === false ? ' Bluetooth is off: turn it on first.' : ''}`}</small></button>;
+        return <div className="modal-backdrop"><section className="modal wa-groups-modal" role="dialog" aria-modal="true" aria-label={`Send ${waSend.name}'s phones`}>
+          <div className="modal-head"><h2>Send {waSend.name}</h2><button className="subtle-btn" onClick={() => setWaSend(null)}>Close</button></div>
+          <div className="wa-progress" role="status">
+            <strong>{done} of {total} pictures sent</strong>
+            <div className="wa-bar" aria-hidden="true"><span style={{ width: `${total ? Math.round(done / total * 100) : 0}%` }} /></div>
+            <small>{remaining ? `Next to send: picture ${nextPosition} of ${total}` : 'All pictures are sent.'}</small>
+          </div>
+          <label className="settings-check"><input type="checkbox" checked={waCaption} onChange={event => setWaCaption(event.target.checked)} /> Add one caption with every IMEI / serial</label>
+          <label className="settings-check"><input type="checkbox" checked={waLabel} onChange={event => setWaLabel(event.target.checked)} /> Also write the IMEI / serial on each picture</label>
+          <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Always include serial numbers</label>
+          {!waAttempt && remaining > 0 && problem && <div className="wa-warning" role="alert">
+            <strong>{problem}</strong>
+            <p>Bluetooth can send the pictures, the IMEI and the serial to another phone instead, with no limit on how many.</p>
+          </div>}
+          {waAttempt
+            ? <div className="wa-confirm" role="group" aria-label="Save how many pictures arrived">
+              <strong>{waAttempt.channel === 'bluetooth' ? 'Did they arrive on the other phone?' : 'Did they arrive in WhatsApp?'}</strong>
+              <p>{waAttempt.channel === 'bluetooth' ? 'Check the other phone.' : 'Open the chat and check.'} If fewer than {waAttempt.ids.length} arrived, change the number. The app saves it and will continue after the last one that arrived.</p>
+              <label>Pictures that arrived <input type="number" inputMode="numeric" min={0} max={waAttempt.ids.length} value={waAttempt.arrived} onChange={event => setWaAttempt({ ...waAttempt, arrived: Math.max(0, Math.min(waAttempt.ids.length, Math.floor(Number(event.target.value)) || 0)) })} /></label>
+              <button type="button" className="primary whatsapp-btn" onClick={confirmWhatsAppArrived}>Save · {waAttempt.arrived} of {waAttempt.ids.length} arrived</button>
+              <button type="button" className="subtle-btn" onClick={() => setWaAttempt(null)}>They did not send: try again</button>
+            </div>
+            : remaining > 0
+              ? <div className="wa-send-ways">{bluetoothFirst ? <>{bluetoothButton}{whatsappButton}</> : <>{whatsappButton}{bluetoothButton}</>}</div>
+              : <p className="settings-help">Everything was sent. Tap Start over to send them again.</p>}
+          <details className="review-details"><summary>Send the numbers again as a separate message</summary>
+            <div className="delete-person-choices">
+              <button type="button" className="primary whatsapp-btn" onClick={() => openWhatsApp(waNumbersText(waSend.rows))}>Send the numbers as one message</button>
+              <button type="button" className="subtle-btn" onClick={() => void copyText(waNumbersText(waSend.rows)).then(ok => setToast(ok ? 'Numbers copied.' : 'Copy failed.'))}>Copy the numbers</button>
+            </div>
+          </details>
+          <button type="button" className="subtle-btn" disabled={!done && !waAttempt} onClick={resetWhatsAppProgress}>Start over</button>
+        </section></div>;
+      })()}
+      {oneByOne && (() => {
+        const rows = oneByOne.rows;
+        const row = rows[obState.index];
+        if (!row) return null;
+        const pair = recordImeiPair(row), serial = recordSerial(row);
+        const doneCount = rows.filter(item => obState.done.includes(item.id)).length;
+        const remaining = rows.length - doneCount;
+        const last = obState.index === rows.length - 1;
+        return <div className="modal-backdrop"><section className="modal onebyone-modal" role="dialog" aria-modal="true" aria-label={`One by one: ${oneByOne.name}`}>
+          <div className="modal-head"><h2>One by one · {oneByOne.name}</h2><button className="subtle-btn" onClick={() => setOneByOne(null)}>Close</button></div>
+          <div className="wa-progress" role="status">
+            <strong>Phone {obState.index + 1} of {rows.length}</strong>
+            <div className="wa-bar" aria-hidden="true"><span style={{ width: `${Math.round(doneCount / rows.length * 100)}%` }} /></div>
+            <small>{doneCount} downloaded · {remaining} left{obState.done.includes(row.id) ? ' · this one is already downloaded' : ''}</small>
+          </div>
+          <img className="ob-photo" src={recordPhoto(row)} alt={`Phone ${obState.index + 1}`} />
+          <div className="ob-numbers">
+            <div><small>IMEI 1</small><b>{pair.imei1 || '—'}</b></div>
+            {pair.imei2 && <div><small>IMEI 2</small><b>{pair.imei2}</b></div>}
+            {serial && <div><small>S/N</small><b>{serial}</b></div>}
+          </div>
+          <div className="review-float">
+            <div className="review-tools ob-tools">
+              <button type="button" className="subtle-btn" disabled={!pair.imei1} onClick={() => void copyText(pair.imei1).then(ok => setToast(ok ? 'IMEI copied.' : 'Could not copy.'))}><Copy size={16} /> Copy IMEI</button>
+              <button type="button" className="subtle-btn" disabled={!serial} onClick={() => void copyText(serial).then(ok => setToast(ok ? 'Serial copied.' : 'Could not copy.'))}>Copy S/N</button>
+            </div>
+            <div className="ob-actions">
+              <button type="button" className="primary" onClick={obDownloadNext}><Download size={16} /> {last ? 'Download · last one' : 'Download & next →'}</button>
+              <div className="ob-nav">
+                <button type="button" className="subtle-btn" disabled={obState.index === 0} onClick={() => obSet({ ...obState, index: obState.index - 1 })}>← Back</button>
+                <button type="button" className="subtle-btn" disabled={last} onClick={() => obSet({ ...obState, index: obState.index + 1 })}>Skip →</button>
+              </div>
+              <button type="button" className="subtle-btn" disabled={!remaining} onClick={() => void obSaveRemaining()}>Download all {remaining} remaining to a folder</button>
+            </div>
+          </div>
+        </section></div>;
+      })()}
       {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
         <div className="modal-head"><h2>Bulk edit</h2><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Close</button></div>

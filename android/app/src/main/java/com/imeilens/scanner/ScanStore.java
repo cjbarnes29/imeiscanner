@@ -8,6 +8,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.UUID;
 
 /**
@@ -15,8 +16,8 @@ import java.util.UUID;
  * rewriting the whole file after every photo (which got slow for 500-photo scans).
  */
 final class ScanStore {
-    private static final long FLUSH_MS = 2000;
-    private static final int FLUSH_EVERY = 8;
+    /** Most photos one scan batch can hold. */
+    static final int MAX_PHOTOS = 1000;
 
     private static JSONObject cache;
     private static boolean dirty;
@@ -67,6 +68,30 @@ final class ScanStore {
         return snapshot;
     }
 
+    /**
+     * The job for the web page, with only the records from index "from" (at most 200) and without the photo queue.
+     * With 1000 records the full job is several megabytes; this keeps each call small.
+     */
+    static synchronized String jsonFrom(Context context, int from) {
+        JSONObject job = load(context);
+        JSONArray records = job.optJSONArray("records");
+        int total = records == null ? 0 : records.length();
+        int start = Math.max(0, Math.min(from, total));
+        try {
+            JSONObject out = new JSONObject();
+            for (Iterator<String> keys = job.keys(); keys.hasNext(); ) {
+                String key = keys.next();
+                if (!"records".equals(key) && !"queue".equals(key) && !"pending".equals(key)) out.put(key, job.get(key));
+            }
+            JSONArray slice = new JSONArray();
+            for (int index = start; index < total && index < start + 200; index++) slice.put(records.get(index));
+            out.put("records", slice);
+            out.put("recordsFrom", start);
+            out.put("recordsTotal", total);
+            return out.toString();
+        } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
     static synchronized String status(Context context) { return load(context).optString("status"); }
 
     static synchronized boolean isStopped(Context context) { return "stopped".equals(status(context)); }
@@ -102,7 +127,12 @@ final class ScanStore {
 
     private static void save(Context context, boolean force) {
         dirty = true; snapshot = null;
-        if (force || pending >= FLUSH_EVERY || System.currentTimeMillis() - lastWrite >= FLUSH_MS) write(context, cache);
+        // Big scans write less often: the saved file grows with every record.
+        JSONArray records = cache.optJSONArray("records");
+        int count = records == null ? 0 : records.length();
+        long flushMs = count > 300 ? 6000 : count > 100 ? 3500 : 2000;
+        int flushEvery = count > 300 ? 40 : count > 100 ? 16 : 8;
+        if (force || pending >= flushEvery || System.currentTimeMillis() - lastWrite >= flushMs) write(context, cache);
     }
 
     static synchronized boolean start(Context context, JSONArray queue, String personId) {
