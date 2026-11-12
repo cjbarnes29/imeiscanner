@@ -1,42 +1,82 @@
 # IMEI Lens — Photo Scanner
 
-Built by CJB.
+Built by CJB. Version history: [CHANGELOG.md](CHANGELOG.md) (older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md)).
 
-What changed in each version: [RELEASE-1.6.md](RELEASE-1.6.md), [RELEASE-1.5.md](RELEASE-1.5.md), [RELEASE-1.4.md](RELEASE-1.4.md).
+IMEI Lens reads phone label photos (IMEI 1, IMEI 2, serial, model), lets you check and fix them, groups the phones by person, and sends or saves the results. It comes in two forms that are **the same build**:
 
-An inventory scanner for phone-label photos. Regular OCR runs in the browser. Optional laptop background scanning keeps processing after the browser closes, provided the laptop stays powered on and awake.
+- **Web:** https://cjbarnes29.github.io/imeiscanner/ — OCR runs in your browser.
+- **Android app:** the same screens in an app, plus the features that need a phone (background scanning, sharing, Bluetooth, saving to a folder).
 
-## Free Android app for scanning after closing the screen
+Open **Settings**: the last line shows `Version X (commit) · Web` or `· Android app`. When the numbers match, the two are the same build.
 
-Install the Android APK from the [latest Android release](https://github.com/cjbarnes29/imeiscanner/releases). Open **IMEI Lens**, then choose **Scan on this phone in the background** and select up to 500 photos. Keep the scan notification enabled. The phone saves progress after each photo and shows the cropped records when you reopen the app. Use **Stop scan** in the app or notification to stop it. Exports use Android's save-file picker. Photos and IMEIs remain on the phone; no laptop, paid server, or Google authorization is needed. The GitHub Pages website remains available for browser-only scanning.
+## Install and update the Android app
+1. Open the [releases page](https://github.com/cjbarnes29/imeiscanner/releases) on your phone, take the newest `android-v…` release at the top (releases are marked pre-release, so the "latest" shortcut does not show them), and download `app-debug.apk` (the file is debug-signed, which is fine for installing directly).
+2. Open the file and allow installing from this source when Android asks.
+3. To update, install the newer APK over the old one. If Android refuses (a different signature), **export your records first**, uninstall the old app, then install the new one. Records live inside the app and are removed by uninstalling.
 
-Android may pause and retry queued work when it restricts background activity, and force-stopping the app in phone settings prevents work until the app is opened again. Android 15 also limits `mediaProcessing` foreground services to six hours in a 24-hour period. This APK is a debug-signed preview; later APKs may require uninstalling it before installation, which erases its local records. Export important records first. A phone test is still needed to validate scanning on your device.
+Android may pause queued work when it restricts background activity, and force-stopping the app in phone settings stops scanning until you open it again (tap **Stop scan**, then choose the remaining photos). Android 15 also limits `mediaProcessing` foreground services to six hours in a 24-hour period. Keep the scan notification enabled.
 
 ## The screen
-There are two modes, chosen with the **Simple | Detailed** switch in the top bar. The choice is remembered. Detailed Mode is the full screen and is the default; Simple Mode shows only the essentials. Nothing is removed in either mode: Simple Mode just hides the advanced blocks, and everything works the same in both.
+A bar at the bottom switches between six sections (Detailed mode):
 
-**Detailed Mode** (three steps, all visible):
-1. **Upload photos** (Step 01): Scan with camera (opens the device's own camera app), the drop zone and photo queue, the scan-speed menu, **Extract IMEI**, laptop / background scanning, the Android background scan, and the Samsung product catalog.
-2. **Export inventory** (Step 02): Excel, Word, Google Sheets or CSV, what to include, which records, and the choose-records list. The default is Excel with IMEI 1, IMEI 2, Serial, the picture and a Download picture link.
-3. **Scanned records** (Step 03): model filter chips, the search box, the people controls, and the records in the **detailed table** (default) or the **phone list** grouped by series.
+| Tab | What it is for |
+|---|---|
+| **Scan** | Upload or take photos. On Android: **Choose photos and scan** (background scan) and photos shared from other apps. |
+| **Records** | Search, filter by model (drop-down) and status, group by person, select, review each picture. |
+| **Give** | Decide how many of each model each person gets. |
+| **Unknown** | Models with no name yet: the phones are listed, with suggestions and fixes. |
+| **Share** | Send a person's pictures and numbers, one by one, or save them to your phone. |
+| **Export** | Excel, Word, Google Sheets and CSV reports. |
 
-Summary cards (scanned records, valid IMEI, needs review, models) and quick navigation sit at the top.
+The top bar has the **Simple | Detailed** switch, **Reset** (the trash button: deletes every scanned record and photo after you confirm; people, model names and settings are kept) and **Settings**. Simple mode shows only the essentials; nothing is removed in either mode.
 
-**Simple Mode** shows: **Take photo** (the device's own camera app) and **Choose photos** (scanning starts by itself), the phones grouped under their series with phone name, IMEI, IMEI 2 and serial and a Copy button for each, search, the people tools, and the essential actions: **Export Excel**, **Download all pictures**, **Share selected**, **Send numbers**, **Move selected to**, **Delete selected**, and **Fix photos** when some photos need it. It hides the summary cards, quick navigation, catalog, scan speed, drop zone and queue, laptop scanning, the Export inventory panel, the model filter, Bulk edit and Share all. Switch to Detailed Mode for those.
+### Scanning
+- **Android app:** choose up to **1000 photos** per batch. They scan in the background with a progress notification. The app measures the phone (cores, memory, heat, battery saver) and scans several photos at once. In **Settings → Phone scanning power** you can pick **Auto** (starts gently and speeds up while the phone stays cool), **Turbo**, **Balanced** or **Safe**. If a photo has no readable IMEI, the scanner also tries it turned 90°, 270° and 180° and keeps the best result.
+- **Share into the app:** from WhatsApp, Gallery or any app, share photos to **IMEI Lens**. They are copied into the app and scanned automatically, for the person last selected. Photos shared during a running scan wait and scan next.
+- **Web:** choose photos and tap **Extract IMEI**, or use **Scan with camera**. Browser scans run only while the page stays open.
+- **Laptop or Render server:** see the sections further down.
+- Saved pictures in the Android app are kept at up to 1800 px so 1000 of them fit in memory.
 
-**Camera:** Take photo / Scan with camera hands over to the phone's native camera app (a camera-capture file input), and the photo you take is scanned straight away; tap it again for the next one. On a computer it opens the file chooser. The old in-app camera screen is no longer used.
+### Reviewing a picture
+Tap a record to open the review. **All the buttons live in one floating bar at the bottom** (they stay in view while you scroll the fields): Previous / *n of N* / Next (the last picture shows **Finish ✓**), Copy IMEI, Photo, Edit photo, rotate left and right, then **Save**, **Save & next** and a status (*All saved* or *N unsaved*).
+- You can move between pictures without saving. What you typed is kept, and after the last picture (or when you close the review) a pop-up asks **Save all**, **Discard changes** or **Keep editing**.
+- **Warnings pop up** with an OK button: IMEI digits missing, a duplicate IMEI, an invalid checksum, or a failed send.
+- When the scanner is unsure it floats a question above the Save bar: **Is this 1 device or N?**, or **Check the crop**.
+- **Device model** is a button that opens a big list of every known model (built-in, downloaded catalog, your own names, models already scanned) with search. Tap one to choose it, **＋ Add a new model** to save a new code and name, or **Type for this phone only**.
+- On the Android app a photo opens zoomed on the label when its position is known; **Show full photo** switches back.
 
-### People: move and delete
-Every phone belongs to exactly one person or to nobody (**Unassigned**), so **Everyone** is simply all phones and never lists one twice.
-- **Person chips** show how many phones each person has: *Everyone*, each person, and *Unassigned* when there are any. Tap a person to get **Rename** and **Delete person** buttons; **Add person** adds one. Deleting a person asks whether to keep their phones (moved to Unassigned, with Undo) or delete them too. At least one person is always kept.
-- **Move** (the person menu on each row, **Move selected to**, **Move all to** in a person's view, Bulk edit, or the Person menu in the photo review window): the previous person loses the phone automatically and Everyone is updated without duplicates. A phone is **never moved if the destination already has the same IMEI**; it stays where it is and a message says so.
-- **All IMEIs moved.** When the last phone leaves a person, that person's view says *All IMEIs moved.* (remembered across reloads).
-- **Delete:** while viewing **one person**, Delete (row trash, **Delete selected**, **Delete all**, or the review window) takes the phone off that person and leaves it under Everyone as **Unassigned**, with no confirmation. While viewing **Everyone** or **Unassigned**, Delete removes it **permanently**, after an in-app confirmation (*Delete permanently? / Cancel*).
-- Unassigned phones can be given to a person again with any Move control, and appear in exports as *Unassigned*.
+### Unknown models
+The **Unknown** tab lists every model that has no name. Under each one are its phones (tap one to open it), suggestions (a known code one character away offers **Misread? Use SM-…**, similar models fill the name), a name box, and **More options**: fix the model code, pick the model for all those phones, or move them to a person. **Settings → Add many at once** accepts a list of `code, name` lines.
 
-Also available (Detailed Mode, or under *More for this phone* in the phone list):
-- **Bulk tools** (they apply to the ticked phones, or to all shown when none are ticked): **Share selected / Share all** (pictures 10 at a time, then all numbers as one message), **Download all pictures**, **Send numbers** (one numbered message with IMEI, IMEI 2 and serial), **Bulk edit** (model code, person, mark as checked) and **Bulk crop** (ticked photos, else the ones that need it, else all shown).
-- The phone list's names come from the Samsung catalog first, then Samsung's model-number rules; a phone whose model code could not be read borrows the name of another scanned phone with the same first 8 IMEI digits.
+### Models, catalog and Settings
+**Settings** has: Phone scanning power (Android), **Where files are saved** (Android), **What this app can handle**, Devices in my scans, **My Samsung models** (add, import, export; **Check models** opens the list in a big dialog with Edit and Delete), and the **downloaded Samsung catalog** (**Check catalog** opens it in a big dialog with search, Edit, Delete, ＋ Add a model and Restore deleted; your changes are kept when the catalog updates).
+
+## Sending and saving
+Open **Share** and pick a person. Each person has these buttons:
+
+- **WhatsApp · pictures + IMEI:** all unsent pictures go in **one send with one caption** listing every IMEI and serial once, in picture order. WhatsApp may take only about 30 pictures at once: the app warns, then asks how many arrived and **remembers where it stopped**, so **Continue** sends the next ones. Optional: write the IMEI/serial on each picture (slower) and send the numbers again as one message.
+- **Bluetooth / nearby:** sends the pictures (with IMEI and serial written on them) plus a `numbers.txt`, straight to Bluetooth when the phone has it. The Android app checks whether WhatsApp is installed and works; if not, or if WhatsApp took fewer pictures than sent, a pop-up offers Bluetooth instead. After a Bluetooth send you say how many arrived, the same way.
+- **One by one:** a large picture with its IMEI and serial, **Copy IMEI**, **Copy S/N**, **Download & next**, Back and Skip. It remembers the position and what was downloaded. **Download all remaining** saves the rest.
+- **Save to my phone:** a folder with every picture (IMEI and serial written on it) and `numbers.txt`.
+- **Text only** and **Copy:** plain lists.
+
+**Choose the save folder once.** The first time you use One by one or Save to my phone, Android asks for a folder (pick or create one such as `Documents/IMEI`). After that both save into `IMEI-<person>` inside it **without asking**, and saving again **replaces** the earlier pictures and `numbers.txt` (only files named like `001-IMEI.jpg` and `numbers.txt` are touched). Change or forget the folder in **Settings → Where files are saved**.
+
+**File names.** Single downloads and folder saves are named in picture order with the IMEI: `001-352099001761002.jpg`, `002-…`. Sorting by name keeps the order. Excel and Word reports keep their plain numbered picture links.
+
+## Limits (also listed in Settings → What this app can handle)
+- One scan batch: up to **1000 photos**; records are shown a page at a time.
+- 1000 IMEI numbers as text are about 17 KB: one message. Long lists open the phone's share menu.
+- WhatsApp: about 30 pictures per send. Use Continue, or Bluetooth.
+- Excel or Word with the pictures inside: about 40 pictures per GB of phone memory, between 100 and 600 (an estimate); the app warns. For more, export numbers only or use the folder export.
+- Blurry, glare-covered or cut-off labels cannot be read; they go to **Needs review**.
+- Sending to WhatsApp always needs a tap to choose the chat.
+
+## Backups and safety
+- **Export before** uninstalling the app, clearing its data, or using **Reset**.
+- IMEI numbers are sensitive. Everything stays on your device unless you choose to send or save it.
+- Every merge to `main` is preceded by a backup (see Releases).
+
 
 ## Features
 - Bulk image upload with browser OCR or a laptop background scan queue.
@@ -69,8 +109,7 @@ Also available (Detailed Mode, or under *More for this phone* in the phone list)
 - The in-app photo viewer and self-contained offline HTML gallery keep their controls in place when moving between differently sized pictures. The HTML gallery can view, download, and copy the IMEI for each cropped picture.
 - Editable model and IMEI values; records recalculate validation and duplicate state.
 - The older Excel/Google Sheets layouts include an all-records tab, model tabs, and person tabs; the default IMEI + picture layout is one sheet.
-- **Bulk download.** **Download all pictures (N)** in *Scanned records* saves every ticked record (or every visible record when none is ticked, up to 500) as numbered files `1.jpg`, `2.jpg`, `3.jpg`, ... (numbers only, no IMEI or other text in the file name) plus `numbers.txt` listing the same numbers with IMEI 1, IMEI 2 and serial. It uses the same folder rules as the Excel export: a new folder in the Android app or Chrome/Edge on a computer, otherwise Downloads. No ZIP.
-- **Sharing many records.** **Share all (N)** (or tick records and choose **Share selected**) shares the pictures 10 at a time in one message each, then all the numbers as one separate numbered message (`1. IMEI`, `2. IMEI`, ... in the same order as the pictures). **Copy one by one** lists every record with its number, picture, **Download picture** button and tap-to-copy buttons for IMEI 1, IMEI 2 and serial; each copied value gets a tick so you can work down the list. Picture files are named by number only (`1.jpg`, `2.jpg`, ...), with the same number in the list, the Excel export and bulk downloads; a single record's download uses its record number (for example `3.jpg`). **Download all pictures instead** and **Copy numbers** are fallbacks, and **Share one record at a time** keeps the old per-record flow. *Picture + IMEI* falls back to the serial when a unit has no IMEI; *Picture + IMEI + Serial* adds `S/N ...` on the same line. A browser cannot force separate chat messages from a single share, so the pictures and the numbers are two share steps into the same chat.
+- **Bulk download.** **Download all pictures (N)** in *Scanned records* saves every ticked record (or every visible record when none is ticked) as numbered files `1.jpg`, `2.jpg`, `3.jpg`, ... (numbers only, no IMEI or other text in the file name) plus `numbers.txt` listing the same numbers with IMEI 1, IMEI 2 and serial. It uses the same folder rules as the Excel export: a new folder in the Android app or Chrome/Edge on a computer, otherwise Downloads. No ZIP.
 - Android exports transfer files to the system save picker in small pieces, then report whether the file was saved, cancelled, or failed. Sheets-compatible exports download as Excel files to import into Google Sheets.
 
 ## Run locally
@@ -79,11 +118,10 @@ Install Node.js 24 or newer, then:
 ```bash
 npm install
 npm run dev
-npm test    # unit tests for parsing, splitting, barcode matching and exports
+npm test    # unit tests for parsing, splitting, barcode matching, exports, people and model names
 ```
 
-Open the local URL printed by Vite (usually http://localhost:5173).
-The first OCR scan requires internet access to download the recognition engine and English language data.
+Open the local URL printed by Vite (usually http://localhost:5173). The first OCR scan requires internet access to download the recognition engine and English language data. `npm run dev` and `npm run build` first write `src/version.ts` (the version and commit shown in Settings).
 
 Build for production:
 
@@ -91,6 +129,16 @@ Build for production:
 npm run build
 npm run preview
 ```
+
+Build the Android app (needs the Android SDK and JDK 17; the web build is copied into `android/app/src/main/assets`):
+
+```bash
+npm run build
+mkdir -p android/app/src/main/assets && cp -R dist/. android/app/src/main/assets/
+gradle --project-dir android :app:assembleDebug
+```
+
+The APK is `android/app/build/outputs/apk/debug/app-debug.apk`. A signed release build reads `IMEI_KEYSTORE`, `IMEI_KEYSTORE_PASSWORD`, `IMEI_KEY_ALIAS` and `IMEI_KEY_PASSWORD` from the environment (keep the keystore backed up: without it users cannot upgrade).
 
 ## Real-photo regression check
 Real label photos contain IMEIs and this repository is public, so they are never committed (`test-photos/` is git-ignored). To check the scanner against your own photos:
@@ -112,7 +160,7 @@ The app uses mobile-friendly controls, though browser support for photo formats 
 2. Run `npm ci` and `npm run build` in this folder.
 3. Run `& .\scripts\install-laptop-scanner.ps1` in PowerShell. This starts a Windows sign-in task that runs the scanner independently of the browser.
 4. Open `http://127.0.0.1:8787/` on the laptop, or use the published GitHub Pages app from the same laptop. Expand **Keep scanning after closing the browser**. Use the access code in `server-data/access-code.txt` and the default laptop address `http://127.0.0.1:8787`.
-5. Choose up to 500 photos and press **Scan on laptop**. Wait until **Upload finished** appears. You can now close the browser. Reopen the same app later to import the finished records and crops.
+5. Choose up to 500 photos and press **Scan on laptop** (the Android app itself takes 1000). Wait until **Upload finished** appears. You can now close the browser. Reopen the same app later to import the finished records and crops.
 
 Original uploads, scan status, and cropped photos are kept under `server-data/` on this laptop; this folder is ignored by Git. The API requires the access code and listens only on the laptop's loopback address by default. The access code is saved in the browser so the job can reconnect after closing. Anyone with access to the laptop's browser profile or the code file can access the scans.
 
@@ -138,11 +186,14 @@ The optional [Render deployment](https://render.com/deploy?repo=https://github.c
 
 This hosted option stores photos and IMEIs with Render rather than on your laptop. The GitHub Pages version remains a separate browser-only copy; use the Render address for background scans. The Blueprint has automatic redeploys off so a GitHub push does not interrupt an active scan. Deploy future code changes manually from Render after the current scan finishes. A 20 GB disk is finite: large batches can fill it, so monitor storage and keep exports/backups of important records.
 
-## GitHub and GitHub Pages
-- Commit the source files and `package-lock.json`; `.gitignore` excludes local dependencies, build output, environment files, and local `verification-*` photo and screenshot files. Do not manually upload those private test files to GitHub.
-- GitHub Actions checks the install and production build on pushes and pull requests.
-- To publish, push the project to the `main` branch and choose **GitHub Actions** under **Settings → Pages**. The deployment runs on pushes to `main`; it can also be started from **Actions → Deploy GitHub Pages → Run workflow**. The relative asset paths support both a user site and a repository site.
-- Browser records stay in that browser's IndexedDB. Background jobs are saved on the laptop and imported into the browser when the app reopens. Publishing the site does not upload photos or IMEIs to GitHub.
+## Releases and GitHub
+- **Pages (the website)** deploys on every push to `main`. **Android releases** build from a tag named `android-vX.Y.Z` pushed on a `main` commit: the workflow builds the APK and attaches it to a GitHub release.
+- Both run `npm run build`, so one commit gives one web bundle: the website and the APK contain the **same** files. Compare the version line in Settings.
+- **CI** (`Build`) runs the unit tests and the production build on every push and pull request.
+- **Backups:** before each merge to `main`, the previous `main` is saved as tag `backup-main-before-X.Y.Z` and branch `backup/main-before-X.Y.Z`, and the feature branch as `backup/feature-X.Y.Z`. To undo a merge: `git revert -m 1 <merge commit>`, or reset `main` to the backup tag.
+- Commit the source files and `package-lock.json`; `.gitignore` excludes local dependencies, build output, environment files, the generated `src/version.ts`, and local `verification-*` photo and screenshot files. Do not upload private test photos.
+- Browser records stay in that browser's IndexedDB. Background jobs are saved on the laptop and imported when the app reopens. Publishing the site does not upload photos or IMEIs to GitHub.
+- To publish the website for the first time, choose **GitHub Actions** under **Settings → Pages**; a deployment can also be started from **Actions → Deploy GitHub Pages → Run workflow**.
 
 ## Using Google Sheets
 Exports work without Google authorization. To use a report in Google Sheets, import the Excel file. Links to a local photo folder depend on the spreadsheet app and do not work after import into Google Sheets; the original photos remain on your device.

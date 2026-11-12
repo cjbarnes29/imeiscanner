@@ -43,4 +43,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" "android/app/build/outputs/apk/debug/app-debug.apk#IMEI-Lens-Android.apk" \
             --title "IMEI Lens for Android $GITHUB_REF_NAME" \
             --prerelease \
-            --notes "Phone-only background scanning preview. Install this APK on Android, select photos with Scan on this phone in the background, and use the notification or app to stop. Photos and IMEIs remain on the phone. This preview uses an automatically generated debug signing key, so a later APK may require uninstalling the old version first. Export important records before replacing the app."
+            --notes "IMEI Lens for Android. Install on Android 7 or newer (the file is debug-signed). To update, install over the old app; if Android refuses, export your records first, uninstall the old app, then install this one. See CHANGELOG.md for what changed. The website and this app are the same build: Settings shows the same version."
