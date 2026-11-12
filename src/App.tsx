@@ -22,6 +22,7 @@ import { SamsungCatalog, catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
 import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
+import { embedPhotoLimit } from './capacity';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
 type RecordItem = {
@@ -59,7 +60,7 @@ type PersonGroup = { id: string; label: string; name: string };
 /** People are shown by name only; the "Person 3" label is just an internal id and is never displayed. */
 const personName = (person: PersonGroup) => (person.name || '').trim() || 'Unnamed';
 type LaptopRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; photoIndex: number };
-type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string };
+type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; siblings?: number };
 type AndroidBridge = {
   choosePhotos(personId: string): void;
   status(): string;
@@ -78,6 +79,9 @@ type AndroidBridge = {
   // Android share menu (APK 1.7+): send the staged files through Bluetooth, Quick Share, WhatsApp and so on.
   shareFolder?(token: string, title: string): boolean;
   shareFolderText?(token: string, title: string, text: string): boolean;
+  // APK 1.10+: read the scan in slices (big scans) and share long text through the share menu.
+  statusFrom?(from: number): string;
+  shareText?(title: string, text: string): boolean;
   setActivePerson?(personId: string): void;
   // Delete every saved scan result and cropped photo kept by the Android app (APK 1.8+).
   resetScans?(): boolean;
@@ -1557,6 +1561,8 @@ export default function App() {
   const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
   const [androidJob, setAndroidJob] = useState<{ status: string; count: number; completed: number; failed: number; error?: string } | null>(null);
   const importedAndroidIds = useRef(readNativeImportedIds());
+  /** How many of the Android app's saved records this page has already gone through. */
+  const androidCursor = useRef(0);
   const importingAndroid = useRef(false);
   const phoneOnLaptopNetwork = window.matchMedia('(pointer: coarse)').matches && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(window.location.hostname);
   const useBackgroundByDefault = hostedScanner || phoneOnLaptopNetwork;
@@ -1740,22 +1746,33 @@ export default function App() {
     async function refreshAndroid() {
       if (!androidBridge || importingAndroid.current || cancelled) return;
       importingAndroid.current = true;
+      let more = false;
       try {
-        const job = JSON.parse(androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[] };
+        const sliced = !!androidBridge.statusFrom;
+        const job = JSON.parse(sliced ? androidBridge.statusFrom!(androidCursor.current) : androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[]; recordsFrom?: number; recordsTotal?: number };
         if (cancelled) return;
         setAndroidJob({ status: job.status, count: job.count, completed: job.completed, failed: job.failed, error: job.error });
+        // The app's list was cleared (reset): start reading from the beginning again.
+        if (sliced && (job.recordsTotal ?? 0) < androidCursor.current) { androidCursor.current = 0; more = true; return; }
         const scanned = job.records || [];
         const counts = new Map<string, number>();
         for (const item of scanned) counts.set(item.sourcePictureId || '', (counts.get(item.sourcePictureId || '') || 0) + 1);
-        const pending = scanned.filter(item => !importedAndroidIds.current.has(item.id)).slice(0, 6);
+        const wanted = scanned.filter(item => !importedAndroidIds.current.has(item.id));
+        const pending = wanted.slice(0, 12);
         const added: RecordItem[] = [];
         for (const item of pending) {
+          importedAndroidIds.current.add(item.id);
           const dataUrl = androidBridge.image(item.id);
           if (!dataUrl) continue;
-          const { imageName, ...row } = item;
-          added.push({ ...row, uploadBatchId: row.uploadBatchId || job.id, dataUrl, cropDataUrl: (counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
-          importedAndroidIds.current.add(item.id);
+          const { imageName, siblings, ...row } = item;
+          added.push({ ...row, uploadBatchId: row.uploadBatchId || job.id, dataUrl, cropDataUrl: (siblings || counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
         }
+        if (sliced) {
+          let advance = 0;
+          while (advance < scanned.length && importedAndroidIds.current.has(scanned[advance].id)) advance++;
+          androidCursor.current = (job.recordsFrom ?? 0) + advance;
+          more = androidCursor.current < (job.recordsTotal ?? 0);
+        } else more = wanted.length > pending.length;
         if (added.length) {
           try { localStorage.setItem(NATIVE_IMPORTED_STORE, JSON.stringify([...importedAndroidIds.current])); }
           catch (error) { console.error('Unable to save imported Android IDs', error); }
@@ -1777,7 +1794,10 @@ export default function App() {
           return unique.length ? markDuplicateRecords([...old, ...unique]) : old;
         });
       } catch (error) { console.error('Unable to read Android scan', error); }
-      finally { importingAndroid.current = false; }
+      finally {
+        importingAndroid.current = false;
+        if (more && !cancelled) window.setTimeout(() => void refreshAndroid(), 60);
+      }
     }
     void refreshAndroid();
     const timer = window.setInterval(() => void refreshAndroid(), 2500);
@@ -2285,6 +2305,7 @@ export default function App() {
   );
   async function shareOrCopyText(text: string, what: string) {
     if (!text) return;
+    if (androidBridge?.shareText) { androidBridge.shareText(what, text); setToast(`${what} sent to the share menu. Choose WhatsApp.`); return; }
     if (typeof navigator.share === 'function') {
       try { await navigator.share({ text }); setToast(`${what} sent to the share menu.`); return; }
       catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
@@ -2393,6 +2414,7 @@ export default function App() {
   function resetEverything() {
     if (androidBridge?.resetScans && !androidBridge.resetScans()) { setToast('Could not clear the scans saved by the app. Nothing was deleted.'); setResetOpen(false); return; }
     importedAndroidIds.current.clear();
+    androidCursor.current = 0;
     try { localStorage.removeItem(NATIVE_IMPORTED_STORE); } catch { /* nothing stored */ }
     setRecords([]); setFiles([]); setProgress(''); setCompletedFiles(0); setLaptopMessage('');
     setQuery(''); setFilter('All'); setPersonFilter('All'); setSelectedIds([]); setSelectedOnly(false); setRecordPage(1);
@@ -3784,6 +3806,7 @@ export default function App() {
                 <option value="person_photo">IMEI, model, person and photos</option>
               </select>
             </label>
+            {reportLayout === 'person_photo' && records.length > embedPhotoLimit() && <div className="wa-warning" role="note"><strong>{records.length} photos inside one file is a lot for this phone.</strong><p>Up to about {embedPhotoLimit()} fit comfortably (estimate from this phone's memory). For more, choose "IMEI and model only", or "IMEI + picture with download button" to save the pictures in a folder.</p></div>}
             {reportLayout === 'imei_photo' && (
               <div className="download-status">{exportFormat === 'excel'
                 ? (androidBridge?.beginFolder || typeof (window as any).showDirectoryPicker === 'function'
@@ -4278,6 +4301,20 @@ export default function App() {
               <div><button className="subtle-btn" onClick={() => setDeleteReviewConfirm(false)}>Cancel</button><button className="subtle-btn danger" onClick={() => deleteRecord(selected, true, true)}>Delete record</button></div>
             </div>}
 
+            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !cropEditorOpen && !reviewSplit && <div className="review-split-prompt device-question" role="group" aria-label="How many devices are in this photo">
+              <strong>Is this 1 device or {selected.deviceCount}?</strong>
+              <p>The scanner found {selected.deviceCount} possible devices{selected.deviceImeis?.length ? ` (IMEI 1: ${selected.deviceImeis.join(', ')})` : ''} but no clear gap between them, so it did not cut the photo.</p>
+              <div className="review-split-start">
+                <button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button>
+                <button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices — crop each</button>
+              </div>
+            </div>}
+            {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && !cropEditorOpen && !reviewSplit && <div className="review-top-alert" role="alert">
+              <strong>Check the crop</strong>
+              <span>The automatic crop may be cut off.</span>
+              <button type="button" className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Adjust crop</button>
+            </div>}
+
             {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} />{focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}</div>}
 
             {!cropEditorOpen && reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
@@ -4318,6 +4355,7 @@ export default function App() {
               <span className="review-save-state" role="status">{manualModel !== exportModel(selected.model) || manualImei !== selected.imei || manualSerial !== recordSerial(selected) || manualImei2 !== recordImeiPair(selected).imei2 ? 'Unsaved changes' : 'All saved'}</span>
             </div>}
 
+            {!cropEditorOpen && <details className="review-details"><summary>More details: status, serial, catalog, share</summary>
             <div className="modal-meta">
               <span>Picture ID: {selected.pictureId}</span>
               <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button><p>Choose Samsung Promoter if it appears in your phone’s share menu. Otherwise copy the number and download the photo, then attach them in Sales Registration. Sharing does not confirm a sales submission. <a href="https://play.google.com/store/apps/details?id=com.samsung.promoter" target="_blank" rel="noreferrer">Samsung Promoter app details</a></p>
@@ -4331,6 +4369,7 @@ export default function App() {
               <span>Duplicate: {selected.duplicate ? 'Yes' : 'No'}</span>
               {selected.cropNeedsReview && <span>Automatic cropping needs review; adjust the crop if needed.</span>}
             </div>
+            </details>}
 
             {selected.cropDataUrl && (
               <details>
@@ -4339,14 +4378,6 @@ export default function App() {
               </details>
             )}
 
-            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && !cropEditorOpen && !reviewSplit && <div className="review-split-prompt device-question" role="group" aria-label="How many devices are in this photo">
-              <strong>Is this 1 device or {selected.deviceCount}?</strong>
-              <p>The scanner found {selected.deviceCount} possible devices{selected.deviceImeis?.length ? ` (IMEI 1: ${selected.deviceImeis.join(', ')})` : ''} but no clear gap between them, so it did not cut the photo.</p>
-              <div className="review-split-start">
-                <button className="subtle-btn" disabled={adjustingCrop} onClick={confirmSingleDevice}>1 device</button>
-                <button className="primary" disabled={adjustingCrop} onClick={() => { setReviewCountInput(selected.deviceCount || 2); setCropEditorOpen(true); }}>{selected.deviceCount} devices — crop each</button>
-              </div>
-            </div>}
             {cropEditorOpen && !reviewSplit && <div className="review-split-prompt">
               <label htmlFor="review-crop-count">How many IMEI labels do you see in this photo?</label>
               <p>Choose a number, then draw one box per picture. Review the cropped photos before replacing the original record.</p>

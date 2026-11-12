@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
 import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
+import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
 
 type Props = {
   scannedModels: string[];
@@ -28,6 +29,32 @@ function readSpeed(): SpeedInfo | null {
   const bridge = speedBridge();
   if (!bridge?.speedInfo) return null;
   try { return JSON.parse(bridge.speedInfo()) as SpeedInfo; } catch { return null; }
+}
+
+type Level = 'ok' | 'warn' | 'no';
+const LEVEL_MARK: Record<Level, string> = { ok: '✓', warn: '!', no: '✕' };
+const LEVEL_TEXT: Record<Level, string> = { ok: 'Works', warn: 'Works with a limit', no: 'Not possible' };
+
+/** What the app can and cannot do with a big batch (1000 phones), on this phone. Estimates are marked as estimates. */
+function capacityRows(speed: SpeedInfo | null): { level: Level; title: string; detail: string }[] {
+  const native = !!(window as Window & { AndroidScanner?: { statusFrom?: unknown } }).AndroidScanner;
+  const ram = deviceRamGb(), embed = embedPhotoLimit();
+  const minutes = speed && speed.lastRate > 0 ? Math.max(1, Math.ceil(MAX_PHOTOS_PER_BATCH / speed.lastRate)) : 0;
+  return [
+    native
+      ? { level: 'ok', title: `Scan up to ${MAX_PHOTOS_PER_BATCH} photos in one batch`, detail: 'The app scans in the background with a progress notification, even when you leave the app. Photos past 1000 in one go are skipped: scan the next batch afterwards.' }
+      : { level: 'warn', title: 'Scan many photos in the browser', detail: 'Browser scans run only while this page stays open and use more memory. For 1000 photos use the Android app.' },
+    { level: 'ok', title: 'Keep 1000 or more scanned records', detail: 'Records are saved on this device and shown a page at a time. Use Reset to clear them when a job is done.' },
+    { level: 'ok', title: 'Send 1000 IMEI numbers as text', detail: '1000 numbers are about 17 KB: one message. Long lists open your phone\'s share menu, where you choose WhatsApp.' },
+    { level: 'warn', title: 'Send pictures to WhatsApp', detail: 'All pictures go in one send. WhatsApp may accept only about 30 at once: then use Continue from picture N. Check the chat after each send.' },
+    { level: 'ok', title: 'Excel or CSV with numbers only', detail: 'Any number of records.' },
+    { level: 'ok', title: 'Save all pictures to a folder', detail: 'Every picture is saved as its own file next to the Excel file, so 1000 pictures do not need to fit in memory at once.' },
+    { level: 'warn', title: 'Excel or Word with pictures inside', detail: `Up to about ${embed} pictures on this phone (estimate from about ${ram} GB of memory). For more, export numbers only, or use the folder export.` },
+    { level: minutes ? 'ok' : 'warn', title: 'Time for 1000 photos', detail: minutes ? `About ${minutes} minute${minutes === 1 ? '' : 's'} at your last speed (${speed!.lastRate} photos per minute). Your phone may be warmer and slower on long runs.` : 'Scan a batch once and this line shows how long 1000 photos take on this phone.' },
+    { level: 'no', title: 'Send to WhatsApp without tapping', detail: 'WhatsApp always asks you to choose the chat, so each send needs a tap.' },
+    { level: 'no', title: 'Read blurry, glare or cut-off labels', detail: 'These go to Needs review. Fix them by hand, or retake the photo flat and sharp, with the whole label in view.' },
+    { level: 'no', title: 'Keep scanning after a force stop', detail: 'If Android force-stops the app, or battery saver is strict, scanning stops. Open the app, tap Stop scan, then choose the remaining photos.' },
+  ];
 }
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
@@ -177,6 +204,15 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
       </div>
       <div className="speed-stats"><span>{speed.cores} CPU cores</span><span>{speed.ramGb} GB memory</span><span>Up to {speed.maxWorkers} photo{speed.maxWorkers === 1 ? '' : 's'} at once</span>{speed.lastRate > 0 && <span>Last scan: {speed.lastRate} photos/min ({speed.lastMode}, up to {speed.lastWorkers} at once)</span>}</div>
     </>}
+
+    <h3>What this app can handle</h3>
+    <p className="settings-help">Built for batches of up to {MAX_PHOTOS_PER_BATCH} photos. ✓ works, ! works with a limit, ✕ not possible. Numbers marked estimate depend on this phone's memory.</p>
+    <ul className="capacity-list" aria-label="What the app can handle">
+      {capacityRows(speed).map(row => <li key={row.title} className={`cap-${row.level}`}>
+        <span className="cap-mark" aria-label={LEVEL_TEXT[row.level]}>{LEVEL_MARK[row.level]}</span>
+        <div><strong>{row.title}</strong><small>{row.detail}</small></div>
+      </li>)}
+    </ul>
 
     <h3>Devices in my scans</h3>
     <p className="settings-help">{devices.rows.length ? (missingCount ? <><b>{missingCount}</b> scanned model{missingCount === 1 ? ' is' : 's are'} not in any catalog. Add a name so {missingCount === 1 ? 'it shows' : 'they show'} instead of the code.</> : 'Every scanned model is in a catalog or has your name.') : 'No scanned models yet. Scan some phones and they appear here.'}{devices.noCode > 0 && ` ${devices.noCode} phone${devices.noCode === 1 ? ' has' : 's have'} no model code.`}</p>

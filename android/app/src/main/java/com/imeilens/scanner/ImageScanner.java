@@ -30,6 +30,8 @@ final class ImageScanner {
     private static final Pattern FIRST = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*[1I]\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
     private static final Pattern SECOND = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
 
+    private static final int RECORD_EDGE = 1800;
+
     private ImageScanner() {}
 
     static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge) throws Exception {
@@ -71,6 +73,7 @@ final class ImageScanner {
                 try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation)); }
                 finally { crop.recycle(); }
             }
+            for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("siblings", output.length());
             return output;
         } finally { bitmap.recycle(); }
     }
@@ -82,9 +85,16 @@ final class ImageScanner {
         String raw = ocr.getText();
         String imei = preferredImei(ocr);
         String id = UUID.randomUUID().toString();
-        try (FileOutputStream stream = new FileOutputStream(ScanStore.image(context, id))) {
-            if (!photo.compress(Bitmap.CompressFormat.JPEG, 85, stream)) throw new IllegalStateException("Could not save crop");
+        // Saved pictures are kept small (long edge 1800 px): 1000 full-size pictures would not fit in the page's memory.
+        Bitmap saved = photo;
+        int longest = Math.max(photo.getWidth(), photo.getHeight());
+        if (longest > RECORD_EDGE) {
+            float factor = RECORD_EDGE / (float) longest;
+            saved = Bitmap.createScaledBitmap(photo, Math.max(1, Math.round(photo.getWidth() * factor)), Math.max(1, Math.round(photo.getHeight() * factor)), true);
         }
+        try (FileOutputStream stream = new FileOutputStream(ScanStore.image(context, id))) {
+            if (!saved.compress(Bitmap.CompressFormat.JPEG, 80, stream)) throw new IllegalStateException("Could not save crop");
+        } finally { if (saved != photo) saved.recycle(); }
         JSONObject row = new JSONObject();
         row.put("id", id);
         row.put("pictureId", pictureId());

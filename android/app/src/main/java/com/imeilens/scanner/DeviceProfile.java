@@ -92,6 +92,7 @@ final class DeviceProfile {
             json.put("startWorkers", profile.startWorkers);
             json.put("maxWorkers", profile.maxWorkers);
             json.put("capacity", capacity(context));
+            json.put("maxPhotos", ScanStore.MAX_PHOTOS);
             PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             json.put("batterySaver", power != null && power.isPowerSaveMode());
             json.put("hot", isHot(context));
