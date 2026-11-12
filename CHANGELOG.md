@@ -2,11 +2,15 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
-## Unreleased (web app only) — label counting and review flags
-- **Better count of the products in a photo:** the number of labels is also taken from the S/N, storage (4GB | 128GB) and long model-code lines, not only “Model :”, so one misread line no longer hides a label.
+## 1.21.0 — camera advice, label counting, one crop editor (web and Android)
+This release ships the web changes of 1.20.0 (Crop Studio, drafts, exit confirmation, OCR retry and IMEI repair) together with the Android app. **No new native (Java) code: the Android scanner is the one from 1.19.1.**
+- **Camera that tells you what is wrong:** the camera screen measures sharpness, glare and darkness on a small copy of each frame (about 1.4 times a second) and shows advice (Sharp and clear / A little soft / Blurry / Glare / Too dark). The thresholds come from real label photos: readable photos score 250–830, blurred copies 2–10. After each shot the same check runs, followed by the count of readable IMEI barcodes.
+- **Tap to focus:** tap the label on the camera screen; a ring shows where. It uses the camera's point-of-interest focus where the phone allows it and says so when it does not.
+- **Better count of the products in a photo:** the label count also uses the S/N, storage (4GB | 128GB) and long model-code lines, so one misread “Model :” line no longer hides a label. *Products in each photo* now goes up to 12.
 - **No quiet misses:** a photo that shows several labels but could not be split is flagged for review (“1 device or N?”) instead of being saved as one phone.
-- **Up to 12 products per photo:** *Products in each photo* now offers 7, 8, 9, 10 and 12, with tile plans for the re-read.
-- `scripts/e2e-scan.mjs` runs the real scan in headless Edge/Chrome on photos in `test-photos` (not part of `npm test`).
+- **Unknown models:** after a scan the message tells you how many models are not in the catalog and sends you to the Unknown tab to confirm the names (kept as your own models, also after catalog updates).
+- **Tests in a real browser** (not part of `npm test`, need Edge/Chrome and `npm run build`): `scripts/e2e-studio.mjs` (Crop Studio, 10 checks), `scripts/e2e-camera.mjs` (live advice, tap-to-focus and shot check with a real photo as the camera feed), `scripts/e2e-scan.mjs` (the real scan on photos in `test-photos`, with an accuracy summary), `scripts/eval-frame-quality.mjs` (the blur/dark thresholds on real photos).
+- **Not done / not verified:** OpenCV and perspective (keystone) correction were not added: the ML Kit and in-app image treatments already cover tilt, and OpenCV would add tens of MB that could not be tested without a phone. Native Android camera (CameraX) was not added: the in-app camera runs in the WebView. Nothing was run on a physical phone or an Android emulator (none available on the build machine); measured numbers come from a desktop browser. One known weakness: the IMEI repair step can produce a checksum-valid IMEI 2 that is not what the label says; those records are flagged for review.
 
 ## 1.20.0 — Crop Studio, safer IMEI reading, drafts (web app only; the APK is not rebuilt)
 - **Crop Studio:** one compact editor (full screen on phones, a popup on desktop). Draw a box per label; the count in the header is the number of boxes, there is no count step. Move, resize (corner handles), delete (×), Select several / Select all, Undo, zoom (1×–4×) and Pan. **Auto-detect** adds boxes it finds (it never doubles a box you already have, and it now levels tilted photos first).

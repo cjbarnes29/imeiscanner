@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 export const CATALOG_AUTO_KEY = 'imei-lens-catalog-auto';
 const autoDownloadOff = () => { try { return localStorage.getItem(CATALOG_AUTO_KEY) === 'off'; } catch { return false; } };
 type Product = { id:string; name:string; modelCode:string; region:string; sourceUrl:string; lastChecked:string; imageUrl?:string; specifications?:{name:string;value:string}[]; releaseDate?:string; compatibility?:string };

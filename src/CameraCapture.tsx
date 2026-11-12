@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useBackLayer } from './back-layer';
 import { readImageBarcodes } from './barcode-reader';
+import { analyzeImage, type FrameQuality } from './frame-quality';
 
 function CameraThumbnail({file}: {file:File}) {
   const [url,setUrl]=useState('');
@@ -12,12 +13,14 @@ function CameraThumbnail({file}: {file:File}) {
 async function checkShot(blob: Blob, expected: number): Promise<string> {
   try {
     const bitmap = await createImageBitmap(blob);
+    const quality = analyzeImage(bitmap, bitmap.width, bitmap.height);
+    const prefix = quality.level === 'good' ? '' : `This shot: ${quality.message} `;
     const codes = await readImageBarcodes(bitmap, bitmap.width, bitmap.height, [0, 1600]);
     bitmap.close();
     const imeis = new Set(codes.map(code => code.rawValue).filter(value => /^\d{15}$/.test(value)));
-    if (!imeis.size) return 'Check: no IMEI barcode could be read in this shot. Move closer, reduce glare, or retake.';
+    if (!imeis.size) return prefix + 'Check: no IMEI barcode could be read in this shot. Move closer, reduce glare, or retake.';
     if (expected > 1 && imeis.size < expected) return `Check: only ${imeis.size} IMEI barcode${imeis.size === 1 ? '' : 's'} readable, but you expect ${expected} products. Move closer, keep a gap between boxes, or retake.`;
-    return `Check: ${imeis.size} IMEI barcode${imeis.size === 1 ? '' : 's'} readable in this shot.`;
+    return `${prefix}Check: ${imeis.size} IMEI barcode${imeis.size === 1 ? '' : 's'} readable in this shot.`;
   } catch { return ''; }
 }
 
@@ -43,6 +46,43 @@ export function CameraCapture({ onCapture, onClose, expectedProducts = 0 }: { on
   const [exposure,setExposure] = useState(0);
   const [exposureCap,setExposureCap] = useState<{min:number;max:number;step:number}>();
   const [frameInfo,setFrameInfo] = useState('');
+  const [quality,setQuality] = useState<FrameQuality>();
+  const [focusRing,setFocusRing] = useState<{x:number;y:number}>();
+  const [focusNote,setFocusNote] = useState('');
+  // Live advice while framing: is the picture sharp, free of glare and bright enough? (small grey copy, about 1.4 times a second)
+  useEffect(()=>{
+    if(!ready||photo)return;
+    const timer=window.setInterval(()=>{
+      const v=video.current;
+      if(!v||!v.videoWidth||document.hidden||captureLock.current)return;
+      try{setQuality(analyzeImage(v,v.videoWidth,v.videoHeight));}catch{/* a frame that cannot be read is skipped */}
+    },700);
+    return()=>window.clearInterval(timer);
+  },[ready,photo]);
+  /** Tap the label to focus there (where the camera supports it); the ring shows where you tapped. */
+  async function tapToFocus(event:React.MouseEvent<HTMLDivElement>){
+    if(photo||!ready)return;
+    const box=event.currentTarget.getBoundingClientRect(),v=video.current;
+    const px=event.clientX-box.left,py=event.clientY-box.top;
+    setFocusRing({x:px,y:py});window.setTimeout(()=>setFocusRing(undefined),900);
+    // Map the tap to the video picture (object-fit: contain leaves bars at the sides or top).
+    let nx=px/box.width,ny=py/box.height;
+    if(v&&v.videoWidth&&v.videoHeight){
+      const scale=Math.min(box.width/v.videoWidth,box.height/v.videoHeight),w=v.videoWidth*scale,h=v.videoHeight*scale;
+      nx=(px-(box.width-w)/2)/w;ny=(py-(box.height-h)/2)/h;
+    }
+    if(nx<0||nx>1||ny<0||ny>1)return;
+    const track=stream.current?.getVideoTracks()[0];
+    if(!track)return;
+    try{
+      await track.applyConstraints({advanced:[{pointsOfInterest:[{x:nx,y:ny}],focusMode:'single-shot'} as MediaTrackConstraintSet]});
+      setFocusNote('Focusing…');
+    }catch{
+      try{await track.applyConstraints({advanced:[{focusMode:'continuous'} as MediaTrackConstraintSet]});setFocusNote('This camera cannot focus on a tapped point; continuous focus is on.');}
+      catch{setFocusNote('Focus control is not available on this camera. Move closer or farther until the label is sharp.');}
+    }
+    window.setTimeout(()=>setFocusNote(''),2500);
+  }
   useEffect(()=>{localStorage.setItem('imei-camera-full-size',fullSize?'on':'off');},[fullSize]);
   const alive = useRef(true);
   const [photos,setPhotos]=useState<File[]>([]);
@@ -136,11 +176,13 @@ export function CameraCapture({ onCapture, onClose, expectedProducts = 0 }: { on
     <div className="camera-setup"><button className="subtle-btn" disabled={capturing||photos.length>=50} onClick={()=>phoneCamera.current?.click()}>Phone camera</button><label>Button position <select aria-label="Camera button position" value={placement} onChange={e=>setPlacement(e.target.value)}><option value="center">Bottom center</option><option value="left">Left hand</option><option value="right">Right hand</option></select></label></div>
     {error && <p role="alert">{error}</p>}
     {barcodeStatus && <p role="status">{barcodeStatus}</p>}
-    <div className="review-photo-stage"><video ref={video} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', display: photo ? 'none' : 'block' }} />{preview && <img className="preview" src={preview} alt="Captured label" />}</div>
+    <div className="review-photo-stage camera-stage" onClick={tapToFocus}><video ref={video} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', display: photo ? 'none' : 'block' }} />{focusRing&&!photo&&<span className="focus-ring" style={{left:focusRing.x,top:focusRing.y}} aria-hidden="true" />}{preview && <img className="preview" src={preview} alt="Captured label" />}</div>
     {photos.length>0&&<div className="camera-batch" aria-label="Saved camera photos">{photos.map((file,index)=><div key={file.name}><CameraThumbnail file={file}/><button onClick={()=>setPhotos(old=>old.filter(item=>item!==file))} aria-label={`Remove camera photo ${index+1}`}>× {index+1}</button></div>)}</div>}
     <p role="status">{photos.length} kept{photo?' + 1 current photo':''} · Not scanned yet</p>
     {!photo && <div className="camera-options"><button className="subtle-btn" disabled={capturing} onClick={()=>setFacing(facing==='environment'?'user':'environment')}>Switch camera</button><label>Burst <select aria-label="Burst count" disabled={capturing} value={burst} onChange={e=>setBurst(Number(e.target.value))}><option value={1}>Single photo</option><option value={3}>3 photos</option><option value={5}>5 photos</option></select></label><label>Timer <select disabled={capturing} value={timer} onChange={e=>setTimer(Number(e.target.value))}><option value={0}>Off</option><option value={3}>3 seconds</option><option value={5}>5 seconds</option></select></label>{zoomMax>zoomMin&&<label>Zoom {zoom.toFixed(1)}× <input aria-label="Camera zoom" type="range" min={zoomMin} max={zoomMax} step={0.1} value={zoom} onChange={async e=>{const value=Number(e.target.value);try{await stream.current?.getVideoTracks()[0].applyConstraints({advanced:[{zoom:value} as MediaTrackConstraintSet]});setZoom(value);}catch{setError('Zoom is unavailable. Move closer to the label.');}}}/></label>}</div>}
     {!photo&&(photoMax||exposureCap)&&<div className="camera-options">{photoMax&&<label><input type="checkbox" checked={fullSize} disabled={capturing} onChange={e=>setFullSize(e.target.checked)}/> Full phone resolution ({photoMax.w}×{photoMax.h})</label>}{exposureCap&&<label>Brightness {exposure>0?'+':''}{exposure.toFixed(1)} <input aria-label="Camera brightness" type="range" min={exposureCap.min} max={exposureCap.max} step={exposureCap.step} value={exposure} onChange={async e=>{const value=Number(e.target.value);try{await stream.current?.getVideoTracks()[0].applyConstraints({advanced:[{exposureCompensation:value} as MediaTrackConstraintSet]});setExposure(value);}catch{setError('Brightness is unavailable on this camera.');}}}/></label>}</div>}
+    {!photo&&quality&&<p className={`frame-quality frame-quality-${quality.level}`} role="status">{quality.message} <small>(sharpness {quality.sharpness})</small></p>}
+    {focusNote&&<p role="status">{focusNote}</p>}
     {frameInfo&&<p role="status">{frameInfo}</p>}
     {countdown>0&&<div className="camera-countdown" role="status">{countdown}</div>}
     <div className="review-fixed-actions">

@@ -18,7 +18,7 @@ import { imeiReadings, judgeImei, repeatedAcrossBoxes, type Judgement } from './
 import { canvasStats, planPasses, renderVariant } from './ocr-preprocess';
 import { retryLowConfidence } from './ocr-retry';
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   UploadCloud, ScanLine, Download, Search, Trash2,
   CheckCircle2, AlertTriangle, Copy, Smartphone, Image as ImageIcon,
@@ -3440,9 +3440,11 @@ export default function App() {
       else if (failedFiles) setFiles(old => [...old, ...capturedFiles]);
       else if (stopScanRequested.current) setFiles(old => [...old, ...scanFiles.slice(processedFiles)]);
 
-      const reviewMessage = needsReviewCount
+      // Models the catalog does not know: ask to confirm their names (kept as your own models, even after catalog updates).
+      const unknownModels = new Set(newRows.filter(row => infoOf(row).series === 'Unknown phones').map(row => modelCode4(row.model) || row.model)).size;
+      const reviewMessage = (needsReviewCount
         ? ` ${needsReviewCount} need review; open a record to see the OCR text.`
-        : '';
+        : '') + (unknownModels ? ` ${unknownModels} model${unknownModels === 1 ? ' is' : 's are'} not in the catalog: confirm the name in the Unknown tab.` : '');
 
       setToast(`${failedFiles ? `${failedFiles} photo(s) could not be read${lastFailure ? ` (${lastFailure.slice(0, 120)})` : ''}. ` : ''}${stopScanRequested.current ? 'Scan stopped.' : 'Finished scanning'} ${addedCount} record(s) in ${Math.round((performance.now() - startedAt) / 1000)} seconds.${skippedPhotos ? ` Removed ${skippedPhotos} repeated photo(s).` : ''}${shortPhotos ? ` ${shortPhotos} photo(s) showed fewer than ${expectedProducts} products: check them or retake closer.` : ''}${skippedImeis ? ` Removed ${skippedImeis} repeated IMEI row(s).` : ''}${skippedSerials ? ` Removed ${skippedSerials} repeated serial row(s).` : ''}${reviewMessage}${failedFiles ? ` ${failedFiles} file(s) could not be read.` : ''}`);
     } catch (e) {

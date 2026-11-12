@@ -40,7 +40,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          # Release notes: the CHANGELOG section for this version, after the install steps.
+          awk -v v="$VERSION" '$0 ~ "^## "v"( |$)" {p=1; next} /^## /{p=0} p' CHANGELOG.md > changes.md
+          {
+            echo "## Install"
+            echo "1. On an Android 7+ phone, download **IMEI-Lens-Android.apk** from the assets below and open it (allow installing from this source when asked)."
+            echo "2. To update, install it over the old app. If Android refuses (a different signature), **export your records first**, uninstall the old app, then install this one. Records live inside the app and are removed by uninstalling."
+            echo "3. Open **Settings**: the last line shows the version (${VERSION}); the website shows the same one."
+            echo
+            echo "The file is debug-signed. Photos and IMEIs stay on the phone."
+            echo
+            echo "## What changed in ${VERSION}"
+            if [ -s changes.md ]; then cat changes.md; else echo "See CHANGELOG.md."; fi
+          } > release-notes.md
           gh release create "$GITHUB_REF_NAME" "android/app/build/outputs/apk/debug/app-debug.apk#IMEI-Lens-Android.apk" \
             --title "IMEI Lens for Android $GITHUB_REF_NAME" \
             --prerelease \
-            --notes "IMEI Lens for Android. Install on Android 7 or newer (the file is debug-signed). To update, install over the old app; if Android refuses, export your records first, uninstall the old app, then install this one. See CHANGELOG.md for what changed. The website and this app are the same build: Settings shows the same version."
+            --notes-file release-notes.md

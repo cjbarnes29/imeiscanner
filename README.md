@@ -149,6 +149,19 @@ gradle --project-dir android :app:assembleDebug
 
 The APK is `android/app/build/outputs/apk/debug/app-debug.apk`. A signed release build reads `IMEI_KEYSTORE`, `IMEI_KEYSTORE_PASSWORD`, `IMEI_KEY_ALIAS` and `IMEI_KEY_PASSWORD` from the environment (keep the keystore backed up: without it users cannot upgrade).
 
+## Camera advice and tap-to-focus
+The in-app camera (also used inside the Android app's WebView) shows live advice under the picture: **Sharp and clear**, **A little soft**, **Blurry**, **Glare** or **Too dark**, measured on a 480 px grey copy of the frame about 1.4 times a second (`src/frame-quality.ts`; thresholds are in that file and were chosen from real photos with `scripts/calibrate-frame-quality.mjs`). Tap the label to focus there (`pointsOfInterest`, where the phone's camera supports it). After a shot the app repeats the check and counts the readable IMEI barcodes. This is advice only: it never blocks a shot.
+
+## Testing in a real browser
+Besides `npm test` there are scripts that drive the built app in headless Edge/Chrome (run `npm run build` first; photos go in `test-photos/`, which is git-ignored):
+
+| Script | What it checks |
+|---|---|
+| `node scripts/e2e-studio.mjs` | Crop Studio: automatic count, Save for later, Resume, exit prompt, Save all, original replaced |
+| `node scripts/e2e-camera.mjs` | Camera: live advice, tap-to-focus ring and shot check, with a sharp and a blurred photo as the fake camera |
+| `node scripts/e2e-scan.mjs 01 02 …` | The real scan on `test-photos/multi-NN.jpg`: records, valid IMEIs, IMEI 1/2 agreement, review flags, seconds |
+| `node scripts/eval-frame-quality.mjs` | Blur/dark thresholds on the real photos |
+
 ## Real-photo regression check
 Real label photos contain IMEIs and this repository is public, so they are never committed (`test-photos/` is git-ignored). To check the scanner against your own photos:
 

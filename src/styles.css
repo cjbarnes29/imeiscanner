@@ -601,3 +601,11 @@ body{touch-action:pan-y pinch-zoom}
 .saved-crop-card strong small{margin-left:6px;font-weight:600}
 @media(max-width:700px){.results-studio .review-crop-list{grid-template-columns:1fr}}
 .saved-crop-card strong small.green{color:#65dcb5}.saved-crop-card strong small.amber{color:#e7bd75}
+
+/* Camera: live advice and tap-to-focus ring */
+.camera-stage{cursor:crosshair}
+.focus-ring{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border:3px solid #62e6bc;border-radius:50%;pointer-events:none;animation:focus-pulse .9s ease-out forwards}
+@keyframes focus-pulse{from{transform:scale(1.5);opacity:1}to{transform:scale(.9);opacity:.2}}
+.frame-quality{margin:4px 0;padding:6px 10px;border-radius:8px;font-size:13px;border:1px solid #2b3d53}.frame-quality small{opacity:.7}
+.frame-quality-good{background:#10281f;border-color:#2c6b52;color:#8be0bd}.frame-quality-soft{background:#2a2410;border-color:#6a5a2a;color:#f3dca0}
+.frame-quality-blurry,.frame-quality-dark{background:#2e1417;border-color:#7a2c34;color:#f2a4ab}.frame-quality-glare{background:#2a2410;border-color:#6a5a2a;color:#f3dca0}
