@@ -63,13 +63,14 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        cleanStaleCache();
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         webView = new WebView(this);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.getSettings().setAllowFileAccess(false);
-        webView.getSettings().setAllowContentAccess(true);
+        webView.getSettings().setAllowContentAccess(false);
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
@@ -104,7 +105,19 @@ public final class MainActivity extends Activity {
             }
         });
         webView.addJavascriptInterface(new Bridge(), "AndroidScanner");
-        setContentView(webView);
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.addView(webView, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        root.setBackgroundColor(0xFF0B1220);
+        // Android 15 draws apps edge to edge: keep the page clear of the status bar, gesture bar and keyboard.
+        if (Build.VERSION.SDK_INT >= 30) {
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+                android.graphics.Insets keyboard = insets.getInsets(android.view.WindowInsets.Type.ime());
+                view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, keyboard.bottom));
+                return android.view.WindowInsets.CONSUMED;
+            });
+        } else root.setFitsSystemWindows(true);
+        setContentView(root);
         webView.loadUrl("https://appassets.androidplatform.net/assets/index.html");
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
@@ -205,6 +218,17 @@ public final class MainActivity extends Activity {
         runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new Event('android-scan-updated'))", null));
     }
 
+    /** Shared and exported copies are temporary: remove any left over from earlier runs. */
+    private void cleanStaleCache() {
+        File[] items = getCacheDir().listFiles();
+        if (items == null) return;
+        long cutoff = System.currentTimeMillis() - 60L * 60L * 1000L;
+        for (File item : items) {
+            if (item.getName().startsWith("imei-folder-") && item.isDirectory() && item.lastModified() < cutoff) deleteFolder(item);
+            else if (item.getName().startsWith("imei-export-") && item.lastModified() < cutoff) item.delete();
+        }
+    }
+
     private static void deleteFolder(File folder) {
         if (folder == null) return;
         File[] files = folder.listFiles();
@@ -240,7 +264,7 @@ public final class MainActivity extends Activity {
         }
 
         @JavascriptInterface public String status() {
-            try { return ScanStore.read(MainActivity.this).toString(); }
+            try { return ScanStore.json(MainActivity.this); }
             catch (Exception error) { return "{\"status\":\"error\",\"error\":\"Cannot read saved scan\",\"records\":[]}"; }
         }
 
@@ -286,6 +310,21 @@ public final class MainActivity extends Activity {
                     return "data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP);
                 } finally { source.recycle(); }
             } catch (Exception error) { return ""; }
+        }
+
+        @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }
+
+        @JavascriptInterface public boolean setSpeedMode(String mode) { return DeviceProfile.setMode(MainActivity.this, mode); }
+
+        /** Stops any running scan and deletes every saved scan result and cropped photo on this phone. */
+        @JavascriptInterface public boolean resetScans() {
+            try {
+                WorkManager.getInstance(MainActivity.this).cancelUniqueWork(WORK_NAME);
+                ScanStore.stop(MainActivity.this);
+                ScanStore.clear(MainActivity.this);
+                notifyWeb();
+                return true;
+            } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Reset failed", error); return false; }
         }
 
         @JavascriptInterface public void stop() {
@@ -390,6 +429,39 @@ public final class MainActivity extends Activity {
                 }
             });
             return true;
+        }
+
+        /** Opens Android's share menu (Bluetooth, Quick Share, WhatsApp...) with the files staged under this token. */
+        @JavascriptInterface public boolean shareFolder(String token, String title) {
+            File folder;
+            synchronized (MainActivity.this) {
+                if (stagingFolder == null || !token.equals(stagingFolderToken)) return false;
+                folder = stagingFolder;
+                stagingFolder = null; stagingFolderToken = null; stagingFolderName = null;
+            }
+            try {
+                File[] files = folder.listFiles();
+                if (files == null || files.length == 0) { deleteFolder(folder); return false; }
+                java.util.Arrays.sort(files);
+                ArrayList<Uri> uris = new ArrayList<>();
+                for (File file : files) uris.add(androidx.core.content.FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", file));
+                Intent send = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                send.setType("*/*");
+                send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+                ClipData clip = ClipData.newRawUri("", uris.get(0));
+                for (int index = 1; index < uris.size(); index++) clip.addItem(new ClipData.Item(uris.get(index)));
+                send.setClipData(clip);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                runOnUiThread(() -> {
+                    try { startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send phones" : title)); }
+                    catch (Exception error) { android.util.Log.e("IMEI-Lens", "Share menu failed", error); deleteFolder(folder); }
+                });
+                return true;
+            } catch (Exception error) {
+                android.util.Log.e("IMEI-Lens", "Share failed", error);
+                deleteFolder(folder);
+                return false;
+            }
         }
 
         @JavascriptInterface public void abortFolder(String token) {

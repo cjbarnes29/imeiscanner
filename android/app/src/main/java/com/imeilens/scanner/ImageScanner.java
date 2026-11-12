@@ -32,21 +32,21 @@ final class ImageScanner {
 
     private ImageScanner() {}
 
-    static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer) throws Exception {
-        Bitmap bitmap = decode(context, uri);
+    static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge) throws Exception {
+        Bitmap bitmap = decode(context, uri, maxEdge);
         try {
             Text full = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)));
             List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer, full));
                 return output;
             }
             List<Rect> regions = boxRegions(bitmap, labels);
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full));
                 return output;
             }
             boolean perspectiveReview = false;
@@ -54,7 +54,7 @@ final class ImageScanner {
                 if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
             for (Rect region : regions) {
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null)); }
                 finally { crop.recycle(); }
             }
             return output;
@@ -62,8 +62,9 @@ final class ImageScanner {
     }
 
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
-                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer) throws Exception {
-        Text ocr = Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
+                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known) throws Exception {
+        // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
+        Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
         String raw = ocr.getText();
         String imei = preferredImei(ocr);
         String id = UUID.randomUUID().toString();
@@ -87,17 +88,44 @@ final class ImageScanner {
         clock.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
         row.put("createdAt", clock.format(new java.util.Date()));
         row.put("raw", raw);
+        if (known != null) { JSONObject focus = focusBox(ocr, photo.getWidth(), photo.getHeight()); if (focus != null) row.put("focus", focus); }
         row.put("number", 0);
         return row;
     }
 
-    private static String pictureId() { return "PIC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(); }
+    private static final Pattern LABEL_TEXT = Pattern.compile("(?i)IM[E3][I1!|l]|\\bS/?N\\b|SERIAL|MODEL|SM-[A-Z]\\d{3}|(?<!\\d)(?:\\d[\\s-]*){15}(?!\\d)");
 
-    static Bitmap decode(Context context, Uri uri) throws Exception {
+    /**
+     * Where the label text sits in the photo, as fractions of its width and height, so the review
+     * screen can open zoomed in on the label. Null when no label text was found or it fills the photo.
+     */
+    static JSONObject focusBox(Text text, int width, int height) {
+        Rect union = null;
+        for (Text.TextBlock block : text.getTextBlocks()) for (Text.Line line : block.getLines()) {
+            Rect box = line.getBoundingBox();
+            if (box == null || !LABEL_TEXT.matcher(line.getText()).find()) continue;
+            if (union == null) union = new Rect(box); else union.union(box);
+        }
+        if (union == null || width <= 0 || height <= 0) return null;
+        int padX = Math.max(union.width() / 4, width / 20), padY = Math.max(union.height(), height / 12);
+        double left = Math.max(0, union.left - padX), top = Math.max(0, union.top - padY);
+        double right = Math.min(width, union.right + padX), bottom = Math.min(height, union.bottom + padY);
+        double w = (right - left) / width, h = (bottom - top) / height;
+        if (w * h > 0.7 || w < 0.05 || h < 0.03) return null;
+        try {
+            return new JSONObject().put("x", left / width).put("y", top / height).put("w", w).put("h", h);
+        } catch (Exception error) { return null; }
+    }
+
+    private static String pictureId() { return "PIC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT); }
+
+    static Bitmap decode(Context context, Uri uri) throws Exception { return decode(context, uri, 3000); }
+
+    static Bitmap decode(Context context, Uri uri, int maxEdge) throws Exception {
         BitmapFactory.Options bounds = new BitmapFactory.Options(); bounds.inJustDecodeBounds = true;
         try (InputStream stream = context.getContentResolver().openInputStream(uri)) { BitmapFactory.decodeStream(stream, null, bounds); }
         int sample = 1;
-        while (Math.max(bounds.outWidth, bounds.outHeight) / sample > 3000) sample *= 2;
+        while (Math.max(bounds.outWidth, bounds.outHeight) / sample > maxEdge) sample *= 2;
         BitmapFactory.Options options = new BitmapFactory.Options(); options.inSampleSize = sample;
         Bitmap bitmap;
         try (InputStream stream = context.getContentResolver().openInputStream(uri)) { bitmap = BitmapFactory.decodeStream(stream, null, options); }
@@ -274,7 +302,7 @@ final class ImageScanner {
         if (exactCodes.size() == 1) return "SM-" + exactCodes.iterator().next();
         if (!labelledCode.isEmpty()) return "SM-" + labelledCode;
         if (!firstCode.isEmpty()) return "SM-" + firstCode;
-        String value = text.toLowerCase();
+        String value = text.toLowerCase(java.util.Locale.ROOT);
         if (value.matches("(?s).*samsung.*s26.*|.*sm[- ]?s94.*")) return "Samsung Galaxy S26 series";
         if (value.matches("(?s).*samsung.*s25.*|.*sm[- ]?s93.*")) return "Samsung Galaxy S25 series";
         if (value.matches("(?s).*samsung.*a56.*|.*sm[- ]?a566.*")) return "Samsung Galaxy A56";
