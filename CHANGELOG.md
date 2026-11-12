@@ -2,6 +2,10 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.19.1 — the background scanner looks closer for missed products
+- **Choose photos and scan** counts the "Model : SM-…" labels it can see. When that is more than the products it found, it reads the photo again in overlapping pieces (halves, thirds, 2×2 or 3×2) and separates the products again. The same idea as the in-app scanner's tiled re-read.
+- Sharing: the *Share {person}* pop-up and the Share tab both stay (the pop-up is for hand-picked selections, the Share tab for whole people).
+
 ## 1.19.0 — the background scanner reads barcodes and levels tilted photos
 - **Choose photos and scan** (the Android background scanner) now reads the label barcodes (ML Kit barcode scanning, on the phone). Each barcode is paired with the "IMEI 1" / "IMEI 2" text printed under it; when exactly one fits, its exact number is used, so OCR misreads of IMEI 1 are corrected. Barcode-confirmed records show it in the confidence score.
 - **Tilted photos are levelled** before the products are separated (angle of the text lines, 2–20°). The levelled photo is kept only if the text really became straighter and nothing was lost.

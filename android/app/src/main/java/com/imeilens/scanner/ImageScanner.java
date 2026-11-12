@@ -72,6 +72,24 @@ final class ImageScanner {
             }
             List<Code> codes = barcodes(bitmap);
             List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
+            // More "Model : SM-…" labels are visible than products were found: read the photo again in
+            // overlapping pieces (each piece is read at a higher effective resolution) and look again.
+            int expected = modelLabels(full);
+            if (expected > labels.size() && expected <= 6) {
+                List<Line> lines = linesOf(full);
+                for (Rect tile : tiles(bitmap.getWidth(), bitmap.getHeight(), expected)) {
+                    Bitmap part = Bitmap.createBitmap(bitmap, tile.left, tile.top, tile.width(), tile.height());
+                    try {
+                        Text read = Tasks.await(recognizer.process(InputImage.fromBitmap(part, 0)));
+                        for (Line line : linesOf(read)) {
+                            Rect box = new Rect(line.box); box.offset(tile.left, tile.top);
+                            if (!repeats(lines, line.text, box)) lines.add(new Line(line.text, box));
+                        }
+                    } finally { part.recycle(); }
+                }
+                List<Rect> more = labels(lines, bitmap.getWidth(), bitmap.getHeight());
+                if (more.size() > labels.size()) labels = more;
+            }
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
@@ -278,13 +296,63 @@ final class ImageScanner {
         return rotated;
     }
 
-    private static List<Rect> labels(Text text, int width, int height) {
+    /** One line of read text and where it is. */
+    static final class Line { final String text; final Rect box; Line(String text, Rect box) { this.text = text; this.box = box; } }
+
+    static List<Line> linesOf(Text text) {
+        List<Line> lines = new ArrayList<>();
+        for (Text.TextBlock block : text.getTextBlocks()) for (Text.Line line : block.getLines())
+            if (line.getBoundingBox() != null) lines.add(new Line(line.getText(), new Rect(line.getBoundingBox())));
+        return lines;
+    }
+
+    /** The same text already known at about the same place (tiles overlap, so lines are read twice). */
+    static boolean repeats(List<Line> lines, String text, Rect box) {
+        for (Line known : lines)
+            if (known.text.trim().equals(text.trim()) && Math.abs(known.box.centerX() - box.centerX()) < Math.max(24, box.height() * 2)
+                && Math.abs(known.box.centerY() - box.centerY()) < Math.max(24, box.height() * 2)) return true;
+        return false;
+    }
+
+    private static final Pattern MODEL_LINE = Pattern.compile("(?i)m[o0]del\\s*[:;.]?\\s*s\\s*m");
+    /** How many product labels the text shows, counted by their "Model : SM-…" lines (one per label). */
+    static int modelLabels(Text text) {
+        List<Rect> found = new ArrayList<>();
+        for (Line line : linesOf(text)) {
+            if (!MODEL_LINE.matcher(line.text).find()) continue;
+            boolean seen = false;
+            for (Rect known : found)
+                if (Math.abs(known.centerY() - line.box.centerY()) < Math.max(12, line.box.height() * 3 / 2)
+                    && Math.abs(known.centerX() - line.box.centerX()) < Math.max(40, line.box.height() * 6)) seen = true;
+            if (!seen) found.add(line.box);
+        }
+        return found.size();
+    }
+
+    /** Overlapping pieces: 2 labels → halves, 3 → thirds, 4 → 2×2, 5-6 → 3×2 (long side first). */
+    static List<Rect> tiles(int width, int height, int products) {
+        boolean landscape = width >= height;
+        int along = products <= 2 ? 2 : products == 3 ? 3 : products == 4 ? 2 : 3, across = products <= 3 ? 1 : 2;
+        int cols = landscape ? along : across, rows = landscape ? across : along;
+        double tw = (double) width / cols, th = (double) height / rows, overlap = 0.14;
+        List<Rect> out = new ArrayList<>();
+        for (int r = 0; r < rows; r++) for (int col = 0; col < cols; col++) {
+            int x0 = (int) Math.max(0, col * tw - (col > 0 ? tw * overlap : 0)), x1 = (int) Math.min(width, (col + 1) * tw + (col < cols - 1 ? tw * overlap : 0));
+            int y0 = (int) Math.max(0, r * th - (r > 0 ? th * overlap : 0)), y1 = (int) Math.min(height, (r + 1) * th + (r < rows - 1 ? th * overlap : 0));
+            if (x1 - x0 > 8 && y1 - y0 > 8) out.add(new Rect(x0, y0, x1, y1));
+        }
+        return out;
+    }
+
+    private static List<Rect> labels(Text text, int width, int height) { return labels(linesOf(text), width, height); }
+
+    private static List<Rect> labels(List<Line> lines, int width, int height) {
         List<Rect> hits = new ArrayList<>();
         List<String> numbers = new ArrayList<>();
-        for (Text.TextBlock block : text.getTextBlocks()) for (Text.Line line : block.getLines()) {
-            if (!LABEL_ONE.matcher(line.getText()).find() || line.getBoundingBox() == null) continue;
-            Rect box = line.getBoundingBox();
-            Matcher number = NUMBER.matcher(line.getText());
+        for (Line line : lines) {
+            if (!LABEL_ONE.matcher(line.text).find()) continue;
+            Rect box = line.box;
+            Matcher number = NUMBER.matcher(line.text);
             String imei = number.find() ? number.group().replaceAll("\\D", "") : "";
             boolean duplicate = false;
             for (Rect previous : hits) {
