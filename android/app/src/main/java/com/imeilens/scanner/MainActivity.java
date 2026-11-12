@@ -494,7 +494,10 @@ public final class MainActivity extends Activity {
         }
 
         /** Opens Android's share menu (Bluetooth, Quick Share, WhatsApp...) with the files staged under this token. */
-        @JavascriptInterface public boolean shareFolder(String token, String title) {
+        @JavascriptInterface public boolean shareFolder(String token, String title) { return shareFolderText(token, title, ""); }
+
+        /** Same as shareFolder, and also sends one text message (for example all IMEI and serial numbers) once. */
+        @JavascriptInterface public boolean shareFolderText(String token, String title, String text) {
             File folder;
             synchronized (MainActivity.this) {
                 if (stagingFolder == null || !token.equals(stagingFolderToken)) return false;
@@ -514,6 +517,7 @@ public final class MainActivity extends Activity {
                 for (int index = 1; index < uris.size(); index++) clip.addItem(new ClipData.Item(uris.get(index)));
                 send.setClipData(clip);
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (text != null && !text.isEmpty()) send.putExtra(Intent.EXTRA_TEXT, text);
                 runOnUiThread(() -> {
                     try { startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send phones" : title)); }
                     catch (Exception error) { android.util.Log.e("IMEI-Lens", "Share menu failed", error); deleteFolder(folder); }

@@ -77,6 +77,7 @@ type AndroidBridge = {
   abortFolder?(token: string): void;
   // Android share menu (APK 1.7+): send the staged files through Bluetooth, Quick Share, WhatsApp and so on.
   shareFolder?(token: string, title: string): boolean;
+  shareFolderText?(token: string, title: string, text: string): boolean;
   setActivePerson?(personId: string): void;
   // Delete every saved scan result and cropped photo kept by the Android app (APK 1.8+).
   resetScans?(): boolean;
@@ -2050,7 +2051,7 @@ export default function App() {
       }),
     })),
   });
-  const WHATSAPP_GROUP = 10;
+  const WHATSAPP_GROUP = 30;
   /** A person's phones as share-text input: grouped by model, with the labels used everywhere else. */
   function sectionForRows(name: string, rows: RecordItem[]) {
     const items = new Map<string, { label: string; count: number; ids: string[] }>();
@@ -2061,9 +2062,34 @@ export default function App() {
     }
     return { name, items: [...items.values()] };
   }
+  /** IMEI and serial numbers only, one per line, in the same order as the pictures. */
+  function waNumbersText(rows: RecordItem[]) {
+    return rows.flatMap(row => {
+      const pair = recordImeiPair(row), serial = recordSerial(row);
+      const lines = [pair.imei1, pair.imei2].filter(Boolean);
+      if (serial && (shareSerial || !lines.length)) lines.push(`S/N ${serial}`);
+      return lines.length ? lines : ['No number detected'];
+    }).join('\n');
+  }
+  /** Android app: all pictures go through the phone's share sheet in a single send (optionally with one text). */
+  async function androidShareFiles(files: File[], title: string, text: string) {
+    const bridge = androidBridge;
+    if (!bridge?.beginFolder || !bridge.shareFolderText) return false;
+    const token = bridge.beginFolder('imei-share');
+    if (!token) throw new Error('Finish or cancel the current save before sharing.');
+    try {
+      for (const file of files) for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
+        const chunk = (await blobDataUrl(file.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
+        if (!bridge.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
+        if (file.size === 0) break;
+      }
+      if (!bridge.shareFolderText(token, title, text)) throw new Error('Could not open the share menu.');
+      return true;
+    } catch (error) { bridge.abortFolder?.(token); throw error; }
+  }
   /** One group: the phones' pictures plus the model and IMEI text, through the share menu (pick WhatsApp there). */
-  function sendGroup(name: string, batch: RecordItem[]) {
-    const text = formatPersonShare([sharePayload(sectionForRows(name, batch))]);
+  function sendGroup(name: string, batch: RecordItem[], textRows: RecordItem[] | null = batch) {
+    const text = textRows ? formatPersonShare([sharePayload(sectionForRows(name, textRows))]) : '';
     let files: File[] = [];
     try {
       files = batch.map((row, index) => {
@@ -2071,7 +2097,13 @@ export default function App() {
         return new File([blob], `${recordImeiPair(row).imei1 || recordSerial(row) || row.number || index + 1}.${extension}`, { type: blob.type || 'image/jpeg' });
       });
     } catch { setToast('A picture is unavailable. Open that record and check its photo.'); return; }
-    const data: ShareData = { files, text };
+    if (androidBridge?.shareFolderText) {
+      const named = files.map((file, index) => new File([file], `${String(index + 1).padStart(2, '0')}-${file.name}`, { type: file.type }));
+      void androidShareFiles(named, name, text).then(() => setToast('Choose WhatsApp and the chat. Then come back and tap Step 2 to send the numbers once.'))
+        .catch(error => setToast(error instanceof Error ? error.message : 'Could not open the share menu.'));
+      return;
+    }
+    const data: ShareData = text ? { files, text } : { files };
     if (typeof navigator.share === 'function' && navigator.canShare?.(data)) {
       void navigator.share(data)
         .then(() => setToast('Choose WhatsApp in the share menu. If the numbers did not come with the pictures, use Copy.'))
@@ -2087,8 +2119,7 @@ export default function App() {
   function startWhatsApp(section: { id: string; name: string }) {
     const rows = idsOfSection(section.id).map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row);
     if (!rows.length) return;
-    if (rows.length <= WHATSAPP_GROUP) sendGroup(section.name, rows);
-    else setWaSend({ name: section.name, rows });
+    setWaSend({ name: section.name, rows });
   }
   const shareSections = [
     ...personGroups.map(person => ({ id: person.id, name: personName(person), items: personModels.get(person.id) || [] })),
@@ -2203,7 +2234,7 @@ export default function App() {
         const blob = dataUrlBlob(recordPhoto(row)), extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
         return new File([blob], `${String(index + 1).padStart(2, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || row.number}.${extension}`, { type: blob.type || 'image/jpeg' });
       });
-      const text = formatPersonShare([sharePayload(sectionForRows(name, batch))]);
+      const text = waNumbersText(batch);
       files.push(new File([text], 'numbers.txt', { type: 'text/plain' }));
       if (androidBridge?.beginFolder && androidBridge.shareFolder) {
         const token = androidBridge.beginFolder('imei-share');
@@ -2228,7 +2259,7 @@ export default function App() {
   const shareTab = (
     <div className="share-tab">
       {shareSections.length === 0 ? <p>No phones yet.</p> : <>
-        <p className="settings-help">WhatsApp sends a person's pictures with the model and IMEI numbers. Bluetooth / nearby opens your phone's share menu with the pictures and a numbers file, so you can pick Bluetooth or Quick Share.</p>
+        <p className="settings-help">WhatsApp: Step 1 sends all of a person's pictures in one send with no text, Step 2 sends the IMEI numbers once as one message. Bluetooth / nearby opens your phone's share menu with the pictures and a plain numbers file.</p>
         <div className="share-toolbar">
           <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp text — everyone</button>
           <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
@@ -3389,7 +3420,7 @@ export default function App() {
   const currentShareText=currentShareRow?shareNumberText({imei:currentShareRow.imei,serial:recordSerial(currentShareRow)},shareMode):'';
   function openSharing(ids:string[]){setShareIds(ids);setShareIndex(0);setShareStep('picture');setShareStatus('');setShareOneByOne(false);}
   const bulkShare=shareRows.length>1&&!shareOneByOne;
-  const SHARE_BATCH=10;
+  const SHARE_BATCH=30;
   const shareBatches=Array.from({length:Math.ceil(shareRows.length/SHARE_BATCH)},(_,i)=>shareRows.slice(i*SHARE_BATCH,(i+1)*SHARE_BATCH));
   /** One message with every number, numbered in the same order as the pictures. */
   const bulkShareText=shareRows.map((row,index)=>{
@@ -3400,20 +3431,16 @@ export default function App() {
     return buildSharePackage(batch.map(row=>({number:row.number,pictureId:row.pictureId,model:'',imei:row.imei,serial:recordSerial(row),photo:recordPhoto(row)})),shareMode).entries.map((entry,index)=>new File([entry.file],`${shareRows.indexOf(batch[index])+1}.jpg`,{type:entry.file.type}));
   }
   const shareLine=(row:RecordItem,index:number)=>{const serial=recordSerial(row),line=shareMode==='imei_serial'?[row.imei,serial&&`S/N ${serial}`].filter(Boolean).join('  '):row.imei||(serial?`S/N ${serial}`:'');return `${line||'No number detected'}`;};
-  /** One tap: a group of pictures plus their numbers (as the message text) in a single share. */
-  function nativeShareTogether(batchIndex:number){
-    if(sharing)return;
-    try{
-      const batch=shareBatches[batchIndex];
-      const data:ShareData={files:bulkPictureFiles(batch),text:batch.map((row,i)=>shareLine(row,batchIndex*SHARE_BATCH+i)).join('\n')};
-      if(!navigator.share||!navigator.canShare?.(data)){setShareStatus('This browser cannot send pictures and text together. Use Step 1 and Step 2 below.');return;}
-      setSharing(true);
-      void navigator.share(data).then(()=>setShareStatus(`Records ${batchIndex*SHARE_BATCH+1}-${batchIndex*SHARE_BATCH+batch.length} sent to the share menu. If a chat app dropped the numbers, use Step 2 below. Delivery is not confirmed.`)).catch(error=>setShareStatus(error?.name==='AbortError'?'Share menu cancelled. Nothing is marked as sent.':'Could not open sharing. Use Step 1 and Step 2 below.')).finally(()=>setSharing(false));
-    }catch(error){setShareStatus(error instanceof Error?error.message:'Could not prepare sharing.');}
-  }
   function nativeShareBulk(kind:'pictures'|'text',batchIndex=0){
     if(sharing)return;
     try{
+      if(androidBridge?.shareFolderText){
+        if(kind==='text'){openWhatsApp(bulkShareText);return;}
+        setSharing(true);
+        const named=bulkPictureFiles(shareBatches[batchIndex]).map((file,index)=>new File([file],`${String(batchIndex*SHARE_BATCH+index+1).padStart(3,'0')}.jpg`,{type:file.type}));
+        void androidShareFiles(named,'Phones','').then(()=>setShareStatus('Choose WhatsApp and the chat. Then share the numbers once (Step 2). Delivery is not confirmed.')).catch(error=>setShareStatus(error instanceof Error?error.message:'Could not open the share menu.')).finally(()=>setSharing(false));
+        return;
+      }
       let data:ShareData;
       if(kind==='pictures'){
         data={files:bulkPictureFiles(shareBatches[batchIndex])};
@@ -4371,9 +4398,6 @@ export default function App() {
        {bulkShare?<div className="share-bulk">
         <p><strong>{shareRows.length} records.</strong> Step 1: share the pictures, {SHARE_BATCH} at a time, to the same chat. Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
         <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
-        <strong>One tap · Pictures + numbers together</strong>
-        <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareTogether(index)}>Share {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length} with numbers</button>)}</div>
-        <p className="copy-hint">Sends each group of {SHARE_BATCH} pictures with their numbers as the message. Some chat apps keep only the pictures; then use Step 1 and Step 2.</p>
         <strong>Step 1 · Pictures</strong>
         <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareBulk('pictures',index)}>Share pictures {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length}</button>)}</div>
         <button className="subtle-btn" onClick={()=>void downloadBulkPictures(shareRows)}>Download all {shareRows.length} pictures instead</button>
@@ -4444,13 +4468,18 @@ export default function App() {
       </section></div>}
       {waSend && <div className="modal-backdrop"><section className="modal wa-groups-modal" role="dialog" aria-modal="true" aria-label={`Send ${waSend.name}'s phones`}>
         <div className="modal-head"><h2>Send {waSend.name}</h2><button className="subtle-btn" onClick={() => setWaSend(null)}>Close</button></div>
-        <p>{waSend.rows.length} phones. They go in groups of {WHATSAPP_GROUP}: tap a group, choose WhatsApp, send, then come back for the next one.</p>
+        <p>{waSend.rows.length} phones. Step 1 sends all the pictures in one send, with no text under them. Step 2 sends the IMEI and serial numbers once, as one message, in the same order as the pictures. Choose the same chat both times.</p>
         <div className="delete-person-choices">
           {Array.from({ length: Math.ceil(waSend.rows.length / WHATSAPP_GROUP) }, (_, index) => {
             const batch = waSend.rows.slice(index * WHATSAPP_GROUP, (index + 1) * WHATSAPP_GROUP);
-            return <button key={index} className="primary whatsapp-btn" onClick={() => sendGroup(waSend.name, batch)}>Send phones {index * WHATSAPP_GROUP + 1}–{index * WHATSAPP_GROUP + batch.length}<small>{batch.length} pictures + model and IMEI</small></button>;
+            return <button key={index} className="primary whatsapp-btn" onClick={() => sendGroup(waSend.name, batch, null)}>Step 1 · {waSend.rows.length > WHATSAPP_GROUP ? `Send pictures ${index * WHATSAPP_GROUP + 1}–${index * WHATSAPP_GROUP + batch.length}` : `Send all ${batch.length} pictures`}<small>One send, no text under the pictures</small></button>;
           })}
         </div>
+        <div className="delete-person-choices">
+          <button type="button" className="primary whatsapp-btn" onClick={() => openWhatsApp(waNumbersText(waSend.rows))}>Step 2 · Send the numbers once<small>IMEI{shareSerial ? ' and serial' : ''} numbers, one per line</small></button>
+          <button type="button" className="subtle-btn" onClick={() => void copyText(waNumbersText(waSend.rows)).then(ok => setToast(ok ? 'Numbers copied.' : 'Copy failed.'))}>Copy the numbers</button>
+        </div>
+        <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Include serial numbers</label>
       </section></div>}
       {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
