@@ -6,7 +6,7 @@ What changed in each Android app / web release since 1.7. The web and the Androi
 - **Choose photos and scan** (the Android background scanner) now reads the label barcodes (ML Kit barcode scanning, on the phone). Each barcode is paired with the "IMEI 1" / "IMEI 2" text printed under it; when exactly one fits, its exact number is used, so OCR misreads of IMEI 1 are corrected. Barcode-confirmed records show it in the confidence score.
 - **Tilted photos are levelled** before the products are separated (angle of the text lines, 2–20°). The levelled photo is kept only if the text really became straighter and nothing was lost.
 - **Model codes edited in the records list** now teach the learning too (when you leave the field), not only review saves.
-- The app is about 2–3 MB larger because of the barcode reader.
+- The app is about 9 MB larger (25.8 → 35.2 MB) because the barcode reader bundles its model so it works offline.
 
 ## 1.18.1 — audit: one scan path, one catalog, consistent duplicates
 - **One way to scan gallery photos in the Android app:** *Choose photos and scan* (the phone's own text reader, keeps running in the background). The browser drop zone and *Quick scan … while open* are gone from the app; the website keeps its browser upload. Simple mode's *Choose photos* now uses the same background scan on Android (it used the browser scanner before). Photos left in the queue after a failed camera scan still show with a scan button.
