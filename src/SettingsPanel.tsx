@@ -5,6 +5,7 @@ import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
 import { CatalogDialog } from './CatalogDialog';
 import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
 import { readTextSize, saveTextSize, TEXT_SIZES, type TextSizeId } from './text-size';
+import { AuthorCredit, TutorialsDialog, WhatsNewDialog } from './Guide';
 import { APP_COMMIT, APP_VERSION } from './version';
 
 type Props = {
@@ -207,12 +208,15 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     try { if (on) localStorage.removeItem(CATALOG_AUTO_KEY); else localStorage.setItem(CATALOG_AUTO_KEY, 'off'); } catch { /* ignore */ }
   }
 
+  const [guide, setGuide] = useState<'' | 'new' | 'tutorials'>('');
   const [textSize, setTextSize] = useState<TextSizeId>(readTextSize);
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
     <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
 
+    <h3>Help</h3>
+    <div className="settings-learn"><button type="button" className="primary" onClick={() => setGuide('tutorials')}>Tutorials: how to do everything</button><button type="button" className="subtle-btn" onClick={() => setGuide('new')}>What’s new</button></div>
     <h3>Text size</h3>
     <p className="settings-help">Make the writing in the whole app smaller or bigger. It is remembered on this phone.</p>
     <div className="text-size-choice" role="radiogroup" aria-label="Text size">{TEXT_SIZES.map(size => <button key={size.id} type="button" role="radio" aria-checked={textSize === size.id} className={textSize === size.id ? "primary" : "subtle-btn"} onClick={() => { setTextSize(size.id); saveTextSize(size.id); }}>{size.label}</button>)}</div>
@@ -334,6 +338,9 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     </div>
     <small className="settings-help">Deleting the catalog does not touch your models, your scanned phones or the built-in list.</small>
     {catalogOpen && <CatalogDialog onClose={() => setCatalogOpen(false)} onChanged={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />}
-    <p className="settings-about">IMEI Lens · by CJB<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
+    {guide === 'new' && <WhatsNewDialog onClose={() => setGuide('')} onTutorials={() => setGuide('tutorials')} />}
+    {guide === 'tutorials' && <TutorialsDialog onClose={() => setGuide('')} />}
+    <AuthorCredit />
+    <p className="settings-about">IMEI Lens · by Carlou Joseph Barnes<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
   </section></div>;
 }

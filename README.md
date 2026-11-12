@@ -49,6 +49,9 @@ Tap a record to open the review. **All the buttons live in one floating bar at t
 ### Unknown models
 The **Unknown** tab lists every model that has no name. Under each one are its phones (tap one to open it), suggestions (a known code one character away offers **Misread? Use SM-…**, similar models fill the name), a name box, and **More options**: fix the model code, pick the model for all those phones, or move them to a person. **Settings → Add many at once** accepts a list of `code, name` lines.
 
+### Welcome, tutorials and credit
+The first time the app opens (and after each new version) a dialog lists the features and improvements. **Settings → Help** reopens it (**What’s new**) and has **Tutorials: how to do everything**. The review window keeps the picture fixed at the top; the typing section and the person / IMEI 2 group fold up and down.
+
 ### Models, catalog and Settings
 **Settings** has: **Text size** (Small, Normal, Large, Extra large), Phone scanning power (Android), **Where files are saved** (Android), **What this app can handle**, Devices in my scans, **My Samsung models** (add, import, export; **Check models** opens the list in a big dialog with Edit and Delete), and the **downloaded Samsung catalog** (**Check catalog** opens it in a big dialog with search, Edit, Delete, ＋ Add a model and Restore deleted; your changes are kept when the catalog updates).
 

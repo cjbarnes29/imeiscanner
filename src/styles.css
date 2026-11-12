@@ -532,3 +532,17 @@ body{touch-action:pan-y pinch-zoom}
 @media(max-width:700px){.review-photo-stage{height:clamp(210px,44dvh,380px)}}
 
 .text-size-choice{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 16px}.text-size-choice button{flex:1;min-width:70px;justify-content:center;padding:10px 6px}
+
+.guide-list{list-style:none;padding:0;margin:8px 0 12px;display:grid;gap:8px}.guide-list li{background:#0d1828;border:1px solid #27394d;border-radius:10px;padding:10px 12px;display:grid;gap:3px}.guide-list b{color:#65dcb5;font-size:14px}.guide-list span{color:#c5d0dd;font-size:13px;line-height:1.5}
+.guide-modal{max-height:90dvh}.guide-backdrop{z-index:40}
+.author-credit{display:flex;align-items:center;gap:12px;margin:12px 0;padding:10px 12px;border:1px solid #27394d;border-radius:12px;background:#0d1828}.author-credit strong{display:block;font-size:16px}.author-credit small{color:#8fa0b4;font-size:12px}.troll-image{flex-shrink:0}
+.guide-topics{display:grid;gap:8px}.guide-topic{background:#0d1828;border:1px solid #27394d;border-radius:10px;overflow:hidden}.guide-topic>button{width:100%;text-align:left;background:none;border:0;color:#e8edf5;font:700 14px inherit;padding:13px 12px;cursor:pointer}.guide-topic.open>button{color:#65dcb5}.guide-topic ol{margin:0;padding:0 14px 14px 32px;color:#c5d0dd;font-size:13px;line-height:1.6}.guide-topic li{margin-top:6px}
+.settings-learn{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.settings-learn button{flex:1;min-width:130px;justify-content:center;padding:11px 8px}
+
+/* Review window: the picture stays put at the top; the typing section and other groups fold up and down. */
+.review-sticky{position:sticky;top:-20px;z-index:6;background:#111e2e;padding-bottom:6px;margin-bottom:6px}
+.review-sticky .modal-head{position:static;margin:0}
+.review-sticky .review-photo-stage{height:clamp(120px,24dvh,230px)}
+.review-sticky .photo-zoom-toggle{margin-top:4px;min-height:34px}
+.review-edit{border:1px solid #27394d;border-radius:10px;background:#0d1828;margin:8px 0;padding:0 10px 10px}
+.review-edit>summary{cursor:pointer;font-weight:700;font-size:14px;color:#65dcb5;padding:12px 0;list-style-position:inside}

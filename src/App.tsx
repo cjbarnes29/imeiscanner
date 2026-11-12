@@ -25,6 +25,7 @@ import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
 import { embedPhotoLimit } from './capacity';
 import './text-size';
+import { hasSeenWhatsNew, markWhatsNewSeen, TutorialsDialog, WhatsNewDialog } from './Guide';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
 type RecordItem = {
@@ -1751,6 +1752,8 @@ export default function App() {
   const [emptiedPeople, setEmptiedPeople] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-lens-emptied-people') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('imei-lens-emptied-people', JSON.stringify(emptiedPeople)); } catch { /* storage full: the message just falls back */ } }, [emptiedPeople]);
   // Permanent delete waits for an in-app confirmation.
+  const [welcome, setWelcome] = useState<'' | 'new' | 'tutorials'>(() => hasSeenWhatsNew() ? '' : 'new');
+  const closeWelcome = () => { markWhatsNewSeen(); setWelcome(''); };
   const [confirmDupes, setConfirmDupes] = useState<string[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; fromReview: boolean } | null>(null);
   const [detailedView, setDetailedView] = useState(false);
@@ -4768,7 +4771,7 @@ export default function App() {
         </section>
 
         <footer>
-          <span>IMEI LENS <i>•</i> Browser-based OCR <i>•</i> by CJB</span>
+          <span>IMEI LENS <i>•</i> Browser-based OCR <i>•</i> by Carlou Joseph Barnes</span>
           <span>
             IMEI extraction is automated; always verify results against the device label.
           </span>
@@ -4785,6 +4788,7 @@ export default function App() {
             className={`modal ${cropEditorOpen ? 'crop-mode' : ''}`}
             onClick={e => e.stopPropagation()}
           >
+            <div className={cropEditorOpen ? undefined : 'review-sticky'}>
             <div className="modal-head">
               <div>
                 <div className="eyebrow">IMAGE REVIEW</div>
@@ -4805,21 +4809,26 @@ export default function App() {
 
             {!cropEditorOpen && <div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} /></div>}
             {!cropEditorOpen && focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}
+            </div>
 
 
 
 
             {!cropEditorOpen && <div className="manual-imei-entry">
+              <details className="review-edit" open><summary>Type: model, serial, IMEI 1</summary>
               <label className="review-model" htmlFor="manual-model">Device model</label>
               <ModelPicker id="manual-model" value={manualModel} onChange={setManualModel} customModels={customModels} catalogEntries={catalogEntries} scannedModels={records.map(row => row.model)} onAddModel={(code, name) => { const next = { ...customModels, [code]: name }; if (!writeCustomModels(next)) return false; setCustomModels(next); return true; }} onEnter={() => document.getElementById('manual-imei')?.focus()} />
               {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries, customModels).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries, customModels).name}</small>}
               <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
               <label htmlFor="manual-imei">IMEI 1</label>
               <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
+              </details>
+              <details className="review-edit"><summary>Person and IMEI 2</summary>
               <label htmlFor="review-person">Person</label>
               <select id="review-person" value={selected.personId || 'unassigned'} onChange={event => { const plan = assignPerson(selected.id, event.target.value); if (plan.moved.length) setSelected({ ...selected, personId: ownerOf(event.target.value) }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
               <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
               <input id="manual-imei2" inputMode="numeric" maxLength={15} value={manualImei2} onChange={event => setManualImei2(digits(event.target.value).slice(0, 15))} />
+              </details>
               <small>Enter moves to the next field, then saves and opens the next record. Use arrow keys to navigate when not typing.</small>
             </div>}
 
@@ -4940,6 +4949,8 @@ export default function App() {
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
       </section></div>}
+      {welcome === 'new' && <WhatsNewDialog first onClose={closeWelcome} onTutorials={() => { markWhatsNewSeen(); setWelcome('tutorials'); }} />}
+      {welcome === 'tutorials' && <TutorialsDialog onClose={closeWelcome} />}
       {confirmDupes && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Remove duplicates">
         <h2>Remove duplicates?</h2>
         <p>{confirmDupes.length} extra cop{confirmDupes.length === 1 ? 'y' : 'ies'} of repeated IMEIs will be deleted with {confirmDupes.length === 1 ? 'its' : 'their'} picture{confirmDupes.length === 1 ? '' : 's'}. One copy of every IMEI stays: the most complete one (with serial and a known model). You can undo for a few seconds afterwards.</p>

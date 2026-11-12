@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.16.0 — welcome, tutorials, steadier review
+- **First launch / new version:** a dialog shows the features and improvements once. It is also in **Settings → Help → What’s new**.
+- **Tutorials** for everything (scanning, camera, review, crop, people, unknown models, WhatsApp/Bluetooth, One by one, save and export, duplicates, settings, reset) in **Settings → Help → Tutorials**.
+- Credit now reads **Carlou Joseph Barnes**, with a troll picture, in the welcome dialog and Settings.
+- **Review window:** the picture stays fixed at the top while you scroll. The typing section (model, serial, IMEI 1) and a second group (person, IMEI 2) fold up and down.
+
 ## 1.15.1 — cleaner review
 - Removed the Samsung Promoter note and link from the review window (More details).
 
