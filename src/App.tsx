@@ -156,16 +156,27 @@ async function copyText(value: string) {
   return copied;
 }
 
+/** A record is a duplicate when another record anywhere in the list (any batch) has the same 15-digit IMEI. */
 function markDuplicateRecords(rows: RecordItem[]) {
-  const latest = rows.reduce<RecordItem | undefined>((current, row) =>
-    row.uploadBatchId && (!current || row.createdAt > current.createdAt) ? row : current, undefined);
-  const batchId = latest?.uploadBatchId;
   const counts = new Map<string, number>();
-  for (const row of rows) if (batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei)) counts.set(row.imei, (counts.get(row.imei) || 0) + 1);
+  for (const row of rows) if (/^\d{15}$/.test(row.imei)) counts.set(row.imei, (counts.get(row.imei) || 0) + 1);
   return rows.map(row => {
-    const duplicate = !!batchId && row.uploadBatchId === batchId && /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1;
+    const duplicate = /^\d{15}$/.test(row.imei) && (counts.get(row.imei) || 0) > 1;
     return row.duplicate === duplicate ? row : { ...row, duplicate };
   });
+}
+/** Which records to delete so that every IMEI is kept once: the most complete copy stays (serial, known model, no review needed, saved crop, then the earliest). */
+function duplicateRemovalIds(rows: RecordItem[]): string[] {
+  const groups = new Map<string, RecordItem[]>();
+  for (const row of rows) if (/^\d{15}$/.test(row.imei)) groups.set(row.imei, [...(groups.get(row.imei) || []), row]);
+  const score = (row: RecordItem) => (recordSerial(row) ? 4 : 0) + (isGenericName(row.model) || /unknown/i.test(row.model) ? 0 : 3) + (row.status === "Valid" ? 2 : 0) + (row.cropDataUrl ? 1 : 0);
+  const remove: string[] = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const keep = [...group].sort((x, y) => score(y) - score(x) || (x.createdAt < y.createdAt ? -1 : 1))[0];
+    for (const row of group) if (row !== keep) remove.push(row.id);
+  }
+  return remove;
 }
 
 async function photoFingerprint(file: Blob) {
@@ -1740,6 +1751,7 @@ export default function App() {
   const [emptiedPeople, setEmptiedPeople] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-lens-emptied-people') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('imei-lens-emptied-people', JSON.stringify(emptiedPeople)); } catch { /* storage full: the message just falls back */ } }, [emptiedPeople]);
   // Permanent delete waits for an in-app confirmation.
+  const [confirmDupes, setConfirmDupes] = useState<string[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; fromReview: boolean } | null>(null);
   const [detailedView, setDetailedView] = useState(false);
   const queueInputRef = useRef<HTMLInputElement>(null);
@@ -1997,6 +2009,7 @@ export default function App() {
   useBackLayer(finishOpen, () => setFinishOpen(false), 'finish-review');
   useBackLayer(!!warning, () => setWarning(''), 'warning');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
+  useBackLayer(!!confirmDupes, () => setConfirmDupes(null), 'confirm-dupes');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
   useBackLayer(cropEditorOpen, closeCropEditor, 'crop');
@@ -2778,6 +2791,16 @@ export default function App() {
   function openReview(record: RecordItem) {
     setReviewIds(visible.map(item => item.id));
     setSelected(record);
+  }
+  /** Delete the extra copies of repeated IMEIs. One copy of each stays; Undo brings the rest back for a few seconds. */
+  function removeDuplicates(ids: string[]) {
+    const set = new Set(ids);
+    setPersonUndo({ people: personGroups, records, text: `${ids.length} duplicate${ids.length === 1 ? '' : 's'} deleted. One copy of each IMEI was kept.`, activePersonId });
+    setRecords(old => markDuplicateRecords(old.filter(item => !set.has(item.id))));
+    setSelectedIds(old => old.filter(id => !set.has(id)));
+    setReviewIds(old => old.filter(id => !set.has(id)));
+    if (selected && set.has(selected.id)) setSelected(null);
+    if (filter === 'Duplicates') setFilter('All');
   }
   /** Permanently remove phones (only reached after the confirmation, or from the review window's own confirmation). */
   function removeRecords(ids: string[], fromReview = false) {
@@ -4444,9 +4467,11 @@ export default function App() {
               </select>
             </label>
             <div className="filter-chips" role="group" aria-label="Status filter">
-              <button className={filter !== 'Review' && filter !== 'Valid' ? 'active' : ''} onClick={() => setFilter('All')}>All</button>
+              <button className={filter !== 'Review' && filter !== 'Valid' && filter !== 'Duplicates' ? 'active' : ''} onClick={() => setFilter('All')}>All</button>
               <button className={filter === 'Review' ? 'active' : ''} onClick={() => setFilter('Review')}>Needs review</button>
               <button className={filter === 'Valid' ? 'active' : ''} onClick={() => setFilter('Valid')}>Valid IMEI <b>{validCount}</b></button>
+              {records.some(r => r.duplicate) && <button className={filter === 'Duplicates' ? 'active' : ''} onClick={() => setFilter('Duplicates')}>Duplicates <b>{records.filter(r => r.duplicate).length}</b></button>}
+              {records.some(r => r.duplicate) && <button className="danger" onClick={() => setConfirmDupes(duplicateRemovalIds(records))}>Remove duplicates</button>}
             </div>
           </div>}
 
@@ -4914,6 +4939,11 @@ export default function App() {
        {!bulkShare&&currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
        <p role="status">{shareStatus}</p>
+      </section></div>}
+      {confirmDupes && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Remove duplicates">
+        <h2>Remove duplicates?</h2>
+        <p>{confirmDupes.length} extra cop{confirmDupes.length === 1 ? 'y' : 'ies'} of repeated IMEIs will be deleted with {confirmDupes.length === 1 ? 'its' : 'their'} picture{confirmDupes.length === 1 ? '' : 's'}. One copy of every IMEI stays: the most complete one (with serial and a known model). You can undo for a few seconds afterwards.</p>
+        <div className="share-toolbar"><button className="subtle-btn danger" disabled={!confirmDupes.length} onClick={() => { removeDuplicates(confirmDupes); setConfirmDupes(null); }}>Remove {confirmDupes.length} duplicate{confirmDupes.length === 1 ? '' : 's'}</button><button className="subtle-btn" onClick={() => setConfirmDupes(null)}>Cancel</button></div>
       </section></div>}
       {confirmDelete && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Confirm delete">
         <h2>Delete permanently?</h2>

@@ -41,6 +41,7 @@ The top bar has the **Simple | Detailed** switch, **Reset** (the trash button: d
 Tap a record to open the review. **All the buttons live in one floating bar at the bottom** (they stay in view while you scroll the fields): Previous / *n of N* / Next (the last picture shows **Finish ✓**), Copy IMEI, Photo, Edit photo, rotate left and right, then **Save**, **Save & next** and a status (*All saved* or *N unsaved*).
 - You can move between pictures without saving. What you typed is kept, and after the last picture (or when you close the review) a pop-up asks **Save all**, **Discard changes** or **Keep editing**.
 - **Warnings pop up** with an OK button: IMEI digits missing, a duplicate IMEI, an invalid checksum, or a failed send.
+- **Duplicates:** an IMEI that appears more than once in any scan is flagged. The **Duplicates** chip shows only those; **Remove duplicates** keeps the most complete copy of each IMEI and deletes the others after you confirm (Undo is offered for a few seconds).
 - When the scanner is unsure it floats a question above the Save bar: **Is this 1 device or N?**, or **Check the crop**.
 - **Device model** is a button that opens a big list of every known model (built-in, downloaded catalog, your own names, models already scanned) with search. Tap one to choose it, **＋ Add a new model** to save a new code and name, or **Type for this phone only**.
 - On the Android app a photo opens zoomed on the label when its position is known; **Show full photo** switches back.

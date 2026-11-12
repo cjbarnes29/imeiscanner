@@ -2,6 +2,10 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.15.0 — remove duplicates
+- **Duplicates are now found across all scans**, not only the latest batch: any 15-digit IMEI that appears more than once is flagged.
+- New **Duplicates** filter chip (with a count) and a **Remove duplicates** button next to the status filters. It asks first, keeps **one copy of every IMEI** (the most complete: serial, known model, valid, saved crop, then the earliest) and deletes the rest with their pictures. **Undo** is offered for a few seconds.
+
 ## 1.14.1 — one tap in One by one
 - **One by one:** the main button is now **Download image + copy IMEI & next**. One tap saves the picture, copies IMEI 1 and goes to the next phone. The separate Copy IMEI button is gone; Copy S/N stays.
 
