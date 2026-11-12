@@ -132,6 +132,21 @@ public final class MainActivity extends Activity {
             webFileCallback = null;
             return;
         }
+        if (requestCode == 1005) {
+            boolean chosen = false;
+            String label = "";
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri tree = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    label = folderLabel(tree);
+                    getSharedPreferences("app-state", MODE_PRIVATE).edit().putString("save-tree", tree.toString()).putString("save-tree-name", label).apply();
+                    chosen = true;
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Could not keep the save folder", error); }
+            }
+            notifySaveFolder(chosen, label);
+            return;
+        }
         if (requestCode == 1004) {
             boolean saved = false;
             if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingFolder != null) {
@@ -258,6 +273,109 @@ public final class MainActivity extends Activity {
             final int shared = queue.length();
             runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-shared',{detail:{count:" + shared + "}}))", null));
         }).start();
+    }
+
+    private String folderLabel(Uri tree) {
+        try (Cursor cursor = getContentResolver().query(DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree)),
+                new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
+        } catch (Exception ignored) { }
+        return "the folder you chose";
+    }
+
+    private void notifySaveFolder(boolean chosen, String label) {
+        JSONObject detail = new JSONObject();
+        try { detail.put("set", chosen); detail.put("name", label); } catch (Exception ignored) { }
+        runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-save-folder',{detail:" + detail + "}))", null));
+    }
+
+    private void notifySaved(boolean ok, int count, String where, String problem) {
+        JSONObject detail = new JSONObject();
+        try { detail.put("ok", ok); detail.put("count", count); detail.put("where", where); detail.put("error", problem); } catch (Exception ignored) { }
+        runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-saved',{detail:" + detail + "}))", null));
+    }
+
+    /** The id of a file or folder with this name inside a folder of the saved tree, or null. */
+    private String findChild(Uri tree, String parentId, String name) {
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId);
+        try (Cursor cursor = getContentResolver().query(children, new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null) while (cursor.moveToNext()) if (name.equals(cursor.getString(1))) return cursor.getString(0);
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    /** Remove the pictures and numbers file an earlier save left in this folder, so a new save replaces them exactly. */
+    private void removeOldReport(Uri tree, String parentId) {
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId);
+        java.util.ArrayList<String> old = new java.util.ArrayList<>();
+        try (Cursor cursor = getContentResolver().query(children, new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null) while (cursor.moveToNext()) {
+                String name = cursor.getString(1);
+                if (name != null && (name.equals("numbers.txt") || name.matches("^\\d{3,4}-.+\\.(jpg|jpeg|png|webp)$"))) old.add(cursor.getString(0));
+            }
+        } catch (Exception ignored) { }
+        for (String id : old) {
+            try { DocumentsContract.deleteDocument(getContentResolver(), DocumentsContract.buildDocumentUriUsingTree(tree, id)); } catch (Exception ignored) { }
+        }
+    }
+
+    private static String mimeFor(String name) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".txt")) return "text/plain";
+        return "application/octet-stream";
+    }
+
+    /** Copy the staged files into the remembered folder (in a sub-folder), replacing files with the same names. */
+    private void commitToSavedFolder(File folder, String subfolder, boolean clean) {
+        int copied = 0;
+        String where = "", problem = "";
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("app-state", MODE_PRIVATE);
+            String saved = prefs.getString("save-tree", "");
+            if (saved.isEmpty()) throw new IllegalStateException("No save folder is chosen. Choose one in Settings.");
+            Uri tree = Uri.parse(saved);
+            String rootId = DocumentsContract.getTreeDocumentId(tree);
+            String parentId = rootId;
+            String sub = subfolder == null ? "" : subfolder.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+            where = prefs.getString("save-tree-name", "your folder");
+            if (!sub.isEmpty()) {
+                String existing = findChild(tree, rootId, sub);
+                if (existing != null) parentId = existing;
+                else {
+                    Uri created = DocumentsContract.createDocument(getContentResolver(), DocumentsContract.buildDocumentUriUsingTree(tree, rootId), DocumentsContract.Document.MIME_TYPE_DIR, sub);
+                    if (created == null) throw new IllegalStateException("Cannot create the folder " + sub + ".");
+                    parentId = DocumentsContract.getDocumentId(created);
+                }
+                where = where + "/" + sub;
+            }
+            if (clean) removeOldReport(tree, parentId);
+            File[] files = folder.listFiles();
+            if (files != null) {
+                java.util.Arrays.sort(files);
+                for (File file : files) {
+                    String existing = findChild(tree, parentId, file.getName());
+                    Uri target;
+                    if (existing != null) target = DocumentsContract.buildDocumentUriUsingTree(tree, existing);
+                    else {
+                        target = DocumentsContract.createDocument(getContentResolver(), DocumentsContract.buildDocumentUriUsingTree(tree, parentId), mimeFor(file.getName()), file.getName());
+                        if (target == null) throw new IllegalStateException("Cannot create " + file.getName() + ".");
+                    }
+                    try (InputStream input = new FileInputStream(file); OutputStream output = getContentResolver().openOutputStream(target, "wt")) {
+                        if (output == null) throw new IllegalStateException("Cannot open " + file.getName() + ".");
+                        byte[] chunk = new byte[16384]; int count;
+                        while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
+                    }
+                    copied++;
+                }
+            }
+        } catch (Exception error) {
+            android.util.Log.e("IMEI-Lens", "Saving to the remembered folder failed", error);
+            problem = error.getMessage() == null ? "Could not save to the folder." : error.getMessage();
+        } finally { deleteFolder(folder); }
+        notifySaved(problem.isEmpty(), copied, where, problem);
     }
 
     private boolean packageInstalled(String name) {
@@ -410,6 +528,57 @@ public final class MainActivity extends Activity {
                 json.put("bluetoothOn", adapter != null && adapter.isEnabled());
             } catch (Exception ignored) { }
             return json.toString();
+        }
+
+        /** Is a save folder remembered, and what is it called. */
+        @JavascriptInterface public String saveFolderInfo() {
+            JSONObject json = new JSONObject();
+            try {
+                android.content.SharedPreferences prefs = getSharedPreferences("app-state", MODE_PRIVATE);
+                String saved = prefs.getString("save-tree", "");
+                boolean held = false;
+                if (!saved.isEmpty()) for (android.content.UriPermission permission : getContentResolver().getPersistedUriPermissions())
+                    if (permission.getUri().toString().equals(saved) && permission.isWritePermission()) held = true;
+                json.put("set", held);
+                json.put("name", held ? prefs.getString("save-tree-name", "") : "");
+            } catch (Exception ignored) { }
+            return json.toString();
+        }
+
+        /** Ask once for a folder; the app keeps the permission and the choice. */
+        @JavascriptInterface public void chooseSaveFolder() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+                    startActivityForResult(intent, 1005);
+                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Folder choice failed", error); notifySaveFolder(false, ""); }
+            });
+        }
+
+        @JavascriptInterface public void forgetSaveFolder() {
+            android.content.SharedPreferences prefs = getSharedPreferences("app-state", MODE_PRIVATE);
+            String saved = prefs.getString("save-tree", "");
+            if (!saved.isEmpty()) {
+                try { getContentResolver().releasePersistableUriPermission(Uri.parse(saved), Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION); } catch (Exception ignored) { }
+            }
+            prefs.edit().remove("save-tree").remove("save-tree-name").apply();
+            notifySaveFolder(false, "");
+        }
+
+        /**
+         * Copy the files staged under this token into the remembered folder, in the sub-folder, without asking.
+         * With clean = true the earlier numbered pictures and numbers.txt there are replaced. The page is told when it is done.
+         */
+        @JavascriptInterface public boolean commitStaged(String token, String subfolder, boolean clean) {
+            File folder;
+            synchronized (MainActivity.this) {
+                if (stagingFolder == null || !token.equals(stagingFolderToken)) return false;
+                folder = stagingFolder;
+                stagingFolder = null; stagingFolderToken = null; stagingFolderName = null;
+            }
+            new Thread(() -> commitToSavedFolder(folder, subfolder, clean)).start();
+            return true;
         }
 
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
 import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
@@ -60,6 +60,15 @@ function capacityRows(speed: SpeedInfo | null): { level: Level; title: string; d
   ];
 }
 
+type SaveInfo = { set: boolean; name: string };
+type SaveBridge = { saveFolderInfo?: () => string; chooseSaveFolder?: () => void; forgetSaveFolder?: () => void };
+const saveBridge = () => (window as Window & { AndroidScanner?: SaveBridge }).AndroidScanner;
+function readSaveInfo(): SaveInfo | null {
+  const bridge = saveBridge();
+  if (!bridge?.saveFolderInfo) return null;
+  try { return JSON.parse(bridge.saveFolderInfo()) as SaveInfo; } catch { return null; }
+}
+
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
 export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose }: Props) {
   const [code, setCode] = useState('');
@@ -74,6 +83,12 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   const [bulk, setBulk] = useState('');
   const [listOpen, setListOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [saveInfo, setSaveInfo] = useState<SaveInfo | null>(readSaveInfo);
+  useEffect(() => {
+    const changed = () => setSaveInfo(readSaveInfo());
+    window.addEventListener('android-save-folder', changed);
+    return () => window.removeEventListener('android-save-folder', changed);
+  }, []);
   const [, setCatalogTick] = useState(0);
   const [auto, setAuto] = useState(() => localStorage.getItem(CATALOG_AUTO_KEY) !== 'off');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -208,6 +223,17 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
         <button type="button" className="subtle-btn" onClick={() => { setSpeed(readSpeed()); setMessage('Checked this phone again.'); }}>Check this phone again</button>
       </div>
       <div className="speed-stats"><span>{speed.cores} CPU cores</span><span>{speed.ramGb} GB memory</span><span>Up to {speed.maxWorkers} photo{speed.maxWorkers === 1 ? '' : 's'} at once</span>{speed.lastRate > 0 && <span>Last scan: {speed.lastRate} photos/min ({speed.lastMode}, up to {speed.lastWorkers} at once)</span>}</div>
+    </>}
+
+    {saveInfo && <>
+      <h3>Where files are saved</h3>
+      <p className="settings-help">One by one and Save to my phone save into this folder without asking each time. Saving again replaces the earlier pictures and numbers file.</p>
+      <div className="speed-device">
+        <strong>{saveInfo.set ? saveInfo.name || 'A folder is chosen' : 'No folder chosen yet'}</strong>
+        <span>{saveInfo.set ? 'Chosen once. The phone remembers it.' : 'You will be asked once, the first time you save.'}</span>
+        <button type="button" className="primary" onClick={() => saveBridge()?.chooseSaveFolder?.()}>{saveInfo.set ? 'Change folder' : 'Choose folder'}</button>
+        {saveInfo.set && <button type="button" className="subtle-btn" onClick={() => saveBridge()?.forgetSaveFolder?.()}>Forget this folder</button>}
+      </div>
     </>}
 
     <h3>What this app can handle</h3>

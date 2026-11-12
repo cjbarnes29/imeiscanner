@@ -82,6 +82,11 @@ type AndroidBridge = {
   shareFolderText?(token: string, title: string, text: string): boolean;
   // APK 1.11+: which ways of sending this phone has, and sending straight to Bluetooth.
   sendCapabilities?(): string;
+  // APK 1.13+: one remembered save folder, written to without asking.
+  saveFolderInfo?(): string;
+  chooseSaveFolder?(): void;
+  forgetSaveFolder?(): void;
+  commitStaged?(token: string, subfolder: string, clean: boolean): boolean;
   shareFolderBluetooth?(token: string, title: string): boolean;
   // APK 1.10+: read the scan in slices (big scans) and share long text through the share menu.
   statusFrom?(from: number): string;
@@ -1806,6 +1811,12 @@ export default function App() {
     return () => window.removeEventListener('android-shared', shared);
   }, []);
   useEffect(() => { androidBridge?.setActivePerson?.(activePersonId); }, [activePersonId]);
+  useEffect(() => {
+    if (!androidBridge) return;
+    const saved = (event: Event) => { const detail = (event as CustomEvent<{ ok: boolean; error?: string }>).detail; if (detail && !detail.ok) setToast(detail.error || 'Could not save.'); };
+    window.addEventListener('android-saved', saved);
+    return () => window.removeEventListener('android-saved', saved);
+  }, []);
 
   useEffect(() => { localStorage.setItem('imei-lens-laptop-url', laptopUrl); }, [laptopUrl]);
   useEffect(() => {
@@ -2298,9 +2309,70 @@ export default function App() {
     return `#${position}  ${parts.length ? parts.join('  ') : 'No number detected'}`;
   }
 
+  const saveFolderSet = () => { try { return !!(JSON.parse(androidBridge?.saveFolderInfo?.() || '{}') as { set?: boolean }).set; } catch { return false; } };
+  const canSaveSilently = () => !!(androidBridge?.commitStaged && androidBridge.saveFolderInfo && androidBridge.beginFolder && androidBridge.appendFolderFile);
+  const reportFolderName = (name: string) => `IMEI-${name || 'phones'}`.replace(/[\\/:*?"<>|]/g, '_');
+  /** Ask for the save folder once. After that the app remembers it and never asks again. */
+  function ensureSaveFolder(): Promise<boolean> {
+    if (saveFolderSet()) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const done = (event: Event) => { window.removeEventListener('android-save-folder', done); resolve(!!(event as CustomEvent<{ set: boolean }>).detail?.set); };
+      window.addEventListener('android-save-folder', done);
+      setToast('Choose a folder to save into, once. The app remembers it and will not ask again. Pick or create a folder such as Documents/IMEI.');
+      androidBridge?.chooseSaveFolder?.();
+    });
+  }
+  /** Wait until the app has finished copying the staged files into the saved folder. */
+  function waitForSaved(): Promise<{ ok: boolean; count: number; where: string; error: string }> {
+    return new Promise(resolve => {
+      const finish = (event: Event) => { window.clearTimeout(timer); window.removeEventListener('android-saved', finish); resolve((event as CustomEvent<{ ok: boolean; count: number; where: string; error: string }>).detail); };
+      const timer = window.setTimeout(() => { window.removeEventListener('android-saved', finish); resolve({ ok: false, count: 0, where: '', error: 'Saving took too long.' }); }, 10 * 60 * 1000);
+      window.addEventListener('android-saved', finish);
+    });
+  }
+  /** Stage base64 pieces under a token (1 MB each). */
+  function stageBase64(token: string, fileName: string, base64: string) {
+    const PIECE = 1048576;
+    for (let offset = 0; offset < base64.length || offset === 0; offset += PIECE) {
+      if (!androidBridge!.appendFolderFile!(token, fileName, base64.slice(offset, offset + PIECE))) throw new Error(`Could not prepare ${fileName}.`);
+      if (!base64.length) break;
+    }
+  }
+  /** Save pictures and numbers.txt into the remembered folder without asking; a repeat save replaces the earlier files. */
+  async function saveToMyselfSilent(name: string, rows: RecordItem[], allRows: RecordItem[]): Promise<boolean> {
+    const bridge = androidBridge!;
+    if (!(await ensureSaveFolder())) { setToast('No folder was chosen. Nothing was saved.'); return false; }
+    const token = bridge.beginFolder!('imei-save');
+    if (!token) { setToast('The phone is still busy. Try again in a moment.'); return false; }
+    try {
+      const total = allRows.length;
+      for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        const position = allRows.indexOf(row) + 1 || index + 1;
+        const base64 = await labelledPhotoBase64(recordPhoto(row), pictureLines(row, position, total, true));
+        stageBase64(token, `${String(position).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, base64);
+        setToast(`Preparing ${index + 1} of ${rows.length}…`);
+        if (index % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      // numbers.txt always lists every phone, even when only the rest was saved now.
+      stageBase64(token, 'numbers.txt', textToBase64(allRows.map((row, index) => pictureLines(row, index + 1, total, true).join('  ')).join('\n')));
+      const finished = waitForSaved();
+      // A full save replaces the earlier pictures; saving only the rest keeps the ones already there.
+      if (!bridge.commitStaged!(token, reportFolderName(name), rows.length === allRows.length)) throw new Error('Could not save. Choose the folder again in Settings.');
+      const result = await finished;
+      setToast(result.ok ? `Saved ${result.count} files to ${result.where}. Saving again replaces them.` : result.error || 'Could not save.');
+      return result.ok;
+    } catch (error) {
+      bridge.abortFolder?.(token);
+      setToast(error instanceof Error ? error.message : 'Could not save the report.');
+      return false;
+    }
+  }
+
   /** Save a copy to this phone: a folder with every picture (IMEI / serial written on it) and a numbers.txt. */
   async function saveToMyself(name: string, rows: RecordItem[], allRows: RecordItem[] = rows): Promise<boolean> {
     if (!rows.length) return false;
+    if (canSaveSilently()) return saveToMyselfSilent(name, rows, allRows);
     const bridge = androidBridge;
     const useFolder = !!(bridge?.beginFolder && bridge.appendFolderFile && bridge.finishFolder);
     const folderName = `IMEI-${name || 'phones'}-${new Date().toISOString().slice(0, 10)}`.replace(/[\\/:*?"<>|]/g, '_');
@@ -2349,11 +2421,23 @@ export default function App() {
     if (oneByOne) writeOneByOne(oneByOne.id, next);
   }
   /** Download this picture, remember it, and show the next phone. */
-  function obDownloadNext() {
+  async function obDownloadNext() {
     if (!oneByOne) return;
     const row = oneByOne.rows[obState.index];
     if (!row) return;
-    saveDirectFile(dataUrlBlob(recordPhoto(row)), orderedPhotoName(row, obState.index + 1));
+    if (canSaveSilently()) {
+      if (!(await ensureSaveFolder())) { setToast('No folder was chosen. Nothing was saved.'); return; }
+      const token = androidBridge!.beginFolder!('imei-one');
+      if (!token) { setToast('The phone is still busy. Try again in a moment.'); return; }
+      try {
+        stageBase64(token, orderedPhotoName(row, obState.index + 1), recordPhoto(row).split(',')[1] || '');
+        if (!androidBridge!.commitStaged!(token, reportFolderName(oneByOne.name), false)) throw new Error('Could not save. Choose the folder again in Settings.');
+      } catch (error) {
+        androidBridge!.abortFolder?.(token);
+        setToast(error instanceof Error ? error.message : 'Could not save the picture.');
+        return;
+      }
+    } else saveDirectFile(dataUrlBlob(recordPhoto(row)), orderedPhotoName(row, obState.index + 1));
     obSet({ done: [...new Set([...obState.done, row.id])], index: Math.min(oneByOne.rows.length - 1, obState.index + 1) });
   }
   async function obSaveRemaining() {
