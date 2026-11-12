@@ -1098,6 +1098,14 @@ function recordsCsv(
 }
 
 /** Picture file name: just the record number, e.g. 3.jpg. */
+/** Download name in picture order with the IMEI (or serial): 003-352099001761028.jpg. Sorting the files by name keeps the order. */
+function orderedPhotoName(r: RecordItem, position?: number) {
+  const ext = (r.cropDataUrl ? 'jpg' : r.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const pair = recordImeiPair(r), serial = recordSerial(r);
+  const id = (pair.imei1 || serial || 'phone').replace(/[^A-Za-z0-9]/g, '');
+  return `${String(position ?? r.number).padStart(3, '0')}-${id}.${ext}`;
+}
+
 function photoFilename(r: RecordItem) {
   const ext = (r.cropDataUrl ? 'jpg' : r.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
   return `${r.number}.${ext}`;
@@ -2252,12 +2260,12 @@ export default function App() {
   }
 
   /** Save a copy to this phone: a folder with every picture (IMEI / serial written on it) and a numbers.txt. */
-  async function saveToMyself(name: string, rows: RecordItem[]): Promise<boolean> {
+  async function saveToMyself(name: string, rows: RecordItem[], allRows: RecordItem[] = rows): Promise<boolean> {
     if (!rows.length) return false;
     const bridge = androidBridge;
     const useFolder = !!(bridge?.beginFolder && bridge.appendFolderFile && bridge.finishFolder);
     const folderName = `IMEI-${name || 'phones'}-${new Date().toISOString().slice(0, 10)}`.replace(/[\\/:*?"<>|]/g, '_');
-    const total = rows.length, numbers: string[] = [];
+    const total = allRows.length, numbers: string[] = [];
     let token = '';
     const append = async (file: File) => {
       for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
@@ -2270,9 +2278,10 @@ export default function App() {
       if (useFolder) { token = bridge!.beginFolder!(folderName); if (!token) throw new Error('Finish or cancel the current save before saving again.'); }
       for (let index = 0; index < rows.length; index++) {
         const row = rows[index];
-        const lines = pictureLines(row, index + 1, total, true);
+        const position = allRows.indexOf(row) + 1 || index + 1;
+        const lines = pictureLines(row, position, total, true);
         const blob = await labelledPhoto(recordPhoto(row), lines);
-        const file = new File([blob], `${String(index + 1).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, { type: 'image/jpeg' });
+        const file = new File([blob], `${String(position).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, { type: 'image/jpeg' });
         numbers.push(lines.join('  '));
         if (useFolder) await append(file); else { saveDirectFile(file, file.name); await new Promise(resolve => setTimeout(resolve, 350)); }
         if (index % 10 === 0) setToast(`Preparing ${index + 1} of ${total}…`);
@@ -2305,14 +2314,14 @@ export default function App() {
     if (!oneByOne) return;
     const row = oneByOne.rows[obState.index];
     if (!row) return;
-    saveDirectFile(dataUrlBlob(recordPhoto(row)), photoFilename(row));
+    saveDirectFile(dataUrlBlob(recordPhoto(row)), orderedPhotoName(row, obState.index + 1));
     obSet({ done: [...new Set([...obState.done, row.id])], index: Math.min(oneByOne.rows.length - 1, obState.index + 1) });
   }
   async function obSaveRemaining() {
     if (!oneByOne) return;
     const remaining = oneByOne.rows.filter(row => !obState.done.includes(row.id));
     if (!remaining.length) return;
-    if (await saveToMyself(oneByOne.name, remaining)) obSet({ done: oneByOne.rows.map(row => row.id), index: obState.index });
+    if (await saveToMyself(oneByOne.name, remaining, oneByOne.rows)) obSet({ done: oneByOne.rows.map(row => row.id), index: obState.index });
   }
 
   function resetWhatsAppProgress() {
@@ -4238,7 +4247,7 @@ export default function App() {
                   <Download size={15} /> Download photo gallery HTML
                 </button>
                 {photoDownloads.slice(0, photoDisplayCount).map(record => (
-                  <button key={record.id} className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), photoFilename(record).replace(/^#/, 'photo-'))}>
+                  <button key={record.id} className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), orderedPhotoName(record))}>
                     <Download size={15} /> Photo #{record.number} · {record.imei || 'No IMEI'}
                   </button>
                 ))}
@@ -4410,7 +4419,7 @@ export default function App() {
                     <label>Model code <input aria-label={`Model code for ${info.name}`} value={exportModel(record.model)} onChange={event => updateRow(record.id, { model: event.target.value })} /></label>
                     <button className="subtle-btn" disabled={!exportModel(record.model)} onClick={() => void copyText(exportModel(record.model)).then(ok => setToast(ok ? 'Model code copied.' : 'Copy failed.'))}>Copy model code</button>
                     <button className="subtle-btn" onClick={() => void copyText(`Model: ${exportModel(record.model)}\nIMEI: ${record.imei}\nSerial number: ${serial}`).then(ok => setToast(ok ? 'Record copied.' : 'Copy failed.'))}>Copy whole record</button>
-                    <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), photoFilename(record))}>Download photo</button>
+                    <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), orderedPhotoName(record))}>Download photo</button>
                     <button className="subtle-btn" onClick={() => shareRecord(record)}>Share photo + number</button>
                     <button className="subtle-btn" onClick={() => openCropReview(record)}>Edit or crop photo</button>
                   </div></details>
@@ -4550,7 +4559,7 @@ export default function App() {
                           className="row-action"
                           title="Download original photo"
                           onClick={() => {
-                            saveDirectFile(dataUrlBlob(recordPhoto(r)), photoFilename(r));
+                            saveDirectFile(dataUrlBlob(recordPhoto(r)), orderedPhotoName(r));
                           }}
                         >
                           <Download size={16} /> Photo
@@ -4653,7 +4662,7 @@ export default function App() {
               </div>}
               <div className="review-tools">
                 <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
-                <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), photoFilename(selected))}><Download size={16} /> Photo</button>
+                <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Photo</button>
                 <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
                 <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('left')}>↶</button>
                 <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto || adjustingCrop || !!reviewSplit} onClick={() => void rotateSelectedPhoto('right')}>↷</button>
