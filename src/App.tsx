@@ -4703,9 +4703,16 @@ export default function App() {
                           className="inline-edit model-edit"
                           aria-label={`Model for record ${r.number}`}
                           value={r.model}
+                          onFocus={e => { e.currentTarget.dataset.before = r.model; }}
                           onChange={e =>
                             updateRow(r.id, { model: e.target.value })
                           }
+                          onBlur={e => {
+                            // Learn the correction once the edit is finished (never from half-typed codes).
+                            const before = e.currentTarget.dataset.before, after = e.currentTarget.value.trim();
+                            if (before !== undefined && after && after !== before) writeLearned(learnCorrection(readLearned(), before, after));
+                            delete e.currentTarget.dataset.before;
+                          }}
                         />
                         {(() => { const info = infoOf(r); return info.series !== 'Unknown phones' && !isGenericName(info.name) ? <small className="model-cell-name"><strong>{info.name}</strong> · {info.series}</small> : <small className="model-cell-name unknown">{modelCode4(r.model) ? `SM-${modelCode4(r.model)} is not recognised. Add its name in Settings.` : 'Model not recognised. Type the code, or add it in Settings.'}</small>; })()}
                       </td>

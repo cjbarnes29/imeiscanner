@@ -3,11 +3,18 @@ package com.imeilens.scanner;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.net.Uri;
 import androidx.exifinterface.media.ExifInterface;
 import com.google.android.gms.tasks.Tasks;
+import com.google.mlkit.vision.barcode.BarcodeScanner;
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
+import com.google.mlkit.vision.barcode.BarcodeScanning;
+import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognizer;
@@ -52,17 +59,29 @@ final class ImageScanner {
                     if (best >= 100) break;
                 }
             }
+            // A tilted photo: level it so the products can be separated with straight cuts.
+            float tilt = medianAngle(full);
+            if (Math.abs(tilt) >= 2f && Math.abs(tilt) <= 20f) {
+                Bitmap levelled = level(bitmap, -tilt);
+                Text again;
+                try { again = Tasks.await(recognizer.process(InputImage.fromBitmap(levelled, 0))); }
+                catch (Exception error) { levelled.recycle(); throw error; }
+                // Keep it only if the text really became straighter and nothing was lost.
+                if (Math.abs(medianAngle(again)) < Math.abs(tilt) && score(again) >= score(full)) { bitmap.recycle(); bitmap = levelled; full = again; }
+                else levelled.recycle();
+            }
+            List<Code> codes = barcodes(bitmap);
             List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer, full, rotation));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer, full, rotation, codes, null));
                 return output;
             }
             List<Rect> regions = boxRegions(bitmap, labels);
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null));
                 return output;
             }
             boolean perspectiveReview = false;
@@ -70,7 +89,7 @@ final class ImageScanner {
                 if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
             for (Rect region : regions) {
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region)); }
                 finally { crop.recycle(); }
             }
             for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("siblings", output.length());
@@ -79,11 +98,16 @@ final class ImageScanner {
     }
 
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
-                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation) throws Exception {
+                                         String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation,
+                                         List<Code> codes, Rect region) throws Exception {
         // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
         Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
         String raw = ocr.getText();
         String imei = preferredImei(ocr);
+        // Barcodes are exact: pair each with the "IMEI 1" / "IMEI 2" text printed under it.
+        String barcode1 = labelledBarcode(ocr, codes, region, LABEL_ONE), barcode2 = labelledBarcode(ocr, codes, region, LABEL_TWO);
+        if (!barcode1.isEmpty()) { imei = barcode1; raw += "\nIMEI 1 (barcode): " + barcode1; }
+        if (!barcode2.isEmpty()) raw += "\nIMEI 2 (barcode): " + barcode2;
         String id = UUID.randomUUID().toString();
         // Saved pictures are kept small (long edge 1800 px): 1000 full-size pictures would not fit in the page's memory.
         Bitmap saved = photo;
@@ -384,6 +408,77 @@ final class ImageScanner {
             if (values.size() == 1) return values.iterator().next();
         }
         return "";
+    }
+
+    private static final Pattern LABEL_TWO = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\b");
+
+    /** One decoded barcode and where it is in the (rotated, levelled) photo. */
+    static final class Code { final String value; final Rect box; Code(String value, Rect box) { this.value = value; this.box = box; } }
+
+    /** Every Code 128 / EAN-13 barcode in the photo. A failure only means no barcode help for this photo. */
+    private static List<Code> barcodes(Bitmap bitmap) {
+        List<Code> found = new ArrayList<>();
+        BarcodeScanner scanner = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_CODE_128, Barcode.FORMAT_EAN_13).build());
+        try {
+            for (Barcode code : Tasks.await(scanner.process(InputImage.fromBitmap(bitmap, 0)))) {
+                String value = code.getRawValue();
+                Rect box = code.getBoundingBox();
+                if (value != null && box != null) found.add(new Code(value.trim(), box));
+            }
+        } catch (Exception error) { /* barcodes are a bonus; text reading still works */ }
+        finally { scanner.close(); }
+        return found;
+    }
+
+    /**
+     * The valid 15-digit barcode printed directly above the one "IMEI 1" (or "IMEI 2") text line of this label.
+     * Empty unless exactly one value fits, so a wrong barcode is never taken.
+     */
+    static String labelledBarcode(Text ocr, List<Code> codes, Rect region, Pattern label) {
+        if (codes == null || codes.isEmpty()) return "";
+        int dx = region == null ? 0 : region.left, dy = region == null ? 0 : region.top;
+        Set<String> values = new HashSet<>();
+        for (Text.TextBlock block : ocr.getTextBlocks()) for (Text.Line line : block.getLines()) {
+            Rect text = line.getBoundingBox();
+            if (text == null || !label.matcher(line.getText()).find()) continue;
+            int height = Math.max(8, text.height());
+            for (Code code : codes) {
+                if (!luhn(code.value)) continue;
+                Rect box = new Rect(code.box); box.offset(-dx, -dy);
+                boolean above = box.bottom >= text.top - height * 3 && box.bottom <= text.top + height;
+                boolean overlaps = box.left < text.right + height * 4 && box.right > text.left - height;
+                if (above && overlaps) values.add(code.value);
+            }
+        }
+        return values.size() == 1 ? values.iterator().next() : "";
+    }
+
+    /** Median slant of the text lines in degrees (0 when there are too few lines to tell). */
+    static float medianAngle(Text text) {
+        List<Float> angles = new ArrayList<>();
+        for (Text.TextBlock block : text.getTextBlocks()) for (Text.Line line : block.getLines())
+            if (line.getText().trim().length() >= 4) angles.add(line.getAngle());
+        if (angles.size() < 3) return 0f;
+        java.util.Collections.sort(angles);
+        return angles.get(angles.size() / 2);
+    }
+
+    /** The photo turned by the given degrees on a white background (no black corners). */
+    static Bitmap level(Bitmap source, float degrees) {
+        double radians = Math.toRadians(Math.abs(degrees));
+        int width = source.getWidth(), height = source.getHeight();
+        int outWidth = (int) Math.ceil(width * Math.cos(radians) + height * Math.sin(radians));
+        int outHeight = (int) Math.ceil(width * Math.sin(radians) + height * Math.cos(radians));
+        Bitmap out = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        canvas.drawColor(Color.WHITE);
+        Matrix matrix = new Matrix();
+        matrix.postTranslate(-width / 2f, -height / 2f);
+        matrix.postRotate(degrees);
+        matrix.postTranslate(outWidth / 2f, outHeight / 2f);
+        canvas.drawBitmap(source, matrix, new Paint(Paint.FILTER_BITMAP_FLAG));
+        return out;
     }
 
     private static boolean luhn(String value) {

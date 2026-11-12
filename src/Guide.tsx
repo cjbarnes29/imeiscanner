@@ -29,6 +29,7 @@ export function AuthorCredit() {
 }
 
 const NEW_ITEMS = [
+  ['Barcodes in background scans', 'Choose photos and scan now reads the label barcodes and uses the exact IMEI from them, and levels tilted photos before separating the products.'],
   ['Confidence and learning', 'Each record shows how sure the app is (high, medium, low) in the review window. Correct a model code once and the app fixes the same misread next time.'],
   ['Several products in one photo', 'Choose how many products are in each photo (Scan tab). If fewer are found, the app reads the photo again in enlarged pieces. Tilted crops are straightened automatically, and the camera tells you right after a shot if barcodes are missing.'],
   ['Clean pictures', 'Pictures you send or save have no text written on them. They are resized, sharpened and a little clearer. The IMEI and serial go in the caption and in numbers.txt.'],
