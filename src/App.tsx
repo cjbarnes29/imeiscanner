@@ -11,7 +11,8 @@ import { planMove, planUnassign, planDeletePerson, planAllocation, formatModelRe
 import { loadSamsungCatalog, readCatalogEntries } from './SamsungCatalog';
 import { deviceAnchors, planDeviceCrops } from './device-labels';
 import { labelSeeds, seedCrops, seedPlan } from './seed-layout';
-import { mergeQueue, readQueue, writeQueue, type QueueItem } from './crop-queue';
+import { addLog, classifyLog, counts as queueCountsOf, markFailed, mergeQueue, newItem, nextPending, promoteLater, readLog, readQueue, removeItem, retryAllFailed, retryItem, setLater, writeLog, writeQueue, type QueueItem, type QueueLogEntry } from './crop-queue';
+import { QueuePanel } from './QueuePanel';
 import { buildSharePackage, shareNumberText, type ShareMode } from './share-package';
 import { extractSerial, serialLabelRegion, serialReading, unindexedImeis } from './serial';
 import { CropStudio, type StudioPlan } from './CropStudio';
@@ -970,7 +971,7 @@ const newOcrWorker = () => createWorker('eng', 1, { workerPath: `${OCR_BASE}/wor
  * using the same label grouping as scanning. Boxes are in % of the photo.
  * devices counts what was seen even when boxes could not be placed.
  */
-async function autoDetectBoxes(worker: Awaited<ReturnType<typeof createWorker>>, source: string): Promise<{ boxes: DrawnBox[]; devices: number }> {
+async function autoDetectBoxes(worker: Awaited<ReturnType<typeof createWorker>>, source: string, opts: { fast?: boolean; expected?: number } = {}): Promise<{ boxes: DrawnBox[]; devices: number }> {
   const original = new File([dataUrlBlob(source)], 'auto.jpg', { type: 'image/jpeg' });
   await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, user_defined_dpi: '300' });
   // One pass over a picture (optionally levelled first). Boxes come back in % of the picture it was given.
@@ -981,7 +982,7 @@ async function autoDetectBoxes(worker: Awaited<ReturnType<typeof createWorker>>,
     const codes = await frameBarcodes(color);
     lines = [...lines, ...labelledBarcodeLines(codes, lines)];
     // The same "look closer" stage as the scan (tiles from a full-resolution copy when labels are small or more are expected).
-    lines = (await lookCloser({ worker, file, color, lines, codes, raw: lines.map(line => line.text).join('\n'), expectedProducts: 0, fast: false })).lines;
+    lines = (await lookCloser({ worker, file, color, lines, codes, raw: lines.map(line => line.text).join('\n'), expectedProducts: opts.expected || 0, fast: !!opts.fast })).lines;
     const frame = color.getContext('2d')?.getImageData(0, 0, W, H);
     const anchors = deviceAnchors(lines, W, H, frame);
     let regions = anchors.length >= 2 ? planDeviceCrops(anchors, lines, W, H, frame) : [];
@@ -1027,7 +1028,7 @@ async function rereadIfUncertain(worker: Awaited<ReturnType<typeof createWorker>
 }
 
 /** Cut every drawn box and read each one (barcodes, OCR, second reads, extra passes when unsure). */
-async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | null, source: string, boxes: DrawnBox[], modelFor: (raw: string, boxCount: number) => string, onProgress?: (index: number) => void, knownTacs: ReadonlySet<string> = new Set()): Promise<SplitCrop[]> {
+async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | null, source: string, boxes: DrawnBox[], modelFor: (raw: string, boxCount: number) => string, onProgress?: (index: number) => void, knownTacs: ReadonlySet<string> = new Set(), opts: { fast?: boolean; expected?: number } = {}): Promise<SplitCrop[]> {
   const photos = await createCroppedPhotos(source, boxes.map((box, index) => ({ imei: `box-${index}`, ...box })), 100, 100);
   const crops: SplitCrop[] = [];
   for (let index = 0; index < boxes.length; index++) {
@@ -1042,9 +1043,9 @@ async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | n
         await yieldToUi();
         raw = await cameraBarcodeText(cropDataUrl, raw, lines);
         await yieldToUi();
-        raw = await refineCropText(worker, cropDataUrl, raw, lines);
-        await yieldToUi();
-        ({ raw, judgement } = await rereadIfUncertain(worker, cropDataUrl, raw, knownTacs));
+        // Fast = one pass per label: no second read and no extra picture treatments (the setting the user chose).
+        if (!opts.fast) { raw = await refineCropText(worker, cropDataUrl, raw, lines); await yieldToUi(); }
+        ({ raw, judgement } = opts.fast ? { raw, judgement: judgeImei({ readings: imeiReadings(raw), barcode: barcodeImei(raw, 1), knownTacs }) } : await rereadIfUncertain(worker, cropDataUrl, raw, knownTacs));
         imei = cameraImei(raw);
         // Votes across passes or a checksum repair fill in only when the normal rules found nothing.
         if (!imei && judgement.imei) imei = judgement.imei;
@@ -1062,6 +1063,8 @@ async function readBoxCrops(worker: Awaited<ReturnType<typeof createWorker>> | n
   // The same number read for two boxes of one photo: a box sits on the wrong label, or two boxes cover one label.
   const repeated = repeatedAcrossBoxes(crops.map(crop => crop.imei));
   crops.forEach((crop, index) => { if (repeated.has(index)) { crop.review = true; crop.reason = 'The same IMEI was read in two boxes'; } });
+  // Fewer labels than the number the user said each photo holds: say so on every crop instead of finishing quietly.
+  if (opts.expected && opts.expected > 1 && boxes.length < opts.expected) crops.forEach(crop => { crop.review = true; crop.reason = crop.reason || `Found ${boxes.length} of ${opts.expected} products in this photo`; });
   return crops;
 }
 
@@ -1142,7 +1145,7 @@ function CropResults({ groups, setGroups, busy, onBack, onApply }: { groups: Cro
  * draw the boxes in the Crop Studio, read the crops, check them, replace the originals.
  */
 function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose, onLater, onQueue }: {
-  items: BulkItem[]; initialPlans?: Record<string, Box[]>; startIndex?: number; knownTacs: ReadonlySet<string>; onQueue?: (entries: StudioPlan[]) => void;
+  items: BulkItem[]; initialPlans?: Record<string, Box[]>; startIndex?: number; knownTacs: ReadonlySet<string>; onQueue?: (entries: StudioPlan[], mode?: 'later') => void;
   onApply: (groups: CropGroup[]) => void; onClose: () => void; onLater: (boxes: number, photos: number) => void;
 }) {
   const [stage, setStage] = useState<'draw' | 'results'>('draw');
@@ -2146,6 +2149,8 @@ export default function App() {
       saveChain.current = saveChain.current.catch(() => {}).then(async () => {
         try {
           await saveInventory(records);
+          // A queued photo is taken off the saved queue only now that its crops are stored (see the queue runner).
+          if (queueSaveNeeded.current) { queueSaveNeeded.current = false; writeQueue(localStorage, cropQueueRef.current); }
           localStorage.removeItem(STORE);
           setStorageWarning('');
         } catch (error) {
@@ -3736,83 +3741,130 @@ export default function App() {
     }
     if (quiet) refreshDraft(marked); else { setCropEditorOpen(false); setBulkCropOpen(false); setBulkDraft(null); refreshDraft(marked); }
     if (!quiet) setToast(`${count} picture${count === 1 ? '' : 's'} saved from ${made.size} photo${made.size === 1 ? '' : 's'}; the original${made.size === 1 ? '' : 's'} replaced.${unsure ? ` ${unsure} need${unsure === 1 ? 's' : ''} a look.` : ''}`);
+    // Which records each original became (the queue logs them as Completed / Needs Review).
+    return new Map([...made].map(([id, rows]) => [id, rows.map(row => row.id)] as [string, string[]]));
   }
   function finishCropFlow() { setCropEditorOpen(false); setBulkCropOpen(false); setBulkDraft(null); bulkRowsRef.current = null; refreshDraft(); }
 
   // ---- Background crop queue -------------------------------------------------------------------------------------------
-  // Photos are cut and read one at a time while the app stays usable. Each original is replaced only after its crops were
-  // read; crops that are not certain are flagged. The queue is kept on the phone (record ids and boxes only) and offered for
-  // resuming after the app was closed.
+  // Photos are cut and read one at a time while the app stays usable. Statuses: Pending, Processing, Process later, Needs
+  // review, Completed. Each original is replaced only after its crops were read. Queue and finished log are kept on the phone
+  // (ids, boxes, statuses; never pictures); after a restart the queue is offered for resuming, an interrupted photo starts again.
+  // Scan speed and Products in each photo are read when each photo starts, so a change applies to the photos still waiting.
   const bulkRowsRef = useRef<RecordItem[] | null>(null);
   const [cropQueue, setCropQueue] = useState<QueueItem[]>([]);
+  const cropQueueRef = useRef<QueueItem[]>([]);
+  cropQueueRef.current = cropQueue;
+  const queueSaveNeeded = useRef(false);
+  const [queueLog, setQueueLog] = useState<QueueLogEntry[]>([]);
   const [queuePaused, setQueuePaused] = useState(false);
+  const [queuePanelOpen, setQueuePanelOpen] = useState(false);
+  const [processingId, setProcessingId] = useState('');
   const [queueStats, setQueueStats] = useState({ total: 0, done: 0, failed: 0, startedAt: 0, resumed: false });
   const queueBusy = useRef(false);
   const queueWorker = useRef<Promise<Awaited<ReturnType<typeof createWorker>>> | null>(null);
   const applyRef = useRef(applyCropGroups);
   applyRef.current = applyCropGroups;
+  const settingsRef = useRef({ scanMode, expectedProducts });
+  settingsRef.current = { scanMode, expectedProducts };
   const changeQueue = (next: QueueItem[]) => { setCropQueue(next); writeQueue(localStorage, next); };
-  function enqueueCrops(entries: StudioPlan[]) {
-    const items = entries.map(entry => ({ recordId: entry.id, boxes: entry.boxes, auto: !entry.boxes.length }));
+  const changeLog = (update: (old: QueueLogEntry[]) => QueueLogEntry[]) => setQueueLog(old => { const next = update(old); writeLog(localStorage, next); return next; });
+  function enqueueCrops(entries: StudioPlan[], mode?: 'later') {
+    const items = entries.map(entry => newItem(entry.id, entry.boxes, records.find(row => row.id === entry.id)?.name, mode === 'later' ? 'later' : 'pending'));
     clearDraft(localStorage); setPendingDraft(null);
-    setQueueStats(old => ({ total: old.total + items.length, done: old.done, failed: old.failed, startedAt: old.startedAt || Date.now(), resumed: false }));
-    setQueuePaused(false);
+    const fresh = items.filter(item => !cropQueue.some(old => old.recordId === item.recordId)).length;
+    setQueueStats(old => ({ total: old.total + fresh, done: old.done, failed: old.failed, startedAt: old.startedAt || Date.now(), resumed: false }));
+    if (mode !== 'later') setQueuePaused(false);
     changeQueue(mergeQueue(cropQueue, items));
-    setToast(`${items.length} photo${items.length === 1 ? '' : 's'} added to the background queue.`);
+    if (mode !== 'later') setToast(`${items.length} photo${items.length === 1 ? '' : 's'} added to the background queue.`);
   }
+  const inQueue = new Set(cropQueue.map(item => item.recordId));
+  const unqueuedNeedingCrop = records.filter(row => needsCropping(row) && !inQueue.has(row.id));
+  function resumeQueue() { changeQueue(promoteLater(cropQueue)); setQueuePaused(false); }
   // After a restart: offer to continue what was waiting.
   useEffect(() => {
     if (!inventoryLoaded) return;
-    const waiting = readQueue(localStorage, new Set(records.map(row => row.id)));
-    if (waiting.length) { setCropQueue(waiting); setQueuePaused(true); setQueueStats({ total: waiting.length, done: 0, failed: 0, startedAt: Date.now(), resumed: true }); }
+    const existing = new Set(records.map(row => row.id));
+    const waiting = readQueue(localStorage, existing);
+    setQueueLog(readLog(localStorage, existing));
+    if (waiting.length) { setCropQueue(waiting); setQueuePaused(true); setQueueStats({ total: waiting.length, done: 0, failed: waiting.filter(i => i.status === 'failed').length, startedAt: Date.now(), resumed: true }); }
   }, [inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (queuePaused || queueBusy.current || !cropQueue.length || !inventoryLoaded) return;
-    const item = cropQueue[0];
+    const item = nextPending(cropQueue);
+    if (queuePaused || queueBusy.current || !item || !inventoryLoaded) return;
     queueBusy.current = true;
+    setProcessingId(item.recordId);
     void (async () => {
-      let failed = false;
+      let error = '', replaced = false;
       try {
         const record = records.find(row => row.id === item.recordId);
-        if (!record) throw new Error('photo is gone');
+        if (!record) throw new Error('The photo is no longer in your records.');
+        const settings = settingsRef.current, fast = settings.scanMode === 'fast', expected = settings.expectedProducts;
         const source = record.originalDataUrl || (androidBridge?.sourceImage ? androidBridge.sourceImage(record.id) : '') || record.dataUrl;
         const w = await (queueWorker.current ||= newOcrWorker());
         let boxes = item.boxes;
-        if (item.auto || !boxes.length) boxes = (await autoDetectBoxes(w, source)).boxes;
-        if (!boxes.length) throw new Error('no label found');
+        if (item.auto || !boxes.length) boxes = (await autoDetectBoxes(w, source, { fast, expected })).boxes;
+        if (!boxes.length) {
+          // One product and nothing to cut: that is a finished photo when it already has numbers; otherwise it needs a look.
+          if (record.imei || recordSerial(record)) {
+            changeLog(old => addLog(old, { originalId: record.id, name: record.name, recordIds: [record.id], at: new Date().toISOString(), note: 'One product: kept as it is.' }));
+            return;
+          }
+          throw new Error('No separate label was found in this photo.');
+        }
         const entry: BulkItem = { id: record.id, name: record.name, source, deviceCount: record.deviceCount, model: record.model, single: boxes.length === 1 };
-        const crops = await readBoxCrops(w, source, boxes, (raw, count) => modelForCrop(entry, raw, count), undefined, knownTacs);
-        applyRef.current([{ id: record.id, name: record.name, source, crops }], false, true);
-      } catch (error) { console.warn('Queued photo could not be cut', error); failed = true; }
+        const crops = await readBoxCrops(w, source, boxes, (raw, count) => modelForCrop(entry, raw, count), undefined, knownTacs, { fast, expected });
+        const made = applyRef.current([{ id: record.id, name: record.name, source, crops }], false, true);
+        replaced = true;
+        changeLog(old => addLog(old, { originalId: record.id, name: record.name, recordIds: made?.get(record.id) || [], at: new Date().toISOString(), note: expected > 1 && boxes.length < expected ? `Found ${boxes.length} of ${expected} products.` : undefined }));
+      } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); console.warn('Queued photo could not be cut', caught); }
       finally {
         queueBusy.current = false;
-        setQueueStats(old => ({ ...old, done: old.done + (failed ? 0 : 1), failed: old.failed + (failed ? 1 : 0) }));
-        setCropQueue(old => { const rest = old.filter(entry => entry.recordId !== item.recordId); writeQueue(localStorage, rest); return rest; });
+        setProcessingId('');
+        setQueueStats(old => ({ ...old, done: old.done + (error ? 0 : 1), failed: old.failed + (error ? 1 : 0) }));
+        // When crops replaced the original, the saved queue keeps this photo until the records save has finished: if the app
+        // is killed in between, the photo is offered again instead of silently dropping out with its original untouched.
+        setCropQueue(old => { const rest = error ? markFailed(old, item.recordId, error) : removeItem(old, item.recordId); if (replaced) queueSaveNeeded.current = true; else writeQueue(localStorage, rest); return rest; });
       }
     })();
   }, [cropQueue, queuePaused, inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing left to read: release the reader's memory.
   useEffect(() => {
-    if (cropQueue.length || queueBusy.current || !queueWorker.current) return;
+    if (nextPending(cropQueue) || queueBusy.current || !queueWorker.current) return;
     const old = queueWorker.current; queueWorker.current = null;
     void old.then(w => w.terminate()).catch(() => undefined);
-  }, [cropQueue.length, queueStats.done, queueStats.failed]);
+  }, [cropQueue, queueStats.done, queueStats.failed]);
   useEffect(() => { if (!bulkCropOpen && !bulkDraft) bulkRowsRef.current = null; }, [bulkCropOpen, bulkDraft]);
   // While the queue runs, the phone shows a notification and keeps the app awake, so minimizing does not stop it.
+  const queueCounts = queueCountsOf(cropQueue);
+  const queueRunning = queueCounts.pending > 0 && !queuePaused;
   useEffect(() => {
-    androidBridge?.queueStatus?.(queueStats.done + queueStats.failed, queueStats.total, cropQueue.length > 0 && !queuePaused);
-  }, [cropQueue.length, queuePaused, queueStats.done, queueStats.failed, queueStats.total]);
+    androidBridge?.queueStatus?.(queueStats.done + queueStats.failed, queueStats.total, queueRunning);
+  }, [queueRunning, queueStats.done, queueStats.failed, queueStats.total]);
   useEffect(() => () => { androidBridge?.queueStatus?.(0, 0, false); }, []);
   // The notification's Pause button.
   useEffect(() => {
-    if (!androidBridge?.queueStopRequested || !cropQueue.length || queuePaused) return;
+    if (!androidBridge?.queueStopRequested || !queueRunning) return;
     const timer = window.setInterval(() => { if (androidBridge.queueStopRequested!()) { setQueuePaused(true); setToast('Background cropping paused. Tap Continue in the banner.'); } }, 1500);
     return () => window.clearInterval(timer);
-  }, [cropQueue.length, queuePaused]);
-  const queueFlagged = records.filter(row => row.cropNeedsReview && queueStats.startedAt && Date.parse(row.createdAt) >= queueStats.startedAt);
-  const queueActive = cropQueue.length > 0;
+  }, [queueRunning]);
+  const flaggedIds = new Set(records.filter(row => row.cropNeedsReview).map(row => row.id));
+  const { review: queueReviewLog, completed: queueCompletedLog } = classifyLog(queueLog, flaggedIds);
+  const queueFailedItems = cropQueue.filter(item => item.status === 'failed');
+  const queueActive = queueCounts.pending > 0 || queueCounts.later > 0;
+  const queueNeedsReview = queueReviewLog.length + queueFailedItems.length;
   const queueFinished = !queueActive && queueStats.total > 0 && queueStats.done + queueStats.failed >= queueStats.total;
-  function reviewQueueResults() { const ids = queueFlagged.map(row => row.id); if (!ids.length) return; setReviewIds(ids); setSelected(queueFlagged[0]); }
+  function reviewRecordIds(ids: string[]) { const rows = ids.map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row); if (!rows.length) return; setReviewIds(rows.map(row => row.id)); setSelected(rows[0]); setQueuePanelOpen(false); }
+  function approveQueueEntry(entry: QueueLogEntry) {
+    setRecords(old => old.map(row => entry.recordIds.includes(row.id) ? { ...row, cropNeedsReview: false } : row));
+    changeLog(old => old.map(item => item.originalId === entry.originalId ? { ...item, approved: true } : item));
+  }
+  function exportCompleted() {
+    const ids = queueCompletedLog.flatMap(entry => entry.recordIds);
+    if (!ids.length) return;
+    setSelectedIds(ids); setSelectedOnly(true); setQueuePanelOpen(false);
+    setToast(`${ids.length} completed record${ids.length === 1 ? '' : 's'} selected. Use Export (selected only is on).`);
+  }
   function dismissQueue() { setQueueStats({ total: 0, done: 0, failed: 0, startedAt: 0, resumed: false }); }
   function cropFlowLater(boxes: number, photos: number) { finishCropFlow(); setToast(`Saved for later: ${boxes} box${boxes === 1 ? '' : 'es'} on ${photos} photo${photos === 1 ? '' : 's'}. Resume from the banner at the top.`); }
   const cropItem = (r: RecordItem): BulkItem => ({ id: r.id, name: r.name, source: r.originalDataUrl || r.dataUrl, deviceCount: r.deviceCount, model: r.model, single: !((r.deviceCount || 0) > 1) });
@@ -4182,15 +4234,19 @@ export default function App() {
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}`}>
-        {(queueActive || queueFinished) && <div className="draft-banner queue-banner" role="status">
+        {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
-            ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : 'Cropping in the background.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done{queueStats.failed ? ` · ${queueStats.failed} left as they are (no separate products found)` : ''}. Each original is replaced after its crops are read.</span>
-            : <span><strong>Background cropping finished.</strong> {queueStats.done} photo{queueStats.done === 1 ? '' : 's'} cut{queueStats.failed ? `, ${queueStats.failed} left as they are (no separate products found)` : ''}{queueFlagged.length ? ` · ${queueFlagged.length} to check` : ''}.</span>}
+            ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : queueCounts.pending ? 'Cropping in the background.' : 'Photos set aside for later.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done · {queueCounts.pending} waiting{queueCounts.later ? ` · ${queueCounts.later} for later` : ''}{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}. Each original is replaced after its crops are read.</span>
+            : queueFinished
+              ? <span><strong>Background cropping finished.</strong> {queueStats.done} photo{queueStats.done === 1 ? '' : 's'} done{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}.</span>
+              : <span><strong>{queueNeedsReview} photo{queueNeedsReview === 1 ? '' : 's'} need review</strong> from the crop queue.</span>}
           <div>
-            {queueActive && <button className="primary" onClick={() => setQueuePaused(value => !value)}>{queuePaused ? (queueStats.resumed ? 'Resume' : 'Continue') : 'Pause'}</button>}
-            {queueActive && <button className="subtle-btn" onClick={() => { changeQueue([]); setQueuePaused(false); dismissQueue(); setToast('Background cropping cancelled. Photos already cut stay cut.'); }}>{queueStats.resumed ? 'Discard' : 'Cancel'}</button>}
-            {queueFinished && !!queueFlagged.length && <button className="primary" onClick={reviewQueueResults}>Review {queueFlagged.length}</button>}
-            {queueFinished && <button className="subtle-btn" onClick={dismissQueue}>Dismiss</button>}
+            {queueActive && (queueCounts.pending > 0 && !queuePaused
+              ? <button className="primary" onClick={() => setQueuePaused(true)}>Pause</button>
+              : <button className="primary" onClick={resumeQueue}>{queueStats.resumed ? 'Resume' : 'Continue'}{queueCounts.later ? ` (+${queueCounts.later} later)` : ''}</button>)}
+            <button className="subtle-btn" onClick={() => setQueuePanelOpen(true)}>Queue</button>
+            {queueActive && <button className="subtle-btn" onClick={() => { changeQueue(cropQueue.filter(item => item.status === 'failed')); setQueuePaused(false); dismissQueue(); setToast('Waiting photos removed from the queue. Photos already cut stay cut.'); }}>{queueStats.resumed ? 'Discard' : 'Cancel'}</button>}
+            {!queueActive && queueFinished && <button className="subtle-btn" onClick={dismissQueue}>Dismiss</button>}
           </div>
         </div>}
         {pendingDraft && !cropEditorOpen && !bulkCropOpen && !bulkDraft && (() => { const { photos, boxes } = draftSummary(pendingDraft); return <div className="draft-banner" role="status">
@@ -5248,6 +5304,18 @@ export default function App() {
       </section></div>}
       {cropEditorOpen && selected && <CropFlow key={`review-${selected.id}`} items={[{ ...cropItem(selected), source: reviewSource || selected.originalDataUrl || selected.dataUrl }]} knownTacs={knownTacs}
         onApply={groups => applyCropGroups(groups, true)} onClose={finishCropFlow} onLater={cropFlowLater} onQueue={enqueueCrops} />}
+      {queuePanelOpen && <QueuePanel queue={cropQueue} processingId={processingId} paused={queuePaused} reviewLog={queueReviewLog} completedLog={queueCompletedLog}
+        records={records} unqueued={unqueuedNeedingCrop.length}
+        onClose={() => setQueuePanelOpen(false)} onPause={() => setQueuePaused(true)} onResume={resumeQueue}
+        onLater={id => changeQueue(setLater(cropQueue, id))}
+        onProcessNow={id => { changeQueue(cropQueue.map(item => item.recordId === id && item.status === 'later' ? { ...item, status: 'pending' as const } : item)); setQueuePaused(false); }}
+        onRetry={id => { changeQueue(retryItem(cropQueue, id)); setQueuePaused(false); }}
+        onRetryAll={() => { changeQueue(retryAllFailed(cropQueue)); setQueuePaused(false); }}
+        onRemove={id => changeQueue(removeItem(cropQueue, id))}
+        onApprove={approveQueueEntry} onEdit={reviewRecordIds}
+        onCropMyself={id => { const row = records.find(r => r.id === id); if (row) { setQueuePanelOpen(false); changeQueue(removeItem(cropQueue, id)); openCropReview(row); } }}
+        onAddAll={() => enqueueCrops(unqueuedNeedingCrop.map(row => ({ id: row.id, boxes: [] })))}
+        onExportCompleted={exportCompleted} />}
       {(bulkCropOpen || bulkDraft) && !cropEditorOpen && (() => {
         // The list is fixed while the editor is open: queued photos are replaced by their crops in the background, which must not shift the editor under you.
         bulkRowsRef.current ||= bulkDraft ? bulkDraft.items.map(item => records.find(r => r.id === item.recordId)).filter((r): r is RecordItem => !!r) : bulkCropRows();

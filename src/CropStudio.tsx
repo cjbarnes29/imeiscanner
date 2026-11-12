@@ -33,7 +33,7 @@ type Props = {
   /** Called (debounced) whenever the boxes change, so a draft survives a refresh or crash. */
   onAutosave?: (plans: StudioPlan[], index: number) => void;
   /** Send photos to the background queue: they are cut and read one by one while you carry on. A photo with no boxes is cut automatically. */
-  onQueue?: (entries: StudioPlan[]) => void;
+  onQueue?: (entries: StudioPlan[], mode?: 'later') => void;
 };
 
 type Drag =
@@ -55,6 +55,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   const [detecting, setDetecting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [queued, setQueued] = useState<Set<string>>(new Set());
+  const [laterIds, setLaterIds] = useState<Set<string>>(new Set());
   const [draw, setDraw] = useState<Box | null>(null);
   const [view, setView] = useState({ w: 320, h: 400 });
   const [natural, setNatural] = useState({ w: 4, h: 3 });
@@ -205,20 +206,36 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   }
   const saveLater = () => { onSaveLater(asList(), index); };
   // Queue this photo and open the next one that is not queued yet; when none is left, close.
+  // The next photo after this one (wrapping around) that is neither queued nor set aside.
+  const nextUnfinished = (done: ReadonlySet<string>) => {
+    for (let step = 1; step < items.length; step++) { const i = (index + step) % items.length; if (!done.has(items[i].id)) return i; }
+    return -1;
+  };
   function queueOne() {
     if (busy || !onQueue) return;
     if (!boxes.length) { setMessage('Draw at least one box first, or use Queue all to cut photos automatically.'); return; }
     const done = new Set(queued).add(item.id);
     onQueue([{ id: item.id, boxes }]);
-    setQueued(done);
+    setQueued(done); setLaterIds(old => { const n = new Set(old); n.delete(item.id); return n; });
     startPlans.current = JSON.stringify(plans);
-    const next = items.findIndex((entry, i) => i !== index && !done.has(entry.id));
+    const next = nextUnfinished(new Set([...done, ...laterIds]));
+    if (next >= 0) setIndex(next); else onClose();
+  }
+  // Process later: keep this photo's boxes (or none: automatic) in the queue, set aside, and move on. Resume includes it.
+  function laterOne() {
+    if (busy || !onQueue) return;
+    const marked = new Set(laterIds).add(item.id);
+    onQueue([{ id: item.id, boxes }], 'later');
+    setLaterIds(marked);
+    startPlans.current = JSON.stringify(plans);
+    const next = nextUnfinished(new Set([...queued, ...marked]));
     if (next >= 0) setIndex(next); else onClose();
   }
   // Queue every photo not queued yet. Photos with boxes keep them; photos with none are cut automatically.
   function queueAll() {
     if (busy || !onQueue) return;
-    const entries = items.filter(entry => !queued.has(entry.id)).map(entry => ({ id: entry.id, boxes: plans[entry.id] || [] }));
+    // Photos set aside stay set aside (they are already in the queue); everything else is queued now.
+    const entries = items.filter(entry => !queued.has(entry.id) && !laterIds.has(entry.id)).map(entry => ({ id: entry.id, boxes: plans[entry.id] || [] }));
     if (!entries.length) { onClose(); return; }
     onQueue(entries);
     startPlans.current = JSON.stringify(plans);
@@ -288,7 +305,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     {items.length > 1 && <nav className="studio-strip" aria-label="Photos">
       <button className="subtle-btn" aria-label="Previous photo" disabled={busy || index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft size={18} /></button>
       <div className="studio-thumbs">{items.map((entry, i) => <button key={entry.id} className={`studio-thumb${i === index ? ' current' : ''}`} aria-label={`Photo ${i + 1}, ${plans[entry.id]?.length || 0} boxes`} disabled={busy} onClick={() => setIndex(i)}>
-        <img src={entry.source} alt="" loading="lazy" />{queued.has(entry.id) && <b title="Queued">✓</b>}{!queued.has(entry.id) && !!plans[entry.id]?.length && <b>{plans[entry.id].length}</b>}</button>)}</div>
+        <img src={entry.source} alt="" loading="lazy" />{queued.has(entry.id) ? <b className="done" title="Queued">✓</b> : laterIds.has(entry.id) ? <b className="later" title="Process later">⏭</b> : !!plans[entry.id]?.length && <b>{plans[entry.id].length}</b>}</button>)}</div>
       <button className="subtle-btn" aria-label="Next photo" disabled={busy || index === items.length - 1} onClick={() => setIndex(index + 1)}><ChevronRight size={18} /></button>
     </nav>}
 
@@ -296,7 +313,8 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
       <button className="primary" disabled={busy || !total} onClick={saveAll}>{progress ? 'Working…' : `Save all${total ? ` (${total} crop${total === 1 ? '' : 's'}${photosWithBoxes > 1 ? `, ${photosWithBoxes} photos` : ''})` : ''}`}</button>
       <button className="subtle-btn" disabled={busy || !total} onClick={saveLater}><Save size={16} /> Save for later</button>
       {onQueue && items.length > 1 && <button className="subtle-btn" disabled={busy || !boxes.length || queued.has(item.id)} onClick={queueOne}>Queue this photo &amp; next →</button>}
-      {onQueue && <button className="subtle-btn" disabled={busy} onClick={queueAll} title="Photos without boxes are cut automatically">{items.length > 1 ? `Queue all in background (${items.filter(entry => !queued.has(entry.id)).length})` : 'Queue in background'}</button>}
+      {onQueue && items.length > 1 && <button className="subtle-btn" disabled={busy || queued.has(item.id) || laterIds.has(item.id)} onClick={laterOne}>Process later ⏭</button>}
+      {onQueue && <button className="subtle-btn" disabled={busy} onClick={queueAll} title="Photos without boxes are cut automatically">{items.length > 1 ? `Queue all in background (${items.filter(entry => !queued.has(entry.id) && !laterIds.has(entry.id)).length})` : 'Queue in background'}</button>}
     </footer>
 
     {confirmOpen && <div className="studio-confirm" role="alertdialog" aria-modal="true" aria-label="Unsaved changes">

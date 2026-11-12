@@ -2,6 +2,20 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## 1.26.0 — crop queue with statuses (Pending, Processing, Process later, Needs review, Completed)
+**Root causes found in 1.24–1.25 (and fixed here):**
+- *Settings did not reach queued photos.* The queue called the label detector with "Products in each photo = Auto, Standard" hard-coded and always ran every extra reading pass. Fixed: Scan speed and Products in each photo are read when each photo starts. Evidence (browser test): on a blurry pair Standard read 2 of 2 IMEIs and Fast 0 of 2; with 5 expected on a 4-box photo every crop is flagged "Found 4 of 5 products". Fast was not measurably quicker in the test (about 13 s in both): most of that time is starting the reader and finding the labels, which both modes do.
+- *Failures disappeared.* A photo that could not be cut only raised a counter and stayed in your list with no reason, no retry and no way to find it. Now it is kept in the queue as **Needs review** with the reason, Retry, Crop myself and Quick edit.
+- *"Review N" picked records by time*, so unrelated records scanned during the queue were included. Now a small log records which records each queued photo became; Needs review shows only those photos.
+- *A single-product photo that already had its numbers* was counted as "left as it is". It is now **Completed** ("One product: kept as it is").
+- *A finished photo could drop out of the queue without being replaced.* The queue entry was removed at once but the new records were saved about 0.35 s later; if the app was killed in between, the original stayed and the queue no longer listed it. Now the entry is removed from the saved queue only after the records are stored. Test: leaving the app the instant a photo finished, three times: each time the original was still there and still queued (it is read again on resume; nothing lost, nothing duplicated).
+- *"Queue this photo & next" jumped to the first unqueued photo from the start*, not the next one. It now opens the next unfinished photo after the current one.
+**New:**
+- **Process later ⏭** in Crop Studio: keeps the photo's boxes, marks it, opens the next unfinished photo. Set-aside photos are not read until **Resume / Continue**, which includes them.
+- **Queue panel** (banner → *Queue*): tabs Pending, Processing, Process later, Needs review, Completed with counts; per photo Later / Process now / Remove / Retry / Retry all / Crop myself / Quick edit / Approve; *Queue N photos that need cropping*; *Select N records for export* (turns on "selected only" in Export).
+- The queue and the finished log survive a restart (ids, boxes, statuses only; never pictures). A photo that was being read when the app stopped is offered again as waiting.
+**Tests:** `scripts/test-crop-queue.mjs` (statuses, later/resume, retry, duplicate prevention, restart recovery, log, Needs review/Completed); `scripts/e2e-queue.mjs` (browser, 15 checks incl. the kill-after-finish check). `npm test` 14 suites pass; review, Crop Studio and camera browser tests pass.
+**Not done / not verified:** nothing ran on a phone (no device available); the queue still runs in the page (kept alive by the 1.25 notification) and Android may still pause it; the native SQLite + WorkManager queue is planned but not started (on hold by request).
 ## 1.25.0 — the crop queue keeps working when the app is minimized (Android)
 **Android code changed (new APK).**
 - While the background crop queue runs, the app shows an ongoing notification ("IMEI Lens is cropping photos · 3 of 12 done", progress bar, tap to open, **Pause**) and holds a wake lock, so Android does not stop it when you minimize the app or the screen turns off (new `QueueService`, foreground service of type media processing; bridge `queueStatus` / `queueStopRequested`). Pause in the notification pauses the queue; *Continue* in the app banner resumes it.
