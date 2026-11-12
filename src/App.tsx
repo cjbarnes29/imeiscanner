@@ -472,6 +472,24 @@ function labelledPhoto(dataUrl: string, lines: string[]): Promise<Blob> {
   });
 }
 
+const ONE_BY_ONE_KEY = 'imei-lens-onebyone-v1';
+type OneByOneState = { index: number; done: string[] };
+/** Where the one-by-one screen stopped for a person, and which pictures were already downloaded. */
+function readOneByOne(sectionId: string): OneByOneState {
+  try {
+    const all = JSON.parse(localStorage.getItem(ONE_BY_ONE_KEY) || '{}') as Record<string, OneByOneState>;
+    const saved = all[sectionId];
+    return saved && Array.isArray(saved.done) ? { index: Number(saved.index) || 0, done: saved.done } : { index: 0, done: [] };
+  } catch { return { index: 0, done: [] }; }
+}
+function writeOneByOne(sectionId: string, state: OneByOneState) {
+  try {
+    const all = JSON.parse(localStorage.getItem(ONE_BY_ONE_KEY) || '{}') as Record<string, OneByOneState>;
+    if (state.done.length || state.index) all[sectionId] = state; else delete all[sectionId];
+    localStorage.setItem(ONE_BY_ONE_KEY, JSON.stringify(all));
+  } catch { /* progress is a convenience */ }
+}
+
 function dataUrlBlob(dataUrl: string) {
   const [head, body] = dataUrl.split(',');
   const mime = head.match(/:(.*?);/)?.[1] || 'image/jpeg';
@@ -2118,6 +2136,12 @@ export default function App() {
   const [waProblem, setWaProblem] = useState('');
   const [waPreferBluetooth, setWaPreferBluetooth] = useState(false);
   const [waLabel, setWaLabel] = useState(true);
+  /** Add one caption with every IMEI / serial to the picture send (shown by WhatsApp once). */
+  const [waCaption, setWaCaption] = useState(true);
+  /** The one-by-one screen for a person: look at each phone, copy its numbers, download its picture. */
+  const [oneByOne, setOneByOne] = useState<{ id: string; name: string; rows: RecordItem[] } | null>(null);
+  const [obState, setObState] = useState<OneByOneState>({ index: 0, done: [] });
+  useBackLayer(!!oneByOne, () => setOneByOne(null), 'one-by-one');
   const [waBusy, setWaBusy] = useState('');
   useBackLayer(!!waSend, () => setWaSend(null), 'whatsapp-groups');
   /** The text sent for one person: each phone's IMEI (and IMEI 2) on its own line; serial numbers only if ticked. */
@@ -2174,6 +2198,7 @@ export default function App() {
       setWaBusy('Preparing pictures…');
       const files: File[] = [];
       const numbers: string[] = [];
+      const captions: string[] = [];
       for (const row of pending) {
         const position = waSend.rows.indexOf(row) + 1;
         const lines = pictureLines(row, position, waSend.rows.length, viaBluetooth);
@@ -2181,12 +2206,16 @@ export default function App() {
         const blob = waLabel || viaBluetooth ? await labelledPhoto(source, lines) : dataUrlBlob(source);
         files.push(new File([blob], `${String(position).padStart(3, '0')}.jpg`, { type: blob.type || 'image/jpeg' }));
         numbers.push(lines.join('  '));
+        captions.push(captionLine(row, position));
       }
       // Bluetooth also carries a plain file with every IMEI and serial.
       if (viaBluetooth) files.push(new File([numbers.join('\n')], 'numbers.txt', { type: 'text/plain' }));
       setWaBusy('');
-      if (androidBridge?.shareFolderText) await androidShareFiles(files, waSend.name, '', viaBluetooth);
-      else if (typeof navigator.share === 'function' && navigator.canShare?.({ files })) await navigator.share({ files });
+      // One caption for the whole send: every IMEI / serial once, in the same order as the pictures.
+      const caption = !viaBluetooth && waCaption ? captions.join('\n') : '';
+      const shareData: ShareData = caption ? { files, text: caption } : { files };
+      if (androidBridge?.shareFolderText) await androidShareFiles(files, waSend.name, caption, viaBluetooth);
+      else if (typeof navigator.share === 'function' && navigator.canShare?.(shareData)) await navigator.share(shareData);
       else {
         files.forEach((file, index) => setTimeout(() => saveDirectFile(file, file.name), 300 + index * 400));
         setToast('This browser cannot send pictures directly. The pictures are being saved; send them from your files.');
@@ -2215,6 +2244,77 @@ export default function App() {
     setWaAttempt(null);
     setToast(waAttempt.arrived ? `Saved: ${waAttempt.arrived} picture${waAttempt.arrived === 1 ? '' : 's'} sent. The app remembers where you stopped.` : 'Nothing saved as sent. You can send them again.');
   }
+  /** One line per phone for the caption: "#3  IMEI 1  IMEI 2  S/N …". */
+  function captionLine(row: RecordItem, position: number) {
+    const pair = recordImeiPair(row), serial = recordSerial(row);
+    const parts = [pair.imei1, pair.imei2, serial && (shareSerial || !pair.imei1) ? `S/N ${serial}` : ''].filter(Boolean);
+    return `#${position}  ${parts.length ? parts.join('  ') : 'No number detected'}`;
+  }
+
+  /** Save a copy to this phone: a folder with every picture (IMEI / serial written on it) and a numbers.txt. */
+  async function saveToMyself(name: string, rows: RecordItem[]): Promise<boolean> {
+    if (!rows.length) return false;
+    const bridge = androidBridge;
+    const useFolder = !!(bridge?.beginFolder && bridge.appendFolderFile && bridge.finishFolder);
+    const folderName = `IMEI-${name || 'phones'}-${new Date().toISOString().slice(0, 10)}`.replace(/[\\/:*?"<>|]/g, '_');
+    const total = rows.length, numbers: string[] = [];
+    let token = '';
+    const append = async (file: File) => {
+      for (let offset = 0; offset < file.size || offset === 0; offset += 64 * 1024) {
+        const chunk = (await blobDataUrl(file.slice(offset, offset + 64 * 1024))).split(',')[1] || '';
+        if (!bridge!.appendFolderFile!(token, file.name, chunk)) throw new Error(`Could not prepare ${file.name}.`);
+        if (file.size === 0) break;
+      }
+    };
+    try {
+      if (useFolder) { token = bridge!.beginFolder!(folderName); if (!token) throw new Error('Finish or cancel the current save before saving again.'); }
+      for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        const lines = pictureLines(row, index + 1, total, true);
+        const blob = await labelledPhoto(recordPhoto(row), lines);
+        const file = new File([blob], `${String(index + 1).padStart(3, '0')}-${recordImeiPair(row).imei1 || recordSerial(row) || 'phone'}.jpg`, { type: 'image/jpeg' });
+        numbers.push(lines.join('  '));
+        if (useFolder) await append(file); else { saveDirectFile(file, file.name); await new Promise(resolve => setTimeout(resolve, 350)); }
+        if (index % 10 === 0) setToast(`Preparing ${index + 1} of ${total}…`);
+      }
+      const list = new File([numbers.join('\n')], 'numbers.txt', { type: 'text/plain' });
+      if (useFolder) { await append(list); if (!bridge!.finishFolder!(token)) throw new Error('Could not open the folder picker.'); setToast('Choose a folder and tap Save. A new folder is created with the pictures and numbers.txt.'); }
+      else { saveDirectFile(list, list.name); setToast(`Saved ${total} picture${total === 1 ? '' : 's'} and numbers.txt to your downloads.`); }
+      return true;
+    } catch (error) {
+      if (useFolder && token) bridge!.abortFolder?.(token);
+      setToast(error instanceof Error ? error.message : 'Could not save the report.');
+      return false;
+    }
+  }
+  const rowsOfSection = (id: string) => idsOfSection(id).map(rowId => records.find(row => row.id === rowId)).filter((row): row is RecordItem => !!row);
+
+  function startOneByOne(section: { id: string; name: string }) {
+    const rows = rowsOfSection(section.id);
+    if (!rows.length) return;
+    const saved = readOneByOne(section.id);
+    setObState({ done: saved.done, index: Math.max(0, Math.min(saved.index, rows.length - 1)) });
+    setOneByOne({ id: section.id, name: section.name, rows });
+  }
+  function obSet(next: OneByOneState) {
+    setObState(next);
+    if (oneByOne) writeOneByOne(oneByOne.id, next);
+  }
+  /** Download this picture, remember it, and show the next phone. */
+  function obDownloadNext() {
+    if (!oneByOne) return;
+    const row = oneByOne.rows[obState.index];
+    if (!row) return;
+    saveDirectFile(dataUrlBlob(recordPhoto(row)), photoFilename(row));
+    obSet({ done: [...new Set([...obState.done, row.id])], index: Math.min(oneByOne.rows.length - 1, obState.index + 1) });
+  }
+  async function obSaveRemaining() {
+    if (!oneByOne) return;
+    const remaining = oneByOne.rows.filter(row => !obState.done.includes(row.id));
+    if (!remaining.length) return;
+    if (await saveToMyself(oneByOne.name, remaining)) obSet({ done: oneByOne.rows.map(row => row.id), index: obState.index });
+  }
+
   function resetWhatsAppProgress() {
     if (!waSend) return;
     setWaSent([]); setWaAttempt(null);
@@ -2437,7 +2537,7 @@ export default function App() {
   const shareTab = (
     <div className="share-tab">
       {shareSections.length === 0 ? <p>No phones yet.</p> : <>
-        <p className="settings-help">WhatsApp: Step 1 sends all of a person's pictures in one send with no text, Step 2 sends the IMEI numbers once as one message. Bluetooth / nearby opens your phone's share menu with the pictures and a plain numbers file.</p>
+        <p className="settings-help">WhatsApp: one send with all of a person's pictures and one caption listing every IMEI and serial. Bluetooth / nearby opens your phone's share menu with the pictures and a plain numbers file.</p>
         <div className="share-toolbar">
           <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp text — everyone</button>
           <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
@@ -2452,6 +2552,8 @@ export default function App() {
               <button className="primary whatsapp-btn" aria-label={`WhatsApp ${section.name}: pictures and IMEI`} onClick={() => startWhatsApp(section)}>WhatsApp · pictures + IMEI</button>
               <button className="subtle-btn" aria-label={`Text only for ${section.name}`} onClick={() => openWhatsApp(formatPersonShare([sharePayload(section)]))}>Text only</button>
               <button className="subtle-btn" aria-label={`Bluetooth or nearby share for ${section.name}`} onClick={() => startWhatsApp(section, true)}>Bluetooth / nearby</button>
+              <button className="subtle-btn" aria-label={`One by one for ${section.name}`} onClick={() => startOneByOne(section)}>One by one</button>
+              <button className="subtle-btn" aria-label={`Save ${section.name} to my phone`} onClick={() => void saveToMyself(section.name, rowsOfSection(section.id))}>Save to my phone</button>
               <button className="subtle-btn" aria-label={`Copy ${section.name}`} onClick={() => void copyText(formatPersonShare([sharePayload(section)])).then(ok => setToast(ok ? `${section.name}'s list copied.` : 'Copy failed.'))}>Copy</button>
             </div>
           </li>)}
@@ -4715,7 +4817,7 @@ export default function App() {
         const noWhatsApp = waCaps?.whatsapp === false;
         const bluetoothFirst = waPreferBluetooth || noWhatsApp;
         const problem = noWhatsApp ? 'WhatsApp is not installed on this phone.' : waProblem || (remaining > WHATSAPP_NOTICE ? `WhatsApp may not take all ${remaining} pictures at once.` : '');
-        const whatsappButton = <button type="button" className={bluetoothFirst ? 'subtle-btn' : 'primary whatsapp-btn'} disabled={!!waBusy || noWhatsApp} onClick={() => void sendWhatsAppPictures('whatsapp')}>{waBusy || (done === 0 ? `Send all ${total} pictures by WhatsApp` : `WhatsApp · continue with pictures ${nextPosition}–${total}`)}<small>{noWhatsApp ? 'WhatsApp is not installed.' : `One send. ${waLabel ? 'IMEI / serial written on each picture.' : 'Pictures only.'}`}</small></button>;
+        const whatsappButton = <button type="button" className={bluetoothFirst ? 'subtle-btn' : 'primary whatsapp-btn'} disabled={!!waBusy || noWhatsApp} onClick={() => void sendWhatsAppPictures('whatsapp')}>{waBusy || (done === 0 ? `Send all ${total} pictures by WhatsApp` : `WhatsApp · continue with pictures ${nextPosition}–${total}`)}<small>{noWhatsApp ? 'WhatsApp is not installed.' : `One send with all the pictures${waCaption ? ' and one caption listing every IMEI / serial' : ''}.${waLabel ? ' Numbers also written on each picture.' : ''}`}</small></button>;
         const bluetoothButton = <button type="button" className={bluetoothFirst || problem ? 'primary' : 'subtle-btn'} disabled={!!waBusy || waCaps?.bluetooth === false} onClick={() => void sendWhatsAppPictures('bluetooth')}>Send {remaining} by Bluetooth{bluetoothFirst ? '' : ' instead'}<small>{waCaps?.bluetooth === false ? 'This phone has no Bluetooth.' : `Pictures with IMEI / serial written on them, plus a numbers.txt file.${waCaps?.bluetoothOn === false ? ' Bluetooth is off: turn it on first.' : ''}`}</small></button>;
         return <div className="modal-backdrop"><section className="modal wa-groups-modal" role="dialog" aria-modal="true" aria-label={`Send ${waSend.name}'s phones`}>
           <div className="modal-head"><h2>Send {waSend.name}</h2><button className="subtle-btn" onClick={() => setWaSend(null)}>Close</button></div>
@@ -4724,7 +4826,8 @@ export default function App() {
             <div className="wa-bar" aria-hidden="true"><span style={{ width: `${total ? Math.round(done / total * 100) : 0}%` }} /></div>
             <small>{remaining ? `Next to send: picture ${nextPosition} of ${total}` : 'All pictures are sent.'}</small>
           </div>
-          <label className="settings-check"><input type="checkbox" checked={waLabel} onChange={event => setWaLabel(event.target.checked)} /> Write the IMEI / serial on each picture</label>
+          <label className="settings-check"><input type="checkbox" checked={waCaption} onChange={event => setWaCaption(event.target.checked)} /> Add one caption with every IMEI / serial</label>
+          <label className="settings-check"><input type="checkbox" checked={waLabel} onChange={event => setWaLabel(event.target.checked)} /> Also write the IMEI / serial on each picture</label>
           <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Always include serial numbers</label>
           {!waAttempt && remaining > 0 && problem && <div className="wa-warning" role="alert">
             <strong>{problem}</strong>
@@ -4741,13 +4844,50 @@ export default function App() {
             : remaining > 0
               ? <div className="wa-send-ways">{bluetoothFirst ? <>{bluetoothButton}{whatsappButton}</> : <>{whatsappButton}{bluetoothButton}</>}</div>
               : <p className="settings-help">Everything was sent. Tap Start over to send them again.</p>}
-          <details className="review-details"><summary>Also send the numbers as text</summary>
+          <details className="review-details"><summary>Send the numbers again as a separate message</summary>
             <div className="delete-person-choices">
               <button type="button" className="primary whatsapp-btn" onClick={() => openWhatsApp(waNumbersText(waSend.rows))}>Send the numbers as one message</button>
               <button type="button" className="subtle-btn" onClick={() => void copyText(waNumbersText(waSend.rows)).then(ok => setToast(ok ? 'Numbers copied.' : 'Copy failed.'))}>Copy the numbers</button>
             </div>
           </details>
           <button type="button" className="subtle-btn" disabled={!done && !waAttempt} onClick={resetWhatsAppProgress}>Start over</button>
+        </section></div>;
+      })()}
+      {oneByOne && (() => {
+        const rows = oneByOne.rows;
+        const row = rows[obState.index];
+        if (!row) return null;
+        const pair = recordImeiPair(row), serial = recordSerial(row);
+        const doneCount = rows.filter(item => obState.done.includes(item.id)).length;
+        const remaining = rows.length - doneCount;
+        const last = obState.index === rows.length - 1;
+        return <div className="modal-backdrop"><section className="modal onebyone-modal" role="dialog" aria-modal="true" aria-label={`One by one: ${oneByOne.name}`}>
+          <div className="modal-head"><h2>One by one · {oneByOne.name}</h2><button className="subtle-btn" onClick={() => setOneByOne(null)}>Close</button></div>
+          <div className="wa-progress" role="status">
+            <strong>Phone {obState.index + 1} of {rows.length}</strong>
+            <div className="wa-bar" aria-hidden="true"><span style={{ width: `${Math.round(doneCount / rows.length * 100)}%` }} /></div>
+            <small>{doneCount} downloaded · {remaining} left{obState.done.includes(row.id) ? ' · this one is already downloaded' : ''}</small>
+          </div>
+          <img className="ob-photo" src={recordPhoto(row)} alt={`Phone ${obState.index + 1}`} />
+          <div className="ob-numbers">
+            <div><small>IMEI 1</small><b>{pair.imei1 || '—'}</b></div>
+            {pair.imei2 && <div><small>IMEI 2</small><b>{pair.imei2}</b></div>}
+            {serial && <div><small>S/N</small><b>{serial}</b></div>}
+          </div>
+          <div className="review-float">
+            <div className="review-tools ob-tools">
+              <button type="button" className="subtle-btn" disabled={!pair.imei1} onClick={() => void copyText(pair.imei1).then(ok => setToast(ok ? 'IMEI copied.' : 'Could not copy.'))}><Copy size={16} /> Copy IMEI</button>
+              <button type="button" className="subtle-btn" disabled={!serial} onClick={() => void copyText(serial).then(ok => setToast(ok ? 'Serial copied.' : 'Could not copy.'))}>Copy S/N</button>
+            </div>
+            <div className="ob-actions">
+              <button type="button" className="primary" onClick={obDownloadNext}><Download size={16} /> {last ? 'Download · last one' : 'Download & next →'}</button>
+              <div className="ob-nav">
+                <button type="button" className="subtle-btn" disabled={obState.index === 0} onClick={() => obSet({ ...obState, index: obState.index - 1 })}>← Back</button>
+                <button type="button" className="subtle-btn" disabled={last} onClick={() => obSet({ ...obState, index: obState.index + 1 })}>Skip →</button>
+              </div>
+              <button type="button" className="subtle-btn" disabled={!remaining} onClick={() => void obSaveRemaining()}>Download all {remaining} remaining to a folder</button>
+            </div>
+          </div>
         </section></div>;
       })()}
       {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}

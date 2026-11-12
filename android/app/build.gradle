@@ -8,8 +8,8 @@ android {
         applicationId 'com.imeilens.scanner'
         minSdk 24
         targetSdk 35
-        versionCode 21
-        versionName '1.11.0'
+        versionCode 22
+        versionName '1.12.0'
         // Real phones only: drops the emulator-only x86 libraries to shrink the APK.
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
     }
