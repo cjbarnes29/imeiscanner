@@ -490,6 +490,33 @@ function writeOneByOne(sectionId: string, state: OneByOneState) {
   } catch { /* progress is a convenience */ }
 }
 
+/** The picture with a band showing its number and IMEI / serial, as base64 JPEG. Smaller than the original so it is quick to send. */
+function labelledPhotoBase64(dataUrl: string, lines: string[], maxEdge = 1280): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
+        const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const font = Math.max(22, Math.round(width / 20)), pad = Math.round(font * 0.45), line = Math.round(font * 1.3);
+        const band = pad * 2 + lines.length * line;
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height + band;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, 0, 0, width, height);
+        context.fillStyle = '#101827'; context.fillRect(0, height, width, band);
+        context.fillStyle = '#ffffff'; context.textBaseline = 'top'; context.font = `700 ${font}px sans-serif`;
+        lines.forEach((text, index) => context.fillText(text, pad, height + pad + index * line, width - pad * 2));
+        resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1] || '');
+      } catch (error) { reject(error); }
+    };
+    image.onerror = () => reject(new Error('A picture could not be opened.'));
+    image.src = dataUrl;
+  });
+}
+const base64ToBytes = (base64: string) => Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+const textToBase64 = (text: string) => { let binary = ''; for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte); return btoa(binary); };
+
 function dataUrlBlob(dataUrl: string) {
   const [head, body] = dataUrl.split(',');
   const mime = head.match(/:(.*?);/)?.[1] || 'image/jpeg';
@@ -2143,7 +2170,7 @@ export default function App() {
   /** A reason WhatsApp did not work, so Bluetooth is offered instead. */
   const [waProblem, setWaProblem] = useState('');
   const [waPreferBluetooth, setWaPreferBluetooth] = useState(false);
-  const [waLabel, setWaLabel] = useState(true);
+  const [waLabel, setWaLabel] = useState(false);
   /** Add one caption with every IMEI / serial to the picture send (shown by WhatsApp once). */
   const [waCaption, setWaCaption] = useState(true);
   /** The one-by-one screen for a person: look at each phone, copy its numbers, download its picture. */
@@ -2203,37 +2230,49 @@ export default function App() {
     if (!pending.length) return;
     const viaBluetooth = channel === 'bluetooth';
     try {
-      setWaBusy('Preparing pictures…');
-      const files: File[] = [];
+      const items: { name: string; base64: string; mime: string }[] = [];
       const numbers: string[] = [];
       const captions: string[] = [];
-      for (const row of pending) {
+      for (let index = 0; index < pending.length; index++) {
+        const row = pending[index];
+        setWaBusy(`Preparing ${index + 1} of ${pending.length}…`);
         const position = waSend.rows.indexOf(row) + 1;
         const lines = pictureLines(row, position, waSend.rows.length, viaBluetooth);
         const source = recordPhoto(row);
-        const blob = waLabel || viaBluetooth ? await labelledPhoto(source, lines) : dataUrlBlob(source);
-        files.push(new File([blob], `${String(position).padStart(3, '0')}.jpg`, { type: blob.type || 'image/jpeg' }));
+        // Writing the numbers on the picture is the slow part; by default the picture is sent as it is.
+        const labelled = waLabel || viaBluetooth;
+        const mime = labelled ? 'image/jpeg' : (source.match(/^data:([^;,]+)/)?.[1] || 'image/jpeg');
+        const base64 = labelled ? await labelledPhotoBase64(source, lines) : source.split(',')[1] || '';
+        const extension = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+        items.push({ name: `${String(position).padStart(3, '0')}.${extension}`, base64, mime });
         numbers.push(lines.join('  '));
         captions.push(captionLine(row, position));
+        if (index % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0)); // let the screen update
       }
       // Bluetooth also carries a plain file with every IMEI and serial.
-      if (viaBluetooth) files.push(new File([numbers.join('\n')], 'numbers.txt', { type: 'text/plain' }));
-      setWaBusy('');
+      if (viaBluetooth) items.push({ name: 'numbers.txt', base64: textToBase64(numbers.join('\n')), mime: 'text/plain' });
       // One caption for the whole send: every IMEI / serial once, in the same order as the pictures.
       const caption = !viaBluetooth && waCaption ? captions.join('\n') : '';
-      const shareData: ShareData = caption ? { files, text: caption } : { files };
-      if (androidBridge?.shareFolderText) await androidShareFiles(files, waSend.name, caption, viaBluetooth);
-      else if (typeof navigator.share === 'function' && navigator.canShare?.(shareData)) await navigator.share(shareData);
-      else {
-        files.forEach((file, index) => setTimeout(() => saveDirectFile(file, file.name), 300 + index * 400));
-        setToast('This browser cannot send pictures directly. The pictures are being saved; send them from your files.');
+      if (androidBridge?.shareFolderText) {
+        await androidShareBase64(items, waSend.name, caption, viaBluetooth, (done, total) => setWaBusy(`Sending ${done} of ${total}…`));
+      } else {
+        const files = items.map(item => new File([base64ToBytes(item.base64)], item.name, { type: item.mime }));
+        const shareData: ShareData = caption ? { files, text: caption } : { files };
+        if (typeof navigator.share === 'function' && navigator.canShare?.(shareData)) await navigator.share(shareData);
+        else {
+          files.forEach((file, index) => setTimeout(() => saveDirectFile(file, file.name), 300 + index * 400));
+          setToast('This browser cannot send pictures directly. The pictures are being saved; send them from your files.');
+        }
       }
+      setWaBusy('');
       setWaAttempt({ ids: pending.map(row => row.id), arrived: viaBluetooth || pending.length <= WHATSAPP_NOTICE ? pending.length : WHATSAPP_NOTICE, channel });
     } catch (error) {
       setWaBusy('');
       if ((error as DOMException)?.name !== 'AbortError') {
-        setToast(error instanceof Error ? error.message : 'Could not open the share menu.');
-        if (!viaBluetooth) { setWaProblem('WhatsApp could not open or take the pictures.'); setWarning('WhatsApp could not open or take the pictures. Use "Send by Bluetooth" instead: it sends the pictures, the IMEI and the serial.'); }
+        const message = error instanceof Error ? error.message : 'Could not open the share menu.';
+        setToast(message);
+        if (!viaBluetooth) { setWaProblem(message); setWarning(`${message} Use "Send by Bluetooth" instead: it sends the pictures, the IMEI and the serial.`); }
+        else setWarning(message);
       }
     }
   }
@@ -2331,6 +2370,27 @@ export default function App() {
     setToast('Started over. Nothing is marked as sent.');
   }
   /** Android app: all pictures go through the phone's share sheet in a single send (optionally with one text). */
+  /** Android app: stage base64 pictures in large pieces (fast), then open the share menu once. */
+  async function androidShareBase64(items: { name: string; base64: string }[], title: string, text: string, bluetooth: boolean, onProgress?: (done: number, total: number) => void) {
+    const bridge = androidBridge;
+    if (!bridge?.beginFolder || !bridge.appendFolderFile || !bridge.shareFolderText) throw new Error('Sharing is not available in this app version.');
+    const token = bridge.beginFolder('imei-share');
+    if (!token) throw new Error('The phone is still busy with a save. Wait a moment and try again.');
+    const PIECE = 1048576; // a multiple of 4, so every piece is valid base64
+    try {
+      for (let index = 0; index < items.length; index++) {
+        const { name, base64 } = items[index];
+        for (let offset = 0; offset < base64.length || offset === 0; offset += PIECE) {
+          if (!bridge.appendFolderFile(token, name, base64.slice(offset, offset + PIECE))) throw new Error(`Could not prepare ${name}.`);
+          if (!base64.length) break;
+        }
+        onProgress?.(index + 1, items.length);
+        if (index % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      const opened = bluetooth && bridge.shareFolderBluetooth ? bridge.shareFolderBluetooth(token, title) : bridge.shareFolderText(token, title, text);
+      if (!opened) throw new Error('Could not open the share menu.');
+    } catch (error) { bridge.abortFolder?.(token); throw error; }
+  }
   async function androidShareFiles(files: File[], title: string, text: string, bluetooth = false) {
     const bridge = androidBridge;
     if (!bridge?.beginFolder || !bridge.shareFolderText) return false;
@@ -4836,7 +4896,7 @@ export default function App() {
             <small>{remaining ? `Next to send: picture ${nextPosition} of ${total}` : 'All pictures are sent.'}</small>
           </div>
           <label className="settings-check"><input type="checkbox" checked={waCaption} onChange={event => setWaCaption(event.target.checked)} /> Add one caption with every IMEI / serial</label>
-          <label className="settings-check"><input type="checkbox" checked={waLabel} onChange={event => setWaLabel(event.target.checked)} /> Also write the IMEI / serial on each picture</label>
+          <label className="settings-check"><input type="checkbox" checked={waLabel} onChange={event => setWaLabel(event.target.checked)} /> Also write the IMEI / serial on each picture (slower)</label>
           <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Always include serial numbers</label>
           {!waAttempt && remaining > 0 && problem && <div className="wa-warning" role="alert">
             <strong>{problem}</strong>
