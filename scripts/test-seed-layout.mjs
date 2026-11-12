@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 import ts from 'typescript';
 const dir=await mkdtemp(join(tmpdir(),'imei-seed-'));
 const compile=async name=>{const src=(await readFile(`src/${name}.ts`,'utf8')).replace(/from '\.\/([\w-]+)'/g,"from './$1.mjs'");await writeFile(join(dir,name+'.mjs'),ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);};
-await compile('imei-validate');await compile('seed-layout');await compile('multi-detect');await compile('scan-layout');
+await compile('imei-validate');await compile('serial');await compile('seed-layout');await compile('multi-detect');await compile('scan-layout');
 const seed=await import(pathToFileURL(join(dir,'seed-layout.mjs')).href);
 const md=await import(pathToFileURL(join(dir,'multi-detect.mjs')).href);
 const L=(text,x0,y0,w=300,h=24)=>({text,bbox:{x0,y0,x1:x0+w,y1:y0+h}});
@@ -67,4 +67,9 @@ assert.equal(iv.pairedImei2('351973130869491','355749140869498','SM-A376B'),'','
 assert.equal(iv.pairedImei2('490154203237518','356938035643809','iPhone 15'),'356938035643809','other brands keep a valid IMEI 2');
 assert.equal(iv.pairedImei2('351973130856613','','SM-A376B'),'');
 
-console.log('PASS: product separation from label lines (5 stacked, repeated lines counted once, 2x3 grid with joined lines, side by side, no blind cuts), tile grids for big photos, IMEI 2 pairing.');
+const sr=await import(pathToFileURL(join(dir,'serial.mjs')).href);
+assert.equal(sr.extractSerial('S/N : RFGL20HBO2P'),'RFGL20HB02P','O read for 0 in a Samsung serial');
+assert.equal(sr.extractSerial('S/N : R5GL8OLDKFM'),'R5GL80LDKFM');
+assert.equal(sr.extractSerial('S/N : ABCDOEFGH1'),'ABCDOEFGH1','other serials are left as read');
+
+console.log('PASS: product separation from label lines (5 stacked, repeated lines counted once, 2x3 grid with joined lines, side by side, no blind cuts), tile grids for big photos, IMEI 2 pairing, Samsung serial O to 0.');
