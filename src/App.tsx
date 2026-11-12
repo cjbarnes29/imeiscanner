@@ -4,6 +4,7 @@ import { scoreConfidence } from './confidence';
 import { learnCorrection, readLearned, refineModel, writeLearned } from './learning';
 import { countModelLabels, mergeOcrLines, needsOrientationCheck, shouldTurn, skewOfCanvas, straightenCanvas, straightenDataUrl, tileRects, unlevelBox } from './multi-detect';
 import { useBackLayer } from './back-layer';
+import { DeferredInput } from './DeferredInput';
 import { phoneInfo, modelCode4, type CatalogEntry } from './phone-names';
 import { SAMSUNG_MODELS } from './samsung-models';
 import { planMove, planUnassign, planDeletePerson, planAllocation, formatModelReview, formatPersonShare, nextPersonNumber, isPersonView, UNASSIGNED, UNASSIGNED_FILTER } from './people';
@@ -18,12 +19,12 @@ import { imeiReadings, judgeImei, repeatedAcrossBoxes, type Judgement } from './
 import { canvasStats, planPasses, renderVariant } from './ocr-preprocess';
 import { retryLowConfidence } from './ocr-retry';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import {
   UploadCloud, ScanLine, Download, Search, Trash2,
   CheckCircle2, AlertTriangle, Copy, Smartphone, Image as ImageIcon,
   X, LoaderCircle, Eye,
-  CloudUpload, Camera, Pencil, Share2, Settings
+  CloudUpload, Camera, Pencil, Share2, Settings, ZoomIn
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
 import { exportModel, type CropRegion, type OcrLine } from './scan-layout';
@@ -75,6 +76,8 @@ type LaptopRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; photoInde
 type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; siblings?: number };
 type AndroidBridge = {
   choosePhotos(personId: string): void;
+  /** APK 1.22+: scan speed and products per photo for the background scanner. Optional so older APKs keep working. */
+  setScanOptions?(speed: string, expected: number): void;
   status(): string;
   image(id: string): string;
   sourceImage(id: string): string;
@@ -1724,8 +1727,13 @@ export default function App() {
   const [stoppingScan, setStoppingScan] = useState(false);
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
-  const [expectedProducts, setExpectedProducts] = useState(0);
-  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard');
+  const [expectedProducts, setExpectedProducts] = useState(() => { try { const n = Number(localStorage.getItem('imei-lens-expected-products')); return Number.isInteger(n) && n >= 0 && n <= 12 ? n : 0; } catch { return 0; } });
+  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>(() => { try { const v = localStorage.getItem('imei-lens-scan-speed'); return v === 'fast' || v === 'detailed' ? v : 'standard'; } catch { return 'standard'; } });
+  // Camera scans use these in the page; Choose photos and scan uses them in the phone's own scanner (same two settings).
+  useEffect(() => {
+    try { localStorage.setItem('imei-lens-expected-products', String(expectedProducts)); localStorage.setItem('imei-lens-scan-speed', scanMode); } catch { /* storage full or blocked */ }
+    androidBridge?.setScanOptions?.(scanMode, expectedProducts);
+  }, [scanMode, expectedProducts]);
   const [laptopUrl, setLaptopUrl] = useState(() => hostedScanner ? window.location.origin : localStorage.getItem('imei-lens-laptop-url') || (window.location.hostname === 'cjbarnes29.github.io' ? 'http://127.0.0.1:8787' : window.location.origin));
   const [laptopKey, setLaptopKey] = useState(() => localStorage.getItem('imei-lens-laptop-key') || '');
   const [laptopJobId, setLaptopJobId] = useState(() => localStorage.getItem('imei-lens-laptop-job') || '');
@@ -1755,17 +1763,28 @@ export default function App() {
   const [selected, setSelected] = useState<RecordItem | null>(null);
   const [deleteReviewConfirm, setDeleteReviewConfirm] = useState(false);
   const [reviewIds, setReviewIds] = useState<string[]>([]);
-  const [manualImei, setManualImei] = useState('');
-  const [manualSerial, setManualSerial] = useState('');
-  const [manualImei2, setManualImei2] = useState('');
+  const [manualImei, setManualImeiState] = useState('');
+  const [manualSerial, setManualSerialState] = useState('');
+  const [manualImei2, setManualImei2State] = useState('');
+  /** The newest typed values, updated at once. The state above follows at low priority so typing never waits for the page to redraw. */
+  const liveFields = useRef({ model: '', imei: '', imei2: '', serial: '' });
+  const setManualImei = (value: string) => { liveFields.current.imei = value; setManualImeiState(value); };
+  const setManualSerial = (value: string) => { liveFields.current.serial = value; setManualSerialState(value); };
+  const setManualImei2 = (value: string) => { liveFields.current.imei2 = value; setManualImei2State(value); };
+  const typeField = (key: 'imei' | 'imei2' | 'serial' | 'model', apply: (value: string) => void) => (value: string) => {
+    liveFields.current[key] = value;
+    startTransition(() => apply(value));
+  };
   /** What you typed for pictures you moved past without saving. Decided at the end: save all or discard. */
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
   const draftsRef = useRef<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
   const [finishOpen, setFinishOpen] = useState(false);
   /** A warning that must be seen: shown as a pop-up with OK instead of a small message. */
   const [warning, setWarning] = useState('');
-  const [manualModel, setManualModel] = useState('');
+  const [manualModel, setManualModelState] = useState('');
+  const setManualModel = (value: string) => { liveFields.current.model = value; setManualModelState(value); };
   const [reviewSource, setReviewSource] = useState('');
+  const [photoExpanded, setPhotoExpanded] = useState(false);
   const [focusPreview, setFocusPreview] = useState('');
   const [showFullPhoto, setShowFullPhoto] = useState(false);
   const [cropEditorOpen, setCropEditorOpen] = useState(false);
@@ -2002,13 +2021,27 @@ export default function App() {
     setManualImei2(draft ? draft.imei2 : selected ? recordImeiPair(selected).imei2 : '');
     setManualModel(draft ? draft.model : selected ? exportModel(selected.model) : '');
     setReviewSource(selected?.originalDataUrl || selected?.dataUrl || '');
+    setPhotoExpanded(false);
     setCropEditorOpen(cropRequestedId.current === selected?.id);
     cropRequestedId.current = null;
+    // The phone decodes the full original (a few seconds on big photos) and the page waits for the answer.
+    // Let the review screen draw first, and skip it entirely when you move on quickly.
+    let current = true;
+    let timer = 0;
     if (selected && androidBridge?.sourceImage && !selected.originalDataUrl) {
-      const original = androidBridge.sourceImage(selected.id);
-      if (original) setReviewSource(original);
+      const id = selected.id;
+      timer = window.setTimeout(() => {
+        if (!current) return;
+        const original = androidBridge.sourceImage!(id);
+        if (original && current) setReviewSource(original);
+      }, 350);
     }
+    return () => { current = false; window.clearTimeout(timer); };
   }, [selected?.id]);
+
+  useBackLayer(photoExpanded, () => setPhotoExpanded(false), 'photo-lightbox');
+  // Models for the picker: a new list each render would make it rebuild its catalog list on every keystroke.
+  const scannedModelList = useMemo(() => records.map(row => row.model), [records]);
 
   // Open the review zoomed in on the label when the scanner found where it is.
   useEffect(() => {
@@ -3472,7 +3505,7 @@ export default function App() {
   }
 
   type ReviewFields = { model: string; imei: string; imei2: string; serial: string };
-  const currentFields = (): ReviewFields => ({ model: manualModel, imei: manualImei, imei2: manualImei2, serial: manualSerial });
+  const currentFields = (): ReviewFields => ({ ...liveFields.current });
   const fieldsDiffer = (record: RecordItem, fields: ReviewFields) => fields.model !== exportModel(record.model) || fields.imei !== record.imei || fields.imei2 !== recordImeiPair(record).imei2 || fields.serial !== recordSerial(record);
   function setDrafts(next: Record<string, ReviewFields>) { draftsRef.current = next; setReviewDrafts(next); }
   /** Keep what was typed for this picture so you can move on and decide at the end. */
@@ -4151,7 +4184,7 @@ export default function App() {
               </select>
             </label>
             {expectedProducts > 1 && <p className="scan-mode-note">If fewer than {expectedProducts} are found the first time, the app reads the photo again in enlarged pieces to find the rest, then straightens each crop. Photos that still cannot be split are marked for review.</p>}
-            {androidBridge && <p className="scan-mode-note">Scan speed and Products in each photo apply to <b>Scan with camera</b>. <b>Choose photos and scan</b> uses the phone’s own text reader and keeps going in the background.</p>}
+            {androidBridge && <p className="scan-mode-note">{androidBridge.setScanOptions ? <>Both settings apply to <b>Scan with camera</b> and to <b>Choose photos and scan</b> (which keeps going in the background).</> : <>This installed app is older: the settings apply to <b>Scan with camera</b> only. Install the newest APK to use them for <b>Choose photos and scan</b> too.</>}</p>}
             <p className="scan-mode-note">
               {scanMode === 'fast' ? 'One OCR pass per photo. Review missed or unclear IMEIs manually.' :
                 scanMode === 'standard' ? 'Runs another pass only when the first result needs it.' :
@@ -4743,7 +4776,8 @@ export default function App() {
         >
           <div
             ref={reviewModalRef}
-            className="modal"
+            className="modal review-modal"
+            role="dialog" aria-modal="true" aria-label="Review record"
             onClick={e => e.stopPropagation()}
           >
             <div className="review-sticky">
@@ -4765,52 +4799,54 @@ export default function App() {
             </div>}
 
 
-            {<div className="review-photo-stage"><img className="preview" src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} /></div>}
-            {focusPreview && <button type="button" className="subtle-btn photo-zoom-toggle" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}
             </div>
 
-
-
-
-            {<div className="manual-imei-entry">
-              <details className="review-edit" open><summary>Type: model, serial, IMEI 1</summary>
-              <label className="review-model" htmlFor="manual-model">Device model</label>
-              <ModelPicker id="manual-model" value={manualModel} onChange={setManualModel} customModels={customModels} catalogEntries={catalogEntries} scannedModels={records.map(row => row.model)} onAddModel={(code, name) => { const next = { ...customModels, [code]: name }; if (!writeCustomModels(next)) return false; setCustomModels(next); return true; }} onEnter={() => document.getElementById('manual-imei')?.focus()} />
-              {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries, customModels).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries, customModels).name}</small>}
-              <label htmlFor="manual-serial">Serial number (S/N)</label><input id="manual-serial" value={manualSerial} onChange={event => setManualSerial(event.target.value)} />
-              <label htmlFor="manual-imei">IMEI 1</label>
-              <input id="manual-imei" inputMode="numeric" maxLength={15} value={manualImei} onChange={event => setManualImei(digits(event.target.value).slice(0, 15))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
-              </details>
-              <details className="review-edit"><summary>Person and IMEI 2</summary>
-              <label htmlFor="review-person">Person</label>
-              <select id="review-person" value={selected.personId || 'unassigned'} onChange={event => { const plan = assignPerson(selected.id, event.target.value); if (plan.moved.length) setSelected({ ...selected, personId: ownerOf(event.target.value) }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
-              <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
-              <input id="manual-imei2" inputMode="numeric" maxLength={15} value={manualImei2} onChange={event => setManualImei2(digits(event.target.value).slice(0, 15))} />
-              </details>
-              <small>Enter moves to the next field, then saves and opens the next record. Use arrow keys to navigate when not typing.</small>
-            </div>}
-
-            {<div className="review-float">
-              {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
-                <button className="subtle-btn" disabled={reviewIndex === 0 || rotatingPhoto} onClick={() => goReview(-1)}>← Previous</button>
-                <span>{reviewIndex + 1} of {reviewRecords.length}</span>
-                {reviewIndex === reviewRecords.length - 1
-                  ? <button className="primary" disabled={rotatingPhoto} onClick={finishReview}>Finish ✓</button>
-                  : <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => goReview(1)}>Next →</button>}
-              </div>}
-              <div className="review-tools">
-                <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
-                <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Photo</button>
-                <button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Edit photo</button>
-                <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶</button>
-                <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷</button>
-                <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+            <div className="review-body">
+            <div className="review-preview">
+              <button type="button" className="review-thumb" aria-label="Enlarge photo" onClick={() => setPhotoExpanded(true)}>
+                <img src={focusPreview && !showFullPhoto ? focusPreview : recordPhoto(selected)} alt={focusPreview && !showFullPhoto ? 'Label area of the photo' : 'Selected record photo'} decoding="async" />
+                <span className="review-thumb-hint"><ZoomIn size={14} /> Tap to enlarge</span>
+              </button>
+              <div className="review-preview-side">
+                {focusPreview && <button type="button" className="subtle-btn" onClick={() => setShowFullPhoto(value => !value)}>{showFullPhoto ? 'Zoom to label' : 'Show full photo'}</button>}
+                <button type="button" className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop / edit photo</button>
               </div>
-{selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" onClick={() => setCropEditorOpen(true)}>{selected.deviceCount} devices: crop each</button></div></div>}{selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}<div className="review-save-bar" role="group" aria-label="Save this record">
-              <button className="primary" disabled={rotatingPhoto} onClick={() => saveReviewFields()}>Save</button>
-              {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
-              <span className="review-save-state" role="status">{pendingChanges ? `${pendingChanges} unsaved` : 'All saved'}</span>
-            </div></div>}
+            </div>
+
+            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" onClick={() => setCropEditorOpen(true)}>{selected.deviceCount} devices: crop each</button></div></div>}
+            {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}
+
+            <div className="manual-imei-entry review-fields">
+              <div className="review-field">
+                <label className="review-model" htmlFor="manual-model">Device model</label>
+                <ModelPicker id="manual-model" value={manualModel} onChange={setManualModel} customModels={customModels} catalogEntries={catalogEntries} scannedModels={scannedModelList} onAddModel={(code, name) => { const next = { ...customModels, [code]: name }; if (!writeCustomModels(next)) return false; setCustomModels(next); return true; }} onEnter={() => document.getElementById('manual-serial')?.focus()} />
+                {modelCode4(manualModel) && phoneInfo(manualModel, catalogEntries, customModels).series !== 'Other phones' && <small className="model-meaning">= {phoneInfo(manualModel, catalogEntries, customModels).name}</small>}
+              </div>
+              <div className="review-field">
+                <label htmlFor="manual-serial">Serial number (S/N)</label>
+                <DeferredInput id="manual-serial" value={manualSerial} autoCapitalize="characters" autoCorrect="off" spellCheck={false} onValue={typeField('serial', setManualSerialState)} />
+              </div>
+              <div className="review-field">
+                <label htmlFor="manual-imei">IMEI 1</label>
+                <DeferredInput id="manual-imei" inputMode="numeric" value={manualImei} clean={text => digits(text).slice(0, 15)} onValue={typeField('imei', setManualImeiState)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); saveReviewFields(true); } }} />
+              </div>
+              <div className="review-field">
+                <label htmlFor="manual-imei2">IMEI 2 <small>(dual-SIM, optional)</small></label>
+                <DeferredInput id="manual-imei2" inputMode="numeric" value={manualImei2} clean={text => digits(text).slice(0, 15)} onValue={typeField('imei2', setManualImei2State)} />
+              </div>
+              <div className="review-field">
+                <label htmlFor="review-person">Person</label>
+                <select id="review-person" value={selected.personId || 'unassigned'} onChange={event => { const plan = assignPerson(selected.id, event.target.value); if (plan.moved.length) setSelected({ ...selected, personId: ownerOf(event.target.value) }); }}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
+              </div>
+            </div>
+
+            <div className="review-tools" role="group" aria-label="Photo actions">
+              <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
+              <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Photo</button>
+              <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶ Left</button>
+              <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷ Right</button>
+              <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+            </div>
 
             {<details className="review-details"><summary>More details: status, serial, catalog, share</summary>
             <div className="modal-meta">
@@ -4840,9 +4876,30 @@ export default function App() {
               <summary>Raw OCR text</summary>
               <pre>{selected.raw || 'No text recognized.'}</pre>
             </details>
+            </div>
+
+            <div className="review-foot">
+              {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
+                <button className="subtle-btn" disabled={reviewIndex === 0 || rotatingPhoto} onClick={() => goReview(-1)}>← Previous</button>
+                <span>{reviewIndex + 1} of {reviewRecords.length}</span>
+                {reviewIndex === reviewRecords.length - 1
+                  ? <button className="primary" disabled={rotatingPhoto} onClick={finishReview}>Finish ✓</button>
+                  : <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => goReview(1)}>Next →</button>}
+              </div>}
+              <div className="review-save-bar" role="group" aria-label="Save this record">
+                <button className="primary" disabled={rotatingPhoto} onClick={() => saveReviewFields()}>Save</button>
+                {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
+                <span className="review-save-state" role="status">{pendingChanges ? `${pendingChanges} unsaved` : 'All saved'}</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
+
+      {selected && photoExpanded && <div className="photo-lightbox" role="dialog" aria-modal="true" aria-label="Enlarged photo" onClick={() => setPhotoExpanded(false)}>
+        <img src={showFullPhoto || !focusPreview ? (reviewSource || recordPhoto(selected)) : focusPreview} alt="Enlarged record photo" />
+        <button type="button" className="subtle-btn photo-lightbox-close" onClick={() => setPhotoExpanded(false)}><X size={16} /> Close</button>
+      </div>}
 
       {shareIds.length>0&&<div className="modal-backdrop share-backdrop"><section className="modal share-modal" role="dialog" aria-modal="true" aria-label="Share selected records">
        <div className="modal-head"><h2>{shareIds.length>1?`Share ${shareIds.length} records`:"Share record"}</h2><button className="subtle-btn" disabled={sharing} onClick={()=>setShareIds([])}>Close sharing</button></div>

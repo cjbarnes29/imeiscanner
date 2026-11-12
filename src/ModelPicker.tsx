@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { SAMSUNG_MODELS } from './samsung-models';
-import { modelCode4 } from './phone-names';
+import { cleanPhoneName, modelCode4 } from './phone-names';
 import { cleanName, normalizeCode } from './custom-models';
 import { useBackLayer } from './back-layer';
 
@@ -33,21 +33,31 @@ export function ModelPicker({ id, value, onChange, customModels, catalogEntries,
   const [message, setMessage] = useState('');
   useBackLayer(open, () => setOpen(false), 'model-picker');
 
+  // The caller often passes a fresh array each render; only rebuild the (large, sorted) list when the content changes.
+  const scannedKey = useMemo(() => [...new Set(scannedModels.map(model => modelCode4(model)).filter(Boolean))].sort().join('|'), [scannedModels]);
   const choices = useMemo(() => {
     const byCode = new Map<string, Choice>();
     for (const [code, name] of Object.entries(SAMSUNG_MODELS)) byCode.set(code, { code, name, from: 'built-in' });
-    for (const entry of catalogEntries) { const code = modelCode4(entry.modelCode); if (code && entry.name) byCode.set(code, { code, name: entry.name, from: 'catalog' }); }
+    // Same rule as the record list (phoneInfo): the built-in name wins, and a catalog name never carries a storage size or
+    // carrier ("128GB (Unlocked)"): the model code does not say which storage this phone has, so the label would be a guess.
+    for (const entry of catalogEntries) {
+      const code = modelCode4(entry.modelCode), name = cleanPhoneName(entry.name || '');
+      if (code && name && !byCode.has(code)) byCode.set(code, { code, name, from: 'catalog' });
+    }
     for (const [code, name] of Object.entries(customModels)) byCode.set(code, { code, name, from: 'mine' });
-    for (const model of scannedModels) { const code = modelCode4(model); if (code && !byCode.has(code)) byCode.set(code, { code, name: '', from: 'not named' }); }
+    for (const code of scannedKey ? scannedKey.split('|') : []) if (!byCode.has(code)) byCode.set(code, { code, name: '', from: 'not named' });
     return [...byCode.values()].sort((a, b) => (a.name || `~${a.code}`).localeCompare(b.name || `~${b.code}`));
-  }, [customModels, catalogEntries, scannedModels]);
+  }, [customModels, catalogEntries, scannedKey]);
 
   const currentCode = modelCode4(value);
   const current = currentCode ? choices.find(choice => choice.code === currentCode) : undefined;
   const query = search.trim().toLowerCase();
-  const shown = query ? choices.filter(choice => `${choice.name} SM-${choice.code} ${FROM_LABEL[choice.from]}`.toLowerCase().includes(query)) : choices;
+  const matches = query ? choices.filter(choice => `${choice.name} SM-${choice.code} ${FROM_LABEL[choice.from]}`.toLowerCase().includes(query)) : choices;
+  // Only draw a screenful at a time: drawing every catalog model froze phones when the list opened.
+  const [limit, setLimit] = useState(60);
+  const shown = matches.slice(0, limit);
 
-  function openDialog() { setView('list'); setSearch(''); setMessage(''); setOpen(true); }
+  function openDialog() { setView('list'); setSearch(''); setLimit(60); setMessage(''); setOpen(true); }
   function pick(code: string) { onChange(`SM-${code}`); setOpen(false); }
   function saveNew() {
     const code = normalizeCode(newCode), name = cleanName(newName);
@@ -70,12 +80,13 @@ export function ModelPicker({ id, value, onChange, customModels, catalogEntries,
         <button type="button" className="subtle-btn" onClick={() => setOpen(false)}>Close</button>
       </div>
       {view === 'list' && <>
-        <input className="model-search" aria-label="Search models" autoFocus placeholder={`Search ${choices.length} models`} value={search} onChange={event => setSearch(event.target.value)} />
+        <input className="model-search" aria-label="Search models" autoFocus placeholder={`Search ${choices.length} models`} value={search} onChange={event => { setSearch(event.target.value); setLimit(60); }} />
         <div className="model-choices" role="list">
           {shown.map(choice => <button key={choice.code} type="button" role="listitem" className={`model-choice${choice.code === currentCode ? ' selected' : ''}`} onClick={() => pick(choice.code)}>
             <strong>{choice.name || `SM-${choice.code}`}</strong>
             <small>SM-{choice.code} · {FROM_LABEL[choice.from]}</small>
           </button>)}
+          {matches.length > shown.length && <button type="button" className="subtle-btn model-more" onClick={() => setLimit(count => count + 120)}>Show more ({matches.length - shown.length} more) · or type in the search box</button>}
           {shown.length === 0 && <p className="settings-help">No model matches “{search}”. Add it below.</p>}
         </div>
         <div className="model-dialog-actions">

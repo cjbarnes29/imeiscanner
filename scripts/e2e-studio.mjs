@@ -83,6 +83,11 @@ try{
   await clickText('button','Undo');
   await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'undo to 2');
   ok('Undo removes the third box (back to 2 labels)');
+  await clickText('button','Redo');
+  await waitFor(`/3 labels/.test(document.querySelector('.studio-title').textContent)`,'redo to 3');
+  await clickText('button','Undo');
+  await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'undo again to 2');
+  ok('Redo brings the third box back; Undo removes it again');
 
   await clickText('.studio-actions button','Save all');
   await waitFor(`[...document.querySelectorAll('button')].some(b=>/^Replace original/.test(b.textContent.trim()))`,'check screen',180000);

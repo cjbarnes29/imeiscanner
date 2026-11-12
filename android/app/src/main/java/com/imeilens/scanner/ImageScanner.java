@@ -42,6 +42,21 @@ final class ImageScanner {
     private ImageScanner() {}
 
     static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge) throws Exception {
+        return scan(context, uri, filename, personId, recognizer, maxEdge, "standard", 0);
+    }
+
+    /** Most products one photo is split into (the "Products in each photo" list goes up to 12). */
+    static final int MAX_PRODUCTS = 12;
+
+    /**
+     * @param speed    "fast" (one read, no tilt or tile passes unless a product count is given), "standard" or
+     *                 "detailed" (extra tile pass whenever two or more products are expected)
+     * @param expected products the user says each photo holds, or 0 to count them from the labels (Auto)
+     */
+    static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge,
+                          String speed, int expected) throws Exception {
+        final boolean fast = "fast".equals(speed), detailed = "detailed".equals(speed);
+        expected = Math.max(0, Math.min(MAX_PRODUCTS, expected));
         Bitmap bitmap = decode(context, uri, maxEdge);
         try {
             Text full = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)));
@@ -61,7 +76,7 @@ final class ImageScanner {
             }
             // A tilted photo: level it so the products can be separated with straight cuts.
             float tilt = medianAngle(full);
-            if (Math.abs(tilt) >= 2f && Math.abs(tilt) <= 20f) {
+            if (!fast && Math.abs(tilt) >= (detailed ? 1.2f : 2f) && Math.abs(tilt) <= 20f) {
                 Bitmap levelled = level(bitmap, -tilt);
                 Text again;
                 try { again = Tasks.await(recognizer.process(InputImage.fromBitmap(levelled, 0))); }
@@ -74,40 +89,44 @@ final class ImageScanner {
             List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
             // More "Model : SM-…" labels are visible than products were found: read the photo again in
             // overlapping pieces (each piece is read at a higher effective resolution) and look again.
-            int expected = modelLabels(full);
-            if (expected > labels.size() && expected <= 6) {
-                List<Line> lines = linesOf(full);
-                for (Rect tile : tiles(bitmap.getWidth(), bitmap.getHeight(), expected)) {
-                    Bitmap part = Bitmap.createBitmap(bitmap, tile.left, tile.top, tile.width(), tile.height());
-                    try {
-                        Text read = Tasks.await(recognizer.process(InputImage.fromBitmap(part, 0)));
-                        for (Line line : linesOf(read)) {
-                            Rect box = new Rect(line.box); box.offset(tile.left, tile.top);
-                            if (!repeats(lines, line.text, box)) lines.add(new Line(line.text, box));
-                        }
-                    } finally { part.recycle(); }
-                }
+            int counted = modelLabels(full);
+            // The user's number wins; Auto uses the "Model : SM-…" lines. Distinct valid barcodes (two per label) also hint at how many labels there are.
+            int target = expected > 0 ? expected : counted;
+            int barcodeLabels = (distinctImeiBarcodes(codes) + 1) / 2;
+            if (expected == 0 && barcodeLabels > target) target = Math.min(MAX_PRODUCTS, barcodeLabels);
+            List<Line> lines = null;
+            if (target > labels.size() && target <= MAX_PRODUCTS && (!fast || expected > 1)) {
+                lines = linesOf(full);
+                lines = readInTiles(recognizer, bitmap, lines, target);
                 List<Rect> more = labels(lines, bitmap.getWidth(), bitmap.getHeight());
                 if (more.size() > labels.size()) labels = more;
+                // Detailed: still short of the count, so look once more with finer pieces.
+                if (detailed && target > labels.size() && target < MAX_PRODUCTS) {
+                    lines = readInTiles(recognizer, bitmap, lines, Math.min(MAX_PRODUCTS, target + 2));
+                    more = labels(lines, bitmap.getWidth(), bitmap.getHeight());
+                    if (more.size() > labels.size()) labels = more;
+                }
             }
+            // Fewer products found than expected: never save them quietly as if all were found.
+            final boolean short_ = target >= 2 && labels.size() < target;
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, false, recognizer, full, rotation, codes, null));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0));
                 return output;
             }
             List<Rect> regions = boxRegions(bitmap, labels);
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null, Math.max(target, labels.size())));
                 return output;
             }
-            boolean perspectiveReview = false;
+            boolean perspectiveReview = short_;
             for (int index = 1; index < regions.size(); index++)
                 if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
             for (Rect region : regions) {
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0)); }
                 finally { crop.recycle(); }
             }
             for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("siblings", output.length());
@@ -117,7 +136,7 @@ final class ImageScanner {
 
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
                                          String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation,
-                                         List<Code> codes, Rect region) throws Exception {
+                                         List<Code> codes, Rect region, int deviceCount) throws Exception {
         // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
         Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
         String raw = ocr.getText();
@@ -149,6 +168,8 @@ final class ImageScanner {
         row.put("imei", imei);
         row.put("status", imei.isEmpty() ? "Review" : "Valid");
         row.put("cropNeedsReview", cropReview);
+        // The review screen asks "1 device or N?" for a photo that shows more labels than could be separated.
+        if (cropReview && deviceCount > 1 && region == null) row.put("deviceCount", deviceCount);
         row.put("duplicate", false);
         java.text.SimpleDateFormat clock = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
         clock.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
@@ -314,6 +335,28 @@ final class ImageScanner {
         return false;
     }
 
+    /** Read the photo again in overlapping pieces and add every line that was not already known. */
+    private static List<Line> readInTiles(TextRecognizer recognizer, Bitmap bitmap, List<Line> known, int products) throws Exception {
+        for (Rect tile : tiles(bitmap.getWidth(), bitmap.getHeight(), products)) {
+            Bitmap part = Bitmap.createBitmap(bitmap, tile.left, tile.top, tile.width(), tile.height());
+            try {
+                Text read = Tasks.await(recognizer.process(InputImage.fromBitmap(part, 0)));
+                for (Line line : linesOf(read)) {
+                    Rect box = new Rect(line.box); box.offset(tile.left, tile.top);
+                    if (!repeats(known, line.text, box)) known.add(new Line(line.text, box));
+                }
+            } finally { part.recycle(); }
+        }
+        return known;
+    }
+
+    /** Different 15-digit barcodes that pass the IMEI checksum (a label has one per IMEI). */
+    static int distinctImeiBarcodes(List<Code> codes) {
+        Set<String> values = new HashSet<>();
+        for (Code code : codes) if (luhn(code.value)) values.add(code.value);
+        return values.size();
+    }
+
     private static final Pattern MODEL_LINE = Pattern.compile("(?i)m[o0]del\\s*[:;.]?\\s*s\\s*m");
     /** How many product labels the text shows, counted by their "Model : SM-…" lines (one per label). */
     static int modelLabels(Text text) {
@@ -329,10 +372,11 @@ final class ImageScanner {
         return found.size();
     }
 
-    /** Overlapping pieces: 2 labels → halves, 3 → thirds, 4 → 2×2, 5-6 → 3×2 (long side first). */
+    /** Overlapping pieces: 2 labels → halves, 3 → thirds, 4 → 2×2, 5-6 → 3×2, 7-8 → 4×2, 9-12 → 4×3 (long side first). */
     static List<Rect> tiles(int width, int height, int products) {
         boolean landscape = width >= height;
-        int along = products <= 2 ? 2 : products == 3 ? 3 : products == 4 ? 2 : 3, across = products <= 3 ? 1 : 2;
+        int along = products <= 2 ? 2 : products == 3 ? 3 : products == 4 ? 2 : products <= 6 ? 3 : products <= 8 ? 4 : products == 9 ? 3 : 4;
+        int across = products <= 3 ? 1 : products <= 6 ? 2 : products <= 8 ? 2 : 3;
         int cols = landscape ? along : across, rows = landscape ? across : along;
         double tw = (double) width / cols, th = (double) height / rows, overlap = 0.14;
         List<Rect> out = new ArrayList<>();

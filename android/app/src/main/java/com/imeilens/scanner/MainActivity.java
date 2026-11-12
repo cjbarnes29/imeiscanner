@@ -439,6 +439,13 @@ public final class MainActivity extends Activity {
             });
         }
 
+        /** Scan speed ("fast", "standard", "detailed") and products per photo (0 = Auto) for the background scanner. */
+        @JavascriptInterface public void setScanOptions(String speed, int expected) {
+            String clean = "fast".equals(speed) || "detailed".equals(speed) ? speed : "standard";
+            getSharedPreferences("app-state", MODE_PRIVATE).edit()
+                .putString("scan-speed", clean).putInt("scan-expected", Math.max(0, Math.min(ImageScanner.MAX_PRODUCTS, expected))).apply();
+        }
+
         @JavascriptInterface public String status() {
             try { return ScanStore.json(MainActivity.this); }
             catch (Exception error) { return "{\"status\":\"error\",\"error\":\"Cannot read saved scan\",\"records\":[]}"; }

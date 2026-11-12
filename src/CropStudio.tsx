@@ -8,7 +8,7 @@
 // Phones get a full-screen editor, larger screens a popup.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { ChevronLeft, ChevronRight, Hand, Loader2, MousePointer2, Save, Trash2, Undo2, Wand2, ZoomIn, ZoomOut, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Hand, Loader2, MousePointer2, Redo2, Save, Trash2, Undo2, Wand2, ZoomIn, ZoomOut, X } from 'lucide-react';
 import { addBox, boxFromPoints, boxesAreSound, clampBox, hitTest, isUsableBox, moveBoxes, removeBoxes, resizeBox, type Box, type Part } from './crop-boxes';
 import { useBackLayer } from './back-layer';
 
@@ -59,6 +59,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   const stageRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const history = useRef<Record<string, Box[][]>>({});
+  const future = useRef<Record<string, Box[][]>>({});
 
   const item = items[index];
   const boxes = plans[item.id] || [];
@@ -94,13 +95,22 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     const stack = history.current[item.id] ||= [];
     stack.push(plans[item.id] || []);
     if (stack.length > 40) stack.shift();
+    future.current[item.id] = [];
     setPlans(old => ({ ...old, [item.id]: next }));
   }, [item.id, plans]);
   const undo = () => {
     const stack = history.current[item.id];
     if (!stack?.length || busy) return;
     const previous = stack.pop()!;
+    (future.current[item.id] ||= []).push(plans[item.id] || []);
     setPlans(old => ({ ...old, [item.id]: previous })); setSelected([]);
+  };
+  const redo = () => {
+    const ahead = future.current[item.id];
+    if (!ahead?.length || busy) return;
+    const next = ahead.pop()!;
+    (history.current[item.id] ||= []).push(plans[item.id] || []);
+    setPlans(old => ({ ...old, [item.id]: next })); setSelected([]);
   };
 
   const fit = Math.min(view.w / natural.w, view.h / natural.h);
@@ -159,7 +169,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
       // The live drag already updated the boxes; record the state before the drag as one undo step.
       const before = d.kind === 'move' ? d.start : (plans[item.id] || []).map((box, i) => i === d.index ? d.start : box);
       const stack = history.current[item.id] ||= [];
-      if (JSON.stringify(before) !== JSON.stringify(plans[item.id])) { stack.push(before); if (stack.length > 40) stack.shift(); }
+      if (JSON.stringify(before) !== JSON.stringify(plans[item.id])) { stack.push(before); if (stack.length > 40) stack.shift(); future.current[item.id] = []; }
     }
   }
 
@@ -201,7 +211,8 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
       const tag = (event.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) { event.preventDefault(); deleteSelected(); }
-      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); }
       else if (event.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
@@ -226,6 +237,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
       <button className={`subtle-btn${several ? ' on' : ''}`} aria-pressed={several} disabled={busy} onClick={() => setSeveral(s => !s)}>Select several</button>
       <button className="subtle-btn" disabled={busy || !boxes.length} onClick={() => setSelected(selected.length === boxes.length ? [] : boxes.map((_, i) => i))}>{selected.length === boxes.length && boxes.length ? 'Select none' : 'Select all'}</button>
       <button className="subtle-btn" aria-label="Undo" disabled={busy || !history.current[item.id]?.length} onClick={undo}><Undo2 size={16} /> Undo</button>
+      <button className="subtle-btn" aria-label="Redo" disabled={busy || !future.current[item.id]?.length} onClick={redo}><Redo2 size={16} /> Redo</button>
       <button className="subtle-btn danger" disabled={busy || !selected.length} onClick={deleteSelected}><Trash2 size={16} /> Delete{selected.length > 1 ? ` ${selected.length}` : ''}</button>
       <button className="subtle-btn" disabled={busy} onClick={() => void auto()}>{detecting ? <Loader2 size={16} className="spin" /> : <Wand2 size={16} />} Auto-detect</button>
     </div>

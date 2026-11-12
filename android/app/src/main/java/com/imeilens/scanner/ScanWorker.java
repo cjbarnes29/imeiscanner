@@ -82,6 +82,10 @@ public final class ScanWorker extends Worker {
         final DeviceProfile profile = DeviceProfile.detect(context);
         final int maxWorkers = profile.maxWorkers;
         final String personId = job.optString("personId", "person-1");
+        // The Scan speed and Products in each photo the user chose on the Scan screen (also used by the camera scan).
+        final android.content.SharedPreferences prefs = context.getSharedPreferences("app-state", Context.MODE_PRIVATE);
+        final String speed = prefs.getString("scan-speed", "standard");
+        final int expectedProducts = prefs.getInt("scan-expected", 0);
         final java.util.concurrent.atomic.AtomicInteger maxEdge = new java.util.concurrent.atomic.AtomicInteger(profile.maxEdge);
         // The pool can grow up to maxWorkers; permits decide how many are actually running.
         final java.util.concurrent.Semaphore permits = new java.util.concurrent.Semaphore(profile.startWorkers);
@@ -111,10 +115,10 @@ public final class ScanWorker extends Worker {
                                 Uri uri = Uri.parse(photo.getString("uri"));
                                 if (!seenPhotos.add(photoFingerprint(uri))) return new JSONArray();
                                 String name = photo.optString("name", "Phone photo.jpg");
-                                try { return ImageScanner.scan(context, uri, name, personId, recognizer, maxEdge.get()); }
+                                try { return ImageScanner.scan(context, uri, name, personId, recognizer, maxEdge.get(), speed, expectedProducts); }
                                 catch (OutOfMemoryError tooBig) {
                                     maxEdge.set(1600); // Out of memory: shrink for every worker and retry once.
-                                    return ImageScanner.scan(context, uri, name, personId, recognizer, 1600);
+                                    return ImageScanner.scan(context, uri, name, personId, recognizer, 1600, speed, expectedProducts);
                                 }
                             } finally { recognizers.put(recognizer); }
                         } finally { permits.release(); }
