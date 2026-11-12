@@ -6,6 +6,7 @@ type Catalog = { updatedAt:string; products:Product[]; coverage:{ complete:boole
 const DELETED_KEY = 'samsung-catalog-deleted', ADDED_KEY = 'samsung-catalog-added', CORRECTIONS_KEY = 'samsung-catalog-corrections';
 type AddedProduct = { id:string; name:string; modelCode:string };
 function readJson<T>(key:string, fallback:T):T { try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; } }
+function readList<T>(key:string):T[] { const value = readJson<unknown>(key, []); return Array.isArray(value) ? value as T[] : []; }
 function writeJson(key:string, value:unknown):boolean { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } }
 
 export type CatalogRow = { id:string; name:string; modelCode:string; region:string; mine:boolean; edited:boolean };
@@ -13,9 +14,9 @@ export type CatalogRow = { id:string; name:string; modelCode:string; region:stri
 export function readCatalogRows():CatalogRow[] {
   const catalog = readJson<Catalog | null>('samsung-catalog', null);
   const corrections = readJson<Record<string,string>>(CORRECTIONS_KEY, {});
-  const deleted = new Set(readJson<string[]>(DELETED_KEY, []));
+  const deleted = new Set(readList<string>(DELETED_KEY));
   const rows:CatalogRow[] = (catalog?.products || []).filter(p => !deleted.has(p.id)).map(p => ({ id:p.id, name:corrections[p.id] || p.name, modelCode:p.modelCode, region:p.region || '', mine:false, edited:!!corrections[p.id] && corrections[p.id] !== p.name }));
-  for (const item of readJson<AddedProduct[]>(ADDED_KEY, [])) rows.push({ id:item.id, name:item.name, modelCode:item.modelCode, region:'Added by me', mine:true, edited:false });
+  for (const item of readList<AddedProduct>(ADDED_KEY)) rows.push({ id:item.id, name:item.name, modelCode:item.modelCode, region:'Added by me', mine:true, edited:false });
   return rows;
 }
 const cleanCatalogName = (name:string) => name.replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -25,22 +26,22 @@ export function renameCatalogRow(id:string, name:string, modelCode?:string):bool
   const clean = cleanCatalogName(name); if (!clean) return false;
   if (id.startsWith('local-')) {
     const code = modelCode ? cleanCatalogCode(modelCode) : '';
-    return writeJson(ADDED_KEY, readJson<AddedProduct[]>(ADDED_KEY, []).map(item => item.id === id ? { ...item, name:clean, modelCode:code || item.modelCode } : item));
+    return writeJson(ADDED_KEY, readList<AddedProduct>(ADDED_KEY).map(item => item.id === id ? { ...item, name:clean, modelCode:code || item.modelCode } : item));
   }
   return writeJson(CORRECTIONS_KEY, { ...readJson<Record<string,string>>(CORRECTIONS_KEY, {}), [id]:clean });
 }
 /** Delete: downloaded entries are hidden (and stay hidden after updates); your own entries are removed. */
 export function deleteCatalogRow(id:string):boolean {
-  if (id.startsWith('local-')) return writeJson(ADDED_KEY, readJson<AddedProduct[]>(ADDED_KEY, []).filter(item => item.id !== id));
-  return writeJson(DELETED_KEY, [...new Set([...readJson<string[]>(DELETED_KEY, []), id])]);
+  if (id.startsWith('local-')) return writeJson(ADDED_KEY, readList<AddedProduct>(ADDED_KEY).filter(item => item.id !== id));
+  return writeJson(DELETED_KEY, [...new Set([...readList<string>(DELETED_KEY), id])]);
 }
 export function addCatalogRow(modelCode:string, name:string):boolean {
   const code = cleanCatalogCode(modelCode), clean = cleanCatalogName(name);
   if (!/^[A-Z]{2,3}-[A-Z0-9]{3,}$/.test(code) || !clean) return false;
   const id = `local-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  return writeJson(ADDED_KEY, [...readJson<AddedProduct[]>(ADDED_KEY, []), { id, name:clean, modelCode:code }]);
+  return writeJson(ADDED_KEY, [...readList<AddedProduct>(ADDED_KEY), { id, name:clean, modelCode:code }]);
 }
-export const countDeletedCatalogRows = () => readJson<string[]>(DELETED_KEY, []).length;
+export const countDeletedCatalogRows = () => readList<string>(DELETED_KEY).length;
 export const restoreDeletedCatalogRows = () => writeJson(DELETED_KEY, []);
 export function SamsungCatalog() {
   const [catalog,setCatalog] = useState<Catalog | null>(() => { try { return JSON.parse(localStorage.getItem('samsung-catalog') || 'null'); } catch { return null; } });
@@ -62,7 +63,7 @@ export function SamsungCatalog() {
     catch (error) { setStatus(`${error instanceof Error ? error.message : 'Update failed.'} Your saved catalog remains available. Retry when connected.`); }
     finally { setBusy(false); }
   }
-  const deletedIds = new Set(readJson<string[]>(DELETED_KEY, []));
+  const deletedIds = new Set(readList<string>(DELETED_KEY));
   const matches = (catalog?.products || []).filter(p => !deletedIds.has(p.id)).filter(p => `${corrections[p.id] || p.name} ${p.modelCode} ${p.region}`.toLowerCase().includes(query.toLowerCase()));
   useEffect(() => { if (!autoDownloadOff()) void update(); }, []);
   return <details className="panel catalog-panel"><summary>Samsung product catalog</summary><p>Verified Samsung product pages only. Coverage is incomplete; missing specifications and compatibility are left unknown. Daily checks run on GitHub even with the app closed. Manual checks require your GitHub account.</p><button className="subtle-btn" disabled={busy} onClick={update}>{busy ? 'Updating…' : 'Update saved catalog'}</button> <a href="https://github.com/cjbarnes29/imeiscanner/actions/workflows/catalog.yml" target="_blank" rel="noreferrer">Run Samsung update now / view job status</a><p role="status">{status}</p><p>{catalog ? `${catalog.products.length} verified variants · Last update ${catalog.updatedAt}` : 'No catalog saved yet.'}</p><input aria-label="Search Samsung catalog" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Product name or model code" />{matches.slice(0,30).map(p=><details key={p.id}><summary>{corrections[p.id] || p.name} · {p.modelCode} · {p.region}</summary>
@@ -75,7 +76,7 @@ export function SamsungCatalog() {
   </details>)}{matches.length>30&&<p>Showing 30 results. Refine the search.</p>}</details>;
 }
 export function catalogModel(text:string):string | undefined {
-  try { const catalog = JSON.parse(localStorage.getItem('samsung-catalog') || 'null') as Catalog | null; const corrections = JSON.parse(localStorage.getItem('samsung-catalog-corrections') || '{}'); const codes = new Set(text.toUpperCase().match(/\b(?:SM|GT|SCH|SGH|EP|EF|ET|EO)-[A-Z0-9]+\b/g) || []); const deletedIds = new Set(JSON.parse(localStorage.getItem('samsung-catalog-deleted') || '[]') as string[]); const matches = (catalog?.products || []).filter(p=>!deletedIds.has(p.id)).filter(p=>codes.has(p.modelCode) || [...codes].some(code => /^(?:SM-[A-Z][0-9]{3}[A-Z0-9]?|(?:EP|EF|ET|EO)-[A-Z0-9]{4,})$/.test(code) && p.modelCode.startsWith(code))); const names = [...new Set(matches.map(p=>corrections[p.id] || p.name))]; return names.length===1 ? names[0] : undefined; } catch { return undefined; }
+  try { const catalog = JSON.parse(localStorage.getItem('samsung-catalog') || 'null') as Catalog | null; const corrections = JSON.parse(localStorage.getItem('samsung-catalog-corrections') || '{}'); const codes = new Set(text.toUpperCase().match(/\b(?:SM|GT|SCH|SGH|EP|EF|ET|EO)-[A-Z0-9]+\b/g) || []); const deletedList = JSON.parse(localStorage.getItem('samsung-catalog-deleted') || '[]'); const deletedIds = new Set<string>(Array.isArray(deletedList) ? deletedList : []); const matches = (catalog?.products || []).filter(p=>!deletedIds.has(p.id)).filter(p=>codes.has(p.modelCode) || [...codes].some(code => /^(?:SM-[A-Z][0-9]{3}[A-Z0-9]?|(?:EP|EF|ET|EO)-[A-Z0-9]{4,})$/.test(code) && p.modelCode.startsWith(code))); const names = [...new Set(matches.map(p=>corrections[p.id] || p.name))]; return names.length===1 ? names[0] : undefined; } catch { return undefined; }
 }
 
 /** Saved catalog entries (name + model code) for phone names; empty until the catalog is loaded. */
