@@ -1,5 +1,7 @@
 # IMEI Lens — Photo Scanner
 
+Built by CJB.
+
 What changed in each version: [RELEASE-1.6.md](RELEASE-1.6.md), [RELEASE-1.5.md](RELEASE-1.5.md), [RELEASE-1.4.md](RELEASE-1.4.md).
 
 An inventory scanner for phone-label photos. Regular OCR runs in the browser. Optional laptop background scanning keeps processing after the browser closes, provided the laptop stays powered on and awake.

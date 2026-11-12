@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
 import { SAMSUNG_MODELS } from './samsung-models';
 import { CATALOG_AUTO_KEY, readCatalogEntries } from './SamsungCatalog';
+import { CatalogDialog } from './CatalogDialog';
 import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
 
 type Props = {
@@ -70,6 +71,8 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   const [speed, setSpeed] = useState<SpeedInfo | null>(readSpeed);
   const [bulk, setBulk] = useState('');
   const [listOpen, setListOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [, setCatalogTick] = useState(0);
   const [auto, setAuto] = useState(() => localStorage.getItem(CATALOG_AUTO_KEY) !== 'off');
   const fileInput = useRef<HTMLInputElement>(null);
   const [devFilter, setDevFilter] = useState<'missing' | 'all'>('missing');
@@ -176,7 +179,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
 
   function deleteCatalog() {
     if (!window.confirm('Delete the downloaded Samsung catalog from this device?' + (auto ? ' It downloads again next time the app opens. Turn off automatic download below to keep it deleted.' : ''))) return;
-    try { localStorage.removeItem('samsung-catalog'); localStorage.removeItem('samsung-catalog-corrections'); } catch { /* nothing stored */ }
+    try { localStorage.removeItem('samsung-catalog'); localStorage.removeItem('samsung-catalog-corrections'); localStorage.removeItem('samsung-catalog-deleted'); } catch { /* nothing stored */ }
     onCatalogChange();
     setMessage('Downloaded catalog and name corrections deleted.');
   }
@@ -292,8 +295,11 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     <p className="settings-help">{catalogCount ? `${catalogCount} products saved on this device${catalogDate ? `, updated ${catalogDate}` : ''}.` : 'No catalog is saved on this device.'}</p>
     <label className="settings-check"><input type="checkbox" checked={auto} onChange={event => toggleAuto(event.target.checked)} /> Download the catalog automatically when the app opens</label>
     <div className="settings-actions">
+      <button className="primary" onClick={() => setCatalogOpen(true)}>Check catalog ({catalogCount})</button>
       <button className="subtle-btn danger" disabled={!catalogCount} onClick={deleteCatalog}>Delete downloaded catalog</button>
     </div>
     <small className="settings-help">Deleting the catalog does not touch your models, your scanned phones or the built-in list.</small>
+    {catalogOpen && <CatalogDialog onClose={() => setCatalogOpen(false)} onChanged={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />}
+    <p className="settings-about">IMEI Lens · by CJB</p>
   </section></div>;
 }

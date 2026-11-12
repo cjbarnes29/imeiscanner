@@ -441,3 +441,40 @@ body{touch-action:pan-y pinch-zoom}
 .device-question strong{color:#f3dd9a;font-size:17px}
 .review-details{margin:8px 0;border:1px solid #30465d;border-radius:10px;padding:0 12px;background:#0d1828}
 .review-details>summary{min-height:48px;display:flex;align-items:center;cursor:pointer;font-weight:600;color:#c9d7e5}
+.wa-progress{display:grid;gap:6px;margin:6px 0 10px;padding:10px 12px;border:1px solid #30465d;border-radius:10px;background:#0d1828}
+.wa-bar{height:10px;border-radius:6px;background:#1b2a3d;overflow:hidden}.wa-bar span{display:block;height:100%;background:#4fd1a5;transition:width .3s}
+.wa-progress small{color:#9aa9bc}
+.wa-confirm{display:grid;gap:8px;margin:8px 0;padding:12px 14px;border:1px solid #4fd1a5;border-radius:10px;background:#12302d}
+.wa-confirm p{margin:0;color:#c9e9df;font-size:14px;line-height:1.5}
+.wa-confirm label{display:flex;gap:10px;align-items:center;font-size:14px}
+.wa-confirm input{width:90px;min-height:44px;background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 10px;font:inherit}
+.wa-confirm button{min-height:48px}
+
+/* The review question floats at the bottom with the Save bar */
+.review-float{position:sticky;bottom:0;z-index:6;margin:8px -4px 0;background:#101b2b;border-top:1px solid #30465d;box-shadow:0 -10px 22px #000a}
+.review-float .review-save-bar{position:static;margin:0;border-top:0;padding-top:8px;background:transparent}
+.review-question{display:grid;gap:8px;margin:8px 8px 0;padding:10px 12px;border:1px solid #8a6d1f;border-radius:10px;background:#2a2410;color:#f3dd9a}
+.review-question strong{display:block;font-size:16px}
+.review-question span{display:block;font-size:13px;color:#e6d49a;margin-top:2px}
+.review-question-buttons{display:flex;gap:8px}.review-question-buttons button{flex:1;min-height:46px;padding:0 10px}
+/* Unknown tab */
+.unknown-phones{list-style:none;margin:8px 0;padding:0;display:grid;gap:6px}
+.unknown-phone{display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:6px 8px;border:1px solid #30465d;border-radius:10px;background:#0d1828;color:#e8edf5;font:inherit;cursor:pointer}
+.unknown-phone img{width:48px;height:48px;object-fit:cover;border-radius:8px;flex:none;background:#09111d}
+.unknown-phone span{display:grid;gap:2px;min-width:0}.unknown-phone b{font-size:14px;overflow:hidden;text-overflow:ellipsis}.unknown-phone small{color:#9aa9bc;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unknown-suggest{display:grid;gap:6px;margin:8px 0}.unknown-suggest small{color:#9aa9bc}.unknown-suggest>div{display:flex;flex-wrap:wrap;gap:8px}
+.chip-btn{min-height:44px;padding:6px 14px;border:1px solid #4a637f;border-radius:22px;background:#121f31;color:#d9e5f2;font:inherit;font-size:13px;cursor:pointer;text-align:left}
+.unknown-options{display:grid;gap:12px;padding:6px 0 12px}.unknown-options>label{display:grid;gap:6px;font-size:13px;color:#b3c4d1}
+.unknown-options select{min-height:46px;background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 10px;font:inherit}
+.unknown-more{display:grid;gap:8px;margin-top:12px}.unknown-more button{min-height:46px}
+.settings-about{margin:18px 0 4px;text-align:center;color:#7d8da3;font-size:12px}
+.catalog-dialog{display:flex;flex-direction:column;gap:10px}
+.catalog-dialog .model-search{flex:none;height:48px;min-height:48px;max-height:48px}
+.catalog-actions{display:flex;gap:8px;flex-wrap:wrap}.catalog-actions button{min-height:46px;flex:1 1 140px}
+.catalog-list{list-style:none;margin:0;padding:0;flex:1;min-height:0;overflow-y:auto;display:grid;gap:8px;align-content:start}
+.catalog-row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #30465d;border-radius:10px;background:#0d1828}
+.catalog-info{display:grid;gap:2px;min-width:0}.catalog-info strong{font-size:14px;overflow-wrap:anywhere}.catalog-info small{color:#9aa9bc;font-size:12px}
+.catalog-buttons{display:flex;gap:6px;flex:none}.catalog-buttons button{min-height:44px;padding:0 12px}
+.catalog-edit{display:grid;gap:8px;width:100%}.catalog-edit input{min-height:46px;background:#0b1424;color:#e8edf5;border:1px solid #30465d;border-radius:9px;padding:0 12px;font:inherit}
+@media(max-width:420px){.catalog-row:not(:has(.catalog-edit)){flex-wrap:wrap}.catalog-row .catalog-buttons{width:100%}.catalog-row .catalog-buttons button{flex:1}}
+.catalog-dialog>button,.catalog-dialog>.catalog-actions,.catalog-dialog>.model-add,.catalog-dialog>.settings-message{flex:none}.catalog-dialog>button{min-height:46px;height:auto}
