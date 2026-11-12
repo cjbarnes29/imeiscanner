@@ -260,6 +260,11 @@ public final class MainActivity extends Activity {
         }).start();
     }
 
+    private boolean packageInstalled(String name) {
+        try { getPackageManager().getPackageInfo(name, 0); return true; }
+        catch (Exception error) { return false; }
+    }
+
     private String displayName(Uri uri) {
         try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
@@ -394,6 +399,19 @@ public final class MainActivity extends Activity {
             return true;
         }
 
+        /** Which ways of sending this phone has: WhatsApp installed, Bluetooth present and switched on. */
+        @JavascriptInterface public String sendCapabilities() {
+            JSONObject json = new JSONObject();
+            try {
+                json.put("whatsapp", packageInstalled("com.whatsapp") || packageInstalled("com.whatsapp.w4b"));
+                android.bluetooth.BluetoothManager manager = (android.bluetooth.BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+                android.bluetooth.BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
+                json.put("bluetooth", adapter != null);
+                json.put("bluetoothOn", adapter != null && adapter.isEnabled());
+            } catch (Exception ignored) { }
+            return json.toString();
+        }
+
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }
 
         @JavascriptInterface public boolean setSpeedMode(String mode) { return DeviceProfile.setMode(MainActivity.this, mode); }
@@ -517,7 +535,12 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public boolean shareFolder(String token, String title) { return shareFolderText(token, title, ""); }
 
         /** Same as shareFolder, and also sends one text message (for example all IMEI and serial numbers) once. */
-        @JavascriptInterface public boolean shareFolderText(String token, String title, String text) {
+        @JavascriptInterface public boolean shareFolderText(String token, String title, String text) { return shareStaged(token, title, text, null); }
+
+        /** Sends straight to the Bluetooth app when the phone has the standard one, otherwise opens the share menu. */
+        @JavascriptInterface public boolean shareFolderBluetooth(String token, String title) { return shareStaged(token, title, "", "com.android.bluetooth"); }
+
+        private boolean shareStaged(String token, String title, String text, String targetPackage) {
             File folder;
             synchronized (MainActivity.this) {
                 if (stagingFolder == null || !token.equals(stagingFolderToken)) return false;
@@ -539,7 +562,14 @@ public final class MainActivity extends Activity {
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 if (text != null && !text.isEmpty()) send.putExtra(Intent.EXTRA_TEXT, text);
                 runOnUiThread(() -> {
-                    try { startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send phones" : title)); }
+                    try {
+                        if (targetPackage != null) {
+                            Intent direct = new Intent(send);
+                            direct.setPackage(targetPackage);
+                            if (direct.resolveActivity(getPackageManager()) != null) { startActivity(direct); return; }
+                        }
+                        startActivity(Intent.createChooser(send, title == null || title.isEmpty() ? "Send phones" : title));
+                    }
                     catch (Exception error) { android.util.Log.e("IMEI-Lens", "Share menu failed", error); deleteFolder(folder); }
                 });
                 return true;

@@ -48,6 +48,7 @@ function capacityRows(speed: SpeedInfo | null): { level: Level; title: string; d
     { level: 'ok', title: 'Keep 1000 or more scanned records', detail: 'Records are saved on this device and shown a page at a time. Use Reset to clear them when a job is done.' },
     { level: 'ok', title: 'Send 1000 IMEI numbers as text', detail: '1000 numbers are about 17 KB: one message. Long lists open your phone\'s share menu, where you choose WhatsApp.' },
     { level: 'warn', title: 'Send pictures to WhatsApp', detail: 'All pictures go in one send. WhatsApp may accept only about 30 at once: then use Continue from picture N. Check the chat after each send.' },
+    { level: native ? 'ok' : 'warn', title: 'Send by Bluetooth when WhatsApp cannot', detail: native ? 'The app checks if WhatsApp is installed and works. If not, Bluetooth sends the pictures with the IMEI and serial written on them, plus a numbers.txt file, with no limit on how many. The other phone must accept the files.' : 'Use the Android app for Bluetooth sending.' },
     { level: 'ok', title: 'Excel or CSV with numbers only', detail: 'Any number of records.' },
     { level: 'ok', title: 'Save all pictures to a folder', detail: 'Every picture is saved as its own file next to the Excel file, so 1000 pictures do not need to fit in memory at once.' },
     { level: 'warn', title: 'Excel or Word with pictures inside', detail: `Up to about ${embed} pictures on this phone (estimate from about ${ram} GB of memory). For more, export numbers only, or use the folder export.` },
