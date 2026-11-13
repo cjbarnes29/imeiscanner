@@ -65,6 +65,9 @@ type RecordItem = {
   /** The model code was not clearly readable, was repaired, or two readings disagree (Android scanner); cleared when a person checks or types it. */
   modelNeedsReview?: boolean;
   modelNote?: string;
+  /** IMEI 1 was found by a rule (Samsung: its own barcode, matched to IMEI 2), not read from its printed line; cleared when a person checks or types it. */
+  imeiNeedsReview?: boolean;
+  imeiNote?: string;
   /** Set on crops: the record of the original photo they were cut from (kept in the archive, can be restored). */
   sourceRecordId?: string;
   /** Where the label text is in the photo (fractions of its size). The review screen opens zoomed on it. */
@@ -260,11 +263,13 @@ function imeiIsFallback(row: RecordItem) {
   return !!row.imei && !row.imeiFallbackChecked && recordImeiPair(row).imei1 === '';
 }
 function reviewNote(row: RecordItem) {
-  return imeiIsFallback(row) ? 'IMEI 1 could not be read; the number shown is IMEI 2. Check it or type IMEI 1.' : row.modelNeedsReview ? (row.modelNote || 'Check the model code.') : '';
+  return imeiIsFallback(row) ? 'IMEI 1 could not be read; the number shown is IMEI 2. Check it or type IMEI 1.'
+    : row.imeiNeedsReview ? (row.imeiNote || 'Check IMEI 1 against the label.')
+    : row.modelNeedsReview ? (row.modelNote || 'Check the model code.') : '';
 }
 function reviewStatus(row: RecordItem) {
   const serialOnly = !row.imei && !!recordSerial(row);
-  const needsReview = row.cropNeedsReview || row.serialNeedsReview || row.modelNeedsReview || imeiIsFallback(row) || (!serialOnly && row.status !== 'Valid');
+  const needsReview = row.cropNeedsReview || row.serialNeedsReview || row.modelNeedsReview || row.imeiNeedsReview || imeiIsFallback(row) || (!serialOnly && row.status !== 'Valid');
   return row.duplicate ? needsReview ? 'Duplicate IMEI · Needs review' : 'Duplicate IMEI' : needsReview ? 'Needs review' : serialOnly ? 'Serial only' : 'Valid';
 }
 
@@ -3068,7 +3073,7 @@ export default function App() {
     const edited = records.map(record => !set.has(record.id) ? record : {
       ...record,
       ...(model ? { model } : {}),
-      ...(bulkEditChecked ? { imeiFallbackChecked: true, cropNeedsReview: false, serialNeedsReview: false, modelNeedsReview: false, deviceCount: undefined, deviceImeis: undefined } : {})
+      ...(bulkEditChecked ? { imeiFallbackChecked: true, cropNeedsReview: false, serialNeedsReview: false, modelNeedsReview: false, imeiNeedsReview: false, deviceCount: undefined, deviceImeis: undefined } : {})
     });
     if (bulkEditPerson) moveRecords(ids, ownerOf(bulkEditPerson), edited);
     else { setRecords(markDuplicateRecords(edited)); setToast(`Updated ${ids.length} phone${ids.length === 1 ? '' : 's'}.`); }
@@ -3647,7 +3652,7 @@ export default function App() {
     if (fields.imei2 && !/^\d{15}$/.test(fields.imei2)) return { error: 'Enter all 15 IMEI 2 digits or leave it empty.' };
     const imeiChanged = fields.imei !== record.imei;
     const duplicate = imeiTakenElsewhere(fields.imei, record.id, records);
-    return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, imeiFallbackChecked: true, modelNeedsReview: false, modelNote: '', model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
+    return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, imeiFallbackChecked: true, modelNeedsReview: false, modelNote: '', imeiNeedsReview: false, imeiNote: '', model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
   }
   function saveReviewFields(advance = false) {
     if (!selected || rotatingPhoto) return;
@@ -3732,7 +3737,7 @@ export default function App() {
   function confirmSingleDevice() {
     if (!selected) return;
     const imei = selected.imei || selected.deviceImeis?.[0] || '';
-    updateRow(selected.id, { cropNeedsReview: false, imeiFallbackChecked: true, deviceCount: undefined, deviceImeis: undefined, imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' });
+    updateRow(selected.id, { cropNeedsReview: false, imeiFallbackChecked: true, imeiNeedsReview: false, deviceCount: undefined, deviceImeis: undefined, imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' });
     setManualImei(imei);
     setToast(imei ? 'Kept as one device.' : 'Kept as one device. Enter the IMEI or serial.');
   }
@@ -4915,7 +4920,7 @@ export default function App() {
                     <button className="subtle-btn danger" aria-label={`Delete ${info.name}`} onClick={() => deleteRecord(record)}><Trash2 size={16} /></button>
                   </div>
                   <details className="row-more"><summary>More for this phone</summary><div className="row-more-grid">
-                    <label>IMEI <input aria-label={`IMEI for ${info.name}`} inputMode="numeric" value={record.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); updateRow(record.id, { imei, status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
+                    <label>IMEI <input aria-label={`IMEI for ${info.name}`} inputMode="numeric" value={record.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); updateRow(record.id, { imei, ...(imei.length === 15 ? { imeiNeedsReview: false } : {}), status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
                     <label>Serial <input aria-label={`Serial for ${info.name}`} value={serial} onChange={event => updateRow(record.id, { serial: event.target.value, serialNeedsReview: false })} /></label>
                     <label>Model code <input aria-label={`Model code for ${info.name}`} value={exportModel(record.model)} onChange={event => { const model = event.target.value; updateRow(record.id, { model, modelNeedsReview: !samsungCodeShape(model.trim()), modelNote: samsungCodeShape(model.trim()) ? '' : MODEL_SHAPE_NOTE }); }} /></label>{record.modelNeedsReview && <small className="field-hint">{record.modelNote || MODEL_SHAPE_NOTE}</small>}
                     <button className="subtle-btn" disabled={!exportModel(record.model)} onClick={() => void copyText(exportModel(record.model)).then(ok => setToast(ok ? 'Model code copied.' : 'Copy failed.'))}>Copy model code</button>
@@ -5032,7 +5037,7 @@ export default function App() {
 
                             updateRow(r.id, {
                               imei,
-                              ...(imei.length === 15 ? { cropNeedsReview: false } : {}),
+                              ...(imei.length === 15 ? { cropNeedsReview: false, imeiNeedsReview: false } : {}),
                               status: imei.length === 15
                                 ? (luhnValid(imei) ? 'Valid' : 'Invalid')
                                 : 'Review'

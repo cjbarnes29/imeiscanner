@@ -30,6 +30,7 @@ final class SamsungModel {
     private static final Pattern LABELLED = Pattern.compile("\\bmodel\\s*[:：;.-]?\\s*S\\s*M\\s*[-–—]?\\s*([A-Z0-9|]{5})", Pattern.CASE_INSENSITIVE);
     private static final Pattern VISIBLE = Pattern.compile("\\bS\\s*M\\s*[-–—]\\s*([A-Z0-9|]{5})", Pattern.CASE_INSENSITIVE);
     static final Pattern EXACT = Pattern.compile("[A-Z][0-9]{3}[A-Z0-9]");
+    static final String NO_CODE_NOTE = "No model code was read. Type the code from the label (for example SM-A165F).";
 
     /** A letter the reader gives for a digit, in a position that must be a digit. */
     static char digitFor(char c) {
