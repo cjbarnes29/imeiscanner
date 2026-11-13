@@ -23,7 +23,7 @@ Results of the last run are in `e2e/reports/<time>/REPORT.md` (git-ignored). Num
 | Installing over the real app, signature, data compatibility | none | M | needs a release-signed build and a decision |
 
 ## What was run and the result
-See the table in the final report of the automation setup; the live results are always in the newest `REPORT.md`.
+Full run on 2026-11-13 (emulator, isolated test app, Maestro 2.12.1): **10 passed, 1 known failing (expected), 0 crashes** (00-smoke, 01-scan-gallery 15/15 checks, 02-records 7/7, 03-crop-archive-undo 7/7, 04-restore-from-archive-list 6/6, 05-duplicates-archive-undo 10/10, 06-export-csv 13/13, 08-share 7/7, 09-background-scan 6/6, 10-background-queue 5/5; 07-export-interrupted fails as designed: a 0-byte file is left behind). Each full run takes about 15 minutes. Stability: one fully clean run so far; an earlier run had 3 failures that were test mistakes (wrong field lookup, a read before the app saved, text Maestro cannot see), all fixed. The live results are always in the newest `REPORT.md`.
 
 ## Not in CI (on purpose)
 The emulator workflow is not added to GitHub Actions: the tooling (PowerShell runner, `adb.exe`, `cmd`) is Windows-specific, GitHub's Windows runners cannot run a hardware-accelerated emulator, and the system picker flows were tuned on one emulator image. Porting to Linux (bash runner, KVM emulator action) is possible and listed in `README.md`; it should wait until the suite has been stable for several consecutive runs.
