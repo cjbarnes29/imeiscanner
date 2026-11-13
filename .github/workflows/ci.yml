@@ -9,6 +9,7 @@ permissions:
   contents: read
 
 jobs:
+  # Web checks. The job id stays "build" so an existing required check keeps its name.
   build:
     runs-on: ubuntu-latest
     steps:
@@ -18,13 +19,55 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - run: node scripts/test-records.mjs
-      - run: node scripts/test-device-splitting.mjs
-      - run: node scripts/test-people.mjs
-      - run: node scripts/test-models.mjs
-      - run: node scripts/test-custom-models.mjs
-      - run: node scripts/test-multi-detect.mjs
-      - run: node scripts/test-learning.mjs
-      - run: node scripts/test-crop-engine.mjs
-      - run: node scripts/test-crop-apply.mjs
+      - name: TypeScript
+        run: npm run typecheck
+      - name: All JavaScript tests
+        run: npm test
+      - name: Privacy check (no unlisted checksum-valid IMEI in tracked files)
+        run: npm run check:private:ci
       - run: npm run build
+
+  # Android: JVM unit tests and APK builds (debug-signed; nothing is published from here).
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: npm ci && npm run build
+      - run: mkdir -p android/app/src/main/assets && cp -R dist/. android/app/src/main/assets/
+      - name: JVM unit tests
+        run: gradle --project-dir android :app:testDebugUnitTest --stacktrace
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvm-test-reports
+          path: android/app/build/reports/tests/testDebugUnitTest
+          retention-days: 7
+      - name: Debug APK
+        run: |
+          gradle --project-dir android :app:assembleDebug --stacktrace
+          mkdir -p out && cp android/app/build/outputs/apk/debug/app-debug.apk out/IMEI-Lens-debug.apk
+      - name: Isolated phone-test APK (own app id, minified code, debug-signed)
+        run: |
+          gradle --project-dir android :app:assembleDebug -PphoneTest -PminifyDebug --stacktrace
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/IMEI-Lens-Test-phonetest.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-test-builds
+          path: out/*.apk
+          retention-days: 7
