@@ -1963,13 +1963,14 @@ export default function App() {
   useEffect(() => {
     if (!androidBridge) return;
     const report = (event: Event) => {
-      const { status, filename } = (event as CustomEvent<{ status: string; filename: string }>).detail;
-      const message = status === 'saved' ? `${filename} saved to your phone.`
+      const { status, filename, problem, resumed } = (event as CustomEvent<{ status: string; filename: string; problem?: string; resumed?: boolean }>).detail;
+      const message = status === 'saved' ? (resumed ? `An interrupted save was finished: ${filename} is complete on your phone.` : `${filename} saved to your phone.`)
         : status === 'cancelled' ? 'Save cancelled. No file was downloaded.'
         : status === 'interrupted' ? `The export of ${filename} was interrupted. Nothing was saved. Please try again.`
-        : `Could not save ${filename}. Choose a different folder and try again.`;
+        : `Could not save ${filename}.${problem ? ` ${problem}` : ''} Choose a different folder and try again.`;
       setDownloadStatus(message);
       setToast(message);
+      if (resumed) window.setTimeout(() => setToast(message), 4000); // after the start-up status messages (see android-saved)
     };
     window.addEventListener('android-export-result', report);
     return () => window.removeEventListener('android-export-result', report);
@@ -1988,7 +1989,12 @@ export default function App() {
   useEffect(() => { androidBridge?.setActivePerson?.(activePersonId); }, [activePersonId]);
   useEffect(() => {
     if (!androidBridge) return;
-    const saved = (event: Event) => { const detail = (event as CustomEvent<{ ok: boolean; error?: string }>).detail; if (detail && !detail.ok) setToast(detail.error || 'Could not save.'); };
+    const saved = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; error?: string; count?: number; where?: string; resumed?: boolean }>).detail;
+      if (detail && !detail.ok) setToast(detail.error || 'Could not save.');
+      // Finished at start-up: shown after the start-up status messages, which would otherwise replace it at once.
+      else if (detail?.resumed) { const text = `An interrupted save was finished: ${detail.count ?? 0} files in ${detail.where || 'your folder'}.`; window.setTimeout(() => setToast(text), 4000); }
+    };
     window.addEventListener('android-saved', saved);
     return () => window.removeEventListener('android-saved', saved);
   }, []);

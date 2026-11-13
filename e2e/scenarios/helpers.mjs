@@ -38,7 +38,9 @@ export async function clickText(c, text, { within = 'document', tag = 'button' }
 export async function waitForText(c, text, timeoutMs = 20000, selector = 'body') {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    if (await js(c, `new RegExp(${JSON.stringify(text)}).test(document.querySelector('${selector}').innerText)`)) return true;
+    // While the app is (re)starting there is no process or page yet: keep trying until the time limit instead of failing at once.
+    try { if (await js(c, `new RegExp(${JSON.stringify(text)}).test(document.querySelector('${selector}').innerText)`)) return true; }
+    catch { /* not running or not loaded yet */ }
     await sleep(500);
   }
   return false;
@@ -116,3 +118,22 @@ export async function startCsvExport(c) {
   return clickText(c, '^Export [0-9]+ records');
 }
 export function focusedWindow(c) { return adb(c.device, 'shell', 'dumpsys window | grep mCurrentFocus'); }
+
+/** In the system folder picker: open each folder of the path in turn, then "Use this folder" and "Allow". Returns false when a step is missing. */
+export async function pickFolder(c, path) {
+  for (const name of path) { if (!tapSystemText(c, name)) return false; await sleep(1500); }
+  if (!tapSystemText(c, 'USE THIS FOLDER') && !tapSystemText(c, 'Use this folder')) return false;
+  await sleep(1500);
+  if (!tapSystemText(c, 'ALLOW') && !tapSystemText(c, 'Allow')) return false;
+  await sleep(1500);
+  return true;
+}
+/** Files in a shared-storage folder: [{name, size}] (directories excluded). */
+export function listDir(c, dir) {
+  const out = adb(c.device, 'shell', `ls -l "${dir}" 2>/dev/null; true`);
+  return out.split(/\r?\n/).filter(l => l.startsWith('-')).map(l => { const m = l.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.+)$/); return m ? { name: m[2].trim(), size: +m[1] } : null; }).filter(Boolean);
+}
+/** Sub-folders of a shared-storage folder. */
+export function listDirs(c, dir) {
+  return adb(c.device, 'shell', `ls -l "${dir}" 2>/dev/null; true`).split(/\r?\n/).filter(l => l.startsWith('d')).map(l => l.replace(/^(\S+\s+){7}/, '').trim());
+}

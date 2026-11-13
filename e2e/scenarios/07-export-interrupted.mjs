@@ -1,6 +1,6 @@
 // CSV export while Android ends the app process during the Save dialog. Fixed (ExportCommit journal): the file is completed after the
 // restart, and a 0-byte file is never left behind. (Was a known failure: the pending export lived only in memory.)
-import { ctx, scanAll, clickText, js, adb, sleep, check, finish } from './helpers.mjs';
+import { ctx, scanAll, clickText, js, adb, sleep, check, finish, waitForText } from './helpers.mjs';
 
 const c = ctx(), results = [];
 adb(c.device, 'shell', 'rm -f /sdcard/Download/imei-scanner-export*');
@@ -19,7 +19,7 @@ const xml = adb(c.device, 'shell', 'uiautomator dump /sdcard/e2e-ui.xml >/dev/nu
 const m = xml.match(/text="Save"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/) || xml.match(/text="SAVE"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
 check(results, 'Save button found', !!m);
 if (m) adb(c.device, 'shell', 'input', 'tap', String((+m[1] + +m[3]) / 2 | 0), String((+m[2] + +m[4]) / 2 | 0));
-await sleep(6000);
+check(results, 'the restarted app tells the user the save was finished', await waitForText(c, 'interrupted save was finished', 30000));
 const listing = adb(c.device, 'shell', 'ls -l /sdcard/Download');
 const line = listing.split('\n').find(l => /imei-scanner-export/.test(l)) || '';
 const size = Number((line.match(/\s(\d+)\s\d{4}-\d{2}-\d{2}/) || [])[1] ?? -1);
