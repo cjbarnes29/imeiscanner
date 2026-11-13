@@ -1,0 +1,11 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Baseline measurement only (not part of the suite): fresh start, scan the private real photos pushed as REAL-nn.jpg, wait for completion.
+- runFlow: clean-start.yaml
+- runFlow:
+    file: pick-photos.yaml
+    env:
+      PHOTO_PREFIX: "REAL-"
+- extendedWaitUntil:
+    visible: ".*photos scanned · completed.*"
+    timeout: 300000

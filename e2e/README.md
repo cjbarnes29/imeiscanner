@@ -37,3 +37,7 @@ The report is written to `e2e\reports\<time>\REPORT.md` with per-test logs, Maes
 * Only `com.imeilens.scanner.phonetest`. `run-e2e.ps1` aborts if any flow names another app id.
 * Synthetic data only in committed files (`npm run check:private:ci` enforces it).
 * No test deletes user data; the archive tests check that nothing is lost.
+
+## Background runs: never wait without a timeout
+Start long runs with `e2e\scripts\run-batch.ps1 -Name <name> -Runs N [-RunTimeoutMin 40]`: it always leaves `e2e\reports\<name>-done.txt` or `<name>-failed.txt` (a run that exceeds its timeout is stopped and marked failed). Wait for it with
+`node e2e/scripts/wait-for.mjs e2e/reports/<name>-done.txt --pid <batch pid> --timeout-min 90`, which exits 0 (done), 2 (failed marker), 3 (producer died without a marker) or 4 (timeout), so a waiter can never hang. Log samplers (`adb logcat ... &`) must be started with a kill in a `finally`/trap.
