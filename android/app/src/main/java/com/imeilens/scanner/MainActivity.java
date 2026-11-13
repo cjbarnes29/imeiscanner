@@ -458,6 +458,26 @@ public final class MainActivity extends Activity {
             return value;
         }
 
+        /** The scan report: counts for the current scan and one entry per source photo (outcome, products, IMEIs, duplicates, reason). */
+        @JavascriptInterface public String scanReport() {
+            try { return ScanStore.reportJson(MainActivity.this); }
+            catch (Exception error) { return "{\"jobId\":\"\",\"report\":{},\"photos\":[]}"; }
+        }
+
+        /** Scans again the photos that failed or show a product without an IMEI. Returns how many photos were queued. */
+        @JavascriptInterface public int rescanNeeded(String personId) {
+            try {
+                String person = personId == null || personId.isEmpty() || personId.length() > 80 ? selectedPerson : personId;
+                JSONArray queue = ScanStore.rescanQueue(MainActivity.this);
+                if (queue.length() == 0) return 0;
+                if (ScanStore.start(MainActivity.this, queue, person)) {
+                    WorkManager.getInstance(MainActivity.this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+                } else ScanStore.addPending(MainActivity.this, queue, person);
+                notifyWeb();
+                return queue.length();
+            } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Rescan failed", error); return 0; }
+        }
+
         @JavascriptInterface public String status() {
             try { return ScanStore.json(MainActivity.this); }
             catch (Exception error) { return "{\"status\":\"error\",\"error\":\"Cannot read saved scan\",\"records\":[]}"; }

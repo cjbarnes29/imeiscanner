@@ -661,3 +661,23 @@ body{touch-action:pan-y pinch-zoom}
 .queue-row span{display:grid;gap:2px;min-width:0}.queue-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.queue-row small{color:#a9b9c9;line-height:1.35}
 .queue-row>div{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px}.queue-row>div button{min-height:40px;flex:1 1 110px}
 .studio-thumb b.done{background:#2f8f6a}.studio-thumb b.later{background:#8a6d1f}
+
+/* Scan report (under the background scan progress line) */
+.scan-report { margin-top: 8px; }
+.scan-report-line { margin: 4px 0; font-size: 0.92rem; opacity: 0.95; }
+.scan-report-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.scan-report-list { display: grid; gap: 6px; margin-top: 6px; max-height: 320px; overflow-y: auto; }
+.scan-report-sub { margin: 8px 0 0; font-weight: 600; font-size: 0.9rem; }
+.scan-report-row { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); font-size: 0.88rem; }
+.scan-report-row small { opacity: 0.8; word-break: break-all; }
+.scan-report-row.tone-warn { border-color: rgba(240, 190, 90, 0.55); }
+.scan-report-row.tone-bad { border-color: rgba(240, 110, 110, 0.65); }
+.scan-report-row.tone-info { border-color: rgba(120, 170, 240, 0.5); }
+
+.archive-banner{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.5rem .75rem;margin:.5rem 0;border:1px solid #2f6f6a;border-radius:10px;background:#12302f;color:#dff5f0;font-size:.9rem}
+.archive-list{display:flex;flex-direction:column;gap:.5rem;max-height:60vh;overflow:auto}
+.archive-row{display:flex;flex-direction:column;gap:.2rem;padding:.5rem;border:1px solid #d5dbe6;border-radius:8px}
+.archive-row small{color:#566}
+.undo-bar{flex-wrap:wrap;max-width:min(94vw,560px)}
+.undo-bar span{flex:1 1 12rem}
+.fallback-note{color:#f0c060;font-weight:600}

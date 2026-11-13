@@ -81,15 +81,49 @@ final class ScanStore {
             JSONObject out = new JSONObject();
             for (Iterator<String> keys = job.keys(); keys.hasNext(); ) {
                 String key = keys.next();
-                if (!"records".equals(key) && !"queue".equals(key) && !"pending".equals(key)) out.put(key, job.get(key));
+                if (!"records".equals(key) && !"queue".equals(key) && !"pending".equals(key) && !"photos".equals(key)) out.put(key, job.get(key));
             }
             JSONArray slice = new JSONArray();
             for (int index = start; index < total && index < start + 200; index++) slice.put(records.get(index));
             out.put("records", slice);
             out.put("recordsFrom", start);
             out.put("recordsTotal", total);
+            // The scan report: counts for the current scan (the per-photo list is fetched separately, see reportJson).
+            out.put("report", ScanLedger.summarize(photosOf(job), job.optString("id")));
             return out.toString();
         } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
+    /** The scan report ledger of a job; jobs saved by older versions have none. */
+    private static JSONArray photosOf(JSONObject job) {
+        JSONArray photos = job.optJSONArray("photos");
+        return photos == null ? new JSONArray() : photos;
+    }
+
+    /** The scan report for the web page: the summary of the current scan and one entry per source photo. */
+    static synchronized String reportJson(Context context) {
+        JSONObject job = load(context);
+        try {
+            JSONArray photos = photosOf(job);
+            return new JSONObject().put("jobId", job.optString("id")).put("report", ScanLedger.summarize(photos, job.optString("id"))).put("photos", photos).toString();
+        } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
+    /**
+     * This photo's earlier records that have no IMEI and still have their picture: a new scan of the same photo must not add another
+     * empty copy next to them. Reads the saved job in place (no copy), so it is cheap to call once per photo.
+     */
+    static synchronized java.util.List<String> emptyRecordsOfPhoto(Context context, String uri, String hash) {
+        JSONObject job = load(context);
+        JSONArray records = job.optJSONArray("records");
+        return ScanLedger.emptyRecordsOfPhoto(records == null ? new JSONArray() : records, photosOf(job), uri == null ? "" : uri, hash,
+            id -> { try { return image(context, id).isFile(); } catch (RuntimeException error) { return false; } });
+    }
+
+    /** The photos that failed or show a product without an IMEI, as a queue to scan them again. */
+    static synchronized JSONArray rescanQueue(Context context) {
+        try { return ScanLedger.rescanQueue(photosOf(load(context))); }
+        catch (Exception error) { throw new IllegalStateException(error); }
     }
 
     static synchronized String status(Context context) { return load(context).optString("status"); }
@@ -101,7 +135,7 @@ final class ScanStore {
         try {
             job.put("id", ""); job.put("status", "idle"); job.put("count", 0);
             job.put("completed", 0); job.put("failed", 0);
-            job.put("records", new JSONArray()); job.put("queue", new JSONArray());
+            job.put("records", new JSONArray()); job.put("queue", new JSONArray()); job.put("photos", new JSONArray());
         } catch (Exception error) { throw new IllegalStateException(error); }
         return job;
     }
@@ -180,7 +214,10 @@ final class ScanStore {
         return start(context, pending, person);
     }
 
-    static synchronized void update(Context context, int completed, int failed, JSONArray additions) {
+    static synchronized void update(Context context, int completed, int failed, JSONArray additions) { update(context, completed, failed, additions, null); }
+
+    /** Also writes the source photo's entry in the scan report, in the same save as its records. */
+    static synchronized void update(Context context, int completed, int failed, JSONArray additions, JSONObject photo) {
         JSONObject job = load(context);
         // A scan that was reset has no job id: late results from it must not come back.
         if ("stopped".equals(job.optString("status")) || job.optString("id").isEmpty()) return;
@@ -188,6 +225,11 @@ final class ScanStore {
         if (records == null) records = new JSONArray();
         for (int index = 0; index < additions.length(); index++) records.put(additions.optJSONObject(index));
         try {
+            if (photo != null) {
+                JSONArray photos = photosOf(job);
+                ScanLedger.upsert(photos, photo);
+                job.put("photos", photos);
+            }
             job.put("records", records);
             job.put("completed", completed);
             job.put("failed", failed);

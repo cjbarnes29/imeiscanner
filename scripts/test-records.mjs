@@ -4,7 +4,7 @@ import ts from 'typescript';
 import ExcelJS from 'exceljs';
 
 // Exercise the app's actual helpers without mounting React or changing its source.
-const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'imeiTakenElsewhere', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair', 'pictureWebLink'];
+const names = ['hasMultipleDeviceText','luhnValid', 'extractImei1s', 'extractPreferredImei', 'cameraImei', 'recordSerial', 'markDuplicateRecords', 'imeiTakenElsewhere', 'recordPhoto', 'photoFilename', 'safeFileName', 'htmlEscape', 'personTitle', 'imeiIsFallback', 'reviewNote', 'reviewStatus', 'csvCell', 'recordsCsv', 'makeStableGalleryHtml', 'createPhotoGalleryHtml', 'createInventoryWorkbook', 'createImeiPhotoFiles', 'dataUrlBlob', 'recordImeiPair', 'pictureWebLink'];
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let helpers = 'const digits = s => s.replace(/\\D/g, "");\n';
@@ -59,6 +59,15 @@ try {
   const serialOnly = {...blank,serial:'RTEST2L1PLK'};
   assert.equal(f.reviewStatus(serialOnly),'Serial only');
   assert.equal(f.reviewStatus({...serialOnly,serialNeedsReview:true}),'Needs review');
+  // IMEI 2 shown in the IMEI column because IMEI 1 was unreadable is never silent: it needs review until a person confirms it.
+  const fallback={id:'f',imei:'356938035643809',imei2:'356938035643809',raw:'IMEI 1: unreadable\nIMEI 2: 356938035643809',status:'Valid',duplicate:false};
+  assert.equal(f.imeiIsFallback(fallback),true);
+  assert.equal(f.reviewStatus(fallback),'Needs review');
+  assert.match(f.reviewNote(fallback),/IMEI 1 could not be read/);
+  assert.equal(f.reviewStatus({...fallback,imeiFallbackChecked:true}),'Valid','confirmed by a person');
+  const normal={id:'n',imei:'490154203237518',imei2:'356938035643809',raw:'',status:'Valid',duplicate:false};
+  assert.equal(f.imeiIsFallback(normal),false);
+  assert.equal(f.reviewStatus(normal),'Valid');
   assert.ok(f.recordsCsv([serialOnly],new Map(),peopleForTest(),false,'simple').includes('RTEST2L1PLK'));
   function peopleForTest(){return [{id:'p',label:'Person 1',name:''}];}
   const share=f.buildSharePackage([{number:3,pictureId:'PIC-ONE',model:'Watch',imei:'490154203237518',serial:'',photo:'data:image/jpeg;base64,Q1JPUE9ORQ=='},{number:4,pictureId:'PIC-TWO',model:'',imei:'',serial:'000ABC123',photo:'data:image/png;base64,Q1JPUDJUV08='}]);

@@ -2,6 +2,9 @@ const DATABASE = 'imei-lens-v2';
 const TABLE = 'inventory';
 const RECORD_PREFIX = 'record:';
 let lastSaved = new Map<string, unknown>();
+/** Stored photos that must never be released (originals in the archive). Set by the app at start-up. */
+let isProtectedSource: (sourcePictureId: string) => boolean = () => false;
+export function setSourceGuard(guard: (sourcePictureId: string) => boolean) { isProtectedSource = guard; }
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -63,7 +66,7 @@ export async function saveInventory<T extends { id: string; sourcePictureId?: st
       const store = transaction.objectStore(TABLE);
       for (const row of changed) store.put(row, `${RECORD_PREFIX}${row.id}`);
       for (const id of removed) store.delete(`${RECORD_PREFIX}${id}`);
-      for (const sourceId of unusedSources) store.delete(`source:${sourceId}`);
+      for (const sourceId of unusedSources) if (!isProtectedSource(sourceId)) store.delete(`source:${sourceId}`);
       store.delete('records');
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);

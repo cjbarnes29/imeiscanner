@@ -90,9 +90,9 @@ try{
   ok('Redo brings the third box back; Undo removes it again');
 
   await clickText('.studio-actions button','Save all');
-  await waitFor(`[...document.querySelectorAll('button')].some(b=>/^Replace original/.test(b.textContent.trim()))`,'check screen',180000);
+  await waitFor(`[...document.querySelectorAll('button')].some(b=>/^Save \\d+ pictures? and archive/.test(b.textContent.trim()))`,'check screen',180000);
   ok('Save all reads both boxes and shows a check screen');
-  await clickText('button','Replace original');
+  await clickText('button','and archive');
   await waitFor(`!document.querySelector('.studio-backdrop')`,'applied',60000);
   await sleep(1500);
   const rows=await readDb();
@@ -102,7 +102,7 @@ try{
   assert.ok(rows.every(x=>x.dataLen<photo.length*0.8),'the full photo is not copied into the crops');
   assert.ok(rows.every(x=>x.person===''),'the person is kept');
   assert.equal(await run(`!localStorage.getItem('imei-lens-crop-draft-v1')`),true,'draft cleared after saving');
-  ok('Replace original: 2 records, each with its own crop only, person kept, draft cleared');
+  ok('Save and archive original: 2 records, each with its own crop only, person kept, draft cleared');
   console.log('   IMEIs read from the 2 crops:',rows.map(x=>x.imei).filter(Boolean).join(', ')||'(none)','| models:',rows.map(x=>x.model).join(', '));
 }catch(error){
   console.error('FAIL:',error.message);

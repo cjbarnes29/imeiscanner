@@ -11,12 +11,18 @@ import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import androidx.core.app.NotificationCompat;
 
 /**
  * Keeps the app alive while the background crop queue is running in the page: an ongoing notification ("Cropping 3 of 12",
  * with Stop) and a wake lock, so Android does not stop the app when it is minimized or the screen turns off.
  * The page tells this service how far it is (MainActivity bridge queueStatus); Stop only sets a flag the page reads.
+ *
+ * It never holds the phone awake for a queue that has stopped: the wake lock is renewed only when the page reports progress, and the
+ * service stops itself after QueueWatchdog.STALL_MS without progress (the saved queue is kept; the page shows it as paused).
  */
 public final class QueueService extends Service {
     static final String ACTION_STOP = "com.imeilens.scanner.QUEUE_STOP";
@@ -26,6 +32,19 @@ public final class QueueService extends Service {
     static volatile boolean stopRequested;
     private static volatile boolean running;
     private PowerManager.WakeLock lock;
+    private static volatile QueueService instance;
+    private QueueWatchdog watchdog;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable check = new Runnable() {
+        @Override public void run() {
+            if (watchdog != null && watchdog.stalled(SystemClock.elapsedRealtime())) {
+                android.util.Log.w("IMEI-Lens", "Crop queue made no progress for " + watchdog.idleMs(SystemClock.elapsedRealtime()) / 1000 + " s: stopping the service and releasing the wake lock");
+                stopRequested = true; // if the page is alive it pauses the queue (the saved queue and its photos are kept)
+                stopForeground(Service.STOP_FOREGROUND_REMOVE);
+                stopSelf();
+            } else handler.postDelayed(this, QueueWatchdog.CHECK_MS);
+        }
+    };
 
     static boolean isRunning() { return running; }
 
@@ -39,7 +58,7 @@ public final class QueueService extends Service {
         return new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_crop)
             .setContentTitle("IMEI Lens is cropping photos")
-            .setContentText(done + " of " + total + " photos done ? tap to open")
+            .setContentText(done + " of " + total + " photos done - tap to open")
             .setContentIntent(open).setOnlyAlertOnce(true).setOngoing(true)
             .setProgress(Math.max(1, total), Math.min(done, Math.max(1, total)), false)
             .addAction(android.R.drawable.ic_media_pause, "Pause", stop)
@@ -49,6 +68,8 @@ public final class QueueService extends Service {
     /** Start (or update) the notification. Safe to call often. */
     static void show(Context context, int done, int total) {
         if (running) {
+            QueueService live = instance;
+            if (live != null) live.progress(done, total);
             ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).notify(ID, build(context, done, total));
             return;
         }
@@ -70,17 +91,29 @@ public final class QueueService extends Service {
         if (Build.VERSION.SDK_INT >= 35) startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
         else startForeground(ID, notification);
         running = true;
+        instance = this;
+        if (watchdog == null) watchdog = new QueueWatchdog(SystemClock.elapsedRealtime(), done, total);
         if (lock == null) {
             PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
             lock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "imeilens:crop-queue");
             lock.setReferenceCounted(false);
         }
-        lock.acquire(30L * 60L * 1000L); // renewed by every update; released when the queue ends
+        lock.acquire(QueueWatchdog.LOCK_MS); // renewed only by progress (see progress()); released when the queue ends or stalls
+        handler.removeCallbacks(check);
+        handler.postDelayed(check, QueueWatchdog.CHECK_MS);
         return START_NOT_STICKY;
+    }
+
+    /** A status report from the page: progress renews the wake lock and the stall clock; a repeated report does not. */
+    private void progress(int done, int total) {
+        if (watchdog != null && watchdog.update(done, total, SystemClock.elapsedRealtime()) && lock != null) lock.acquire(QueueWatchdog.LOCK_MS);
     }
 
     @Override public void onDestroy() {
         running = false;
+        instance = null;
+        watchdog = null;
+        handler.removeCallbacks(check);
         if (lock != null && lock.isHeld()) lock.release();
         super.onDestroy();
     }
