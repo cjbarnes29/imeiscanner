@@ -178,22 +178,38 @@ public final class MainActivity extends Activity {
             return;
         }
         if (requestCode == 1003) {
-            boolean saved = false;
-            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingExport != null) {
-                try (InputStream input = new FileInputStream(pendingExport);
-                     OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+            // The in-memory record is gone when Android ended the process during the Save dialog: use the journal.
+            ExportCommit.Pending pending = pendingExport != null && pendingExportName != null
+                ? new ExportCommit.Pending(pendingExport, pendingExportName, pendingExport.length())
+                : ExportCommit.recover(exportStore());
+            boolean ok = resultCode == RESULT_OK && data != null && data.getData() != null;
+            Uri target = ok ? data.getData() : null;
+            android.util.Log.i("IMEI-Lens", "Save result: ok=" + ok + ", staged in memory=" + (pendingExport != null) + ", recovered from journal=" + (pending != null));
+            boolean written = false;
+            if (ok && pending != null) {
+                try (OutputStream output = getContentResolver().openOutputStream(target, "wt")) {
                     if (output == null) throw new IllegalStateException("Cannot open destination");
-                    byte[] chunk = new byte[8192]; int count;
-                    while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
-                    output.flush();
-                    saved = true;
+                    ExportCommit.copyVerified(pending, output);
+                    written = true;
                 } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Export failed", error); }
+                // Read the file back after the stream is closed and count what is really there. (The size the provider
+                // reports can be stale for a moment, even 0 for a good file, so it is never used to delete anything.)
+                if (written) {
+                    long onDisk = bytesInDocument(target);
+                    android.util.Log.i("IMEI-Lens", "Save check: expected=" + pending.size + ", read back=" + onDisk);
+                    written = ExportCommit.sizeMatches(onDisk, pending.size);
+                }
             }
-            String name = pendingExportName;
+            ExportCommit.Outcome outcome = ExportCommit.decide(ok, resultCode == RESULT_CANCELED, pending, written);
+            // Never leave an empty or partial file behind unannounced.
+            if (target != null && ExportCommit.mustRemoveTarget(outcome)) removeDocument(target);
+            String name = pending != null ? pending.name : pendingExportName;
+            if (pending != null) pending.file.delete();
             if (pendingExport != null) pendingExport.delete();
             pendingExport = null;
             pendingExportName = null;
-            reportExport(saved ? "saved" : resultCode == RESULT_CANCELED ? "cancelled" : "failed", name);
+            ExportCommit.clear(exportStore());
+            reportExport(ExportCommit.status(outcome), name);
             return;
         }
         if (requestCode != 1001 || resultCode != RESULT_OK || data == null) return;
@@ -399,10 +415,41 @@ public final class MainActivity extends Activity {
         File[] items = getCacheDir().listFiles();
         if (items == null) return;
         long cutoff = System.currentTimeMillis() - 60L * 60L * 1000L;
+        String journaled = ExportCommit.journaledPath(exportStore());
         for (File item : items) {
             if (item.getName().startsWith("imei-folder-") && item.isDirectory() && item.lastModified() < cutoff) deleteFolder(item);
-            else if (item.getName().startsWith("imei-export-") && item.lastModified() < cutoff) item.delete();
+            else if (item.getName().startsWith("imei-export-") && item.lastModified() < cutoff
+                && !item.getAbsolutePath().equals(journaled)) item.delete();
         }
+        // A journal older than a day, or whose file is gone, is dead: drop it.
+        if (journaled != null && (!new File(journaled).isFile() || new File(journaled).lastModified() < System.currentTimeMillis() - 24L * 3600L * 1000L)) {
+            new File(journaled).delete();
+            ExportCommit.clear(exportStore());
+        }
+    }
+
+    private ExportCommit.Store exportStore() {
+        final android.content.SharedPreferences prefs = getSharedPreferences("export-journal", MODE_PRIVATE);
+        return new ExportCommit.Store() {
+            @Override public String get(String key) { return prefs.getString(key, null); }
+            @Override public void put(String key, String value) { prefs.edit().putString(key, value).commit(); }
+            @Override public void remove(String key) { prefs.edit().remove(key).commit(); }
+        };
+    }
+
+    /** Number of bytes actually readable from the saved document, or -1 when it cannot be opened (then it is not judged). */
+    private long bytesInDocument(Uri uri) {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) return -1;
+            byte[] chunk = new byte[8192]; long total = 0; int count;
+            while ((count = input.read(chunk)) != -1) total += count;
+            return total;
+        } catch (Exception error) { return -1; }
+    }
+
+    private void removeDocument(Uri uri) {
+        try { DocumentsContract.deleteDocument(getContentResolver(), uri); }
+        catch (Exception error) { android.util.Log.e("IMEI-Lens", "Could not remove the incomplete file", error); }
     }
 
     private static void deleteFolder(File folder) {
@@ -667,6 +714,13 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public boolean finishFile(String token, String filename, String mimeType) {
             synchronized (MainActivity.this) {
                 if (stagingExport == null || !token.equals(stagingToken) || pendingExport != null) return false;
+                try { ExportCommit.begin(exportStore(), stagingExport, filename); }
+                catch (Exception error) {
+                    android.util.Log.e("IMEI-Lens", "Nothing to export", error);
+                    stagingExport.delete(); stagingExport = null; stagingToken = null;
+                    reportExport("failed", filename);
+                    return false;
+                }
                 pendingExport = stagingExport;
                 pendingExportName = filename;
                 stagingExport = null;
@@ -685,6 +739,7 @@ public final class MainActivity extends Activity {
                     if (pendingExport != null) pendingExport.delete();
                     pendingExport = null;
                     pendingExportName = null;
+                    ExportCommit.clear(exportStore());
                     reportExport("failed", filename);
                 }
             });

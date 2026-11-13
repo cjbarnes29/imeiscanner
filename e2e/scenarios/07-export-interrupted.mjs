@@ -1,5 +1,5 @@
-// CSV export while Android ends the app process during the Save dialog. DESIRED behavior: no empty file is left behind, or the file is completed.
-// KNOWN FAILING today (confirmed root cause: the pending export lives only in the app's memory; the system creates the empty file when Save is tapped).
+// CSV export while Android ends the app process during the Save dialog. Fixed (ExportCommit journal): the file is completed after the
+// restart, and a 0-byte file is never left behind. (Was a known failure: the pending export lived only in memory.)
 import { ctx, scanAll, clickText, js, adb, sleep, check, finish } from './helpers.mjs';
 
 const c = ctx(), results = [];
@@ -24,5 +24,6 @@ const listing = adb(c.device, 'shell', 'ls -l /sdcard/Download');
 const line = listing.split('\n').find(l => /imei-scanner-export/.test(l)) || '';
 const size = Number((line.match(/\s(\d+)\s\d{4}-\d{2}-\d{2}/) || [])[1] ?? -1);
 check(results, 'no empty (0-byte) export file is left behind', size !== 0, line ? `${size} bytes` : 'no file');
+check(results, 'the export was completed after the restart (not lost)', size > 100, `${size} bytes`);
 adb(c.device, 'shell', 'rm -f /sdcard/Download/imei-scanner-export*');
 finish('07-export-interrupted', results);

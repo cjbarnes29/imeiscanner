@@ -1966,6 +1966,7 @@ export default function App() {
       const { status, filename } = (event as CustomEvent<{ status: string; filename: string }>).detail;
       const message = status === 'saved' ? `${filename} saved to your phone.`
         : status === 'cancelled' ? 'Save cancelled. No file was downloaded.'
+        : status === 'interrupted' ? `The export of ${filename} was interrupted. Nothing was saved. Please try again.`
         : `Could not save ${filename}. Choose a different folder and try again.`;
       setDownloadStatus(message);
       setToast(message);
