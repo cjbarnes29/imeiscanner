@@ -52,6 +52,8 @@ final class LabelGeometry {
         final List<Hit> hits = new ArrayList<>();
         final List<Box> groups = new ArrayList<>();
         boolean vertical;
+        /** "IMEI 1" scraps of neighbouring labels at the photo border that were not made into labels. */
+        int fragments;
     }
 
     /** The digits of a masked IMEI for logs: first 8 and last 4 digits, the rest hidden. Anything else is only counted. */
@@ -74,13 +76,16 @@ final class LabelGeometry {
     static List<Hit> imeiOneHits(List<Item> lines) {
         List<Hit> hits = new ArrayList<>();
         for (Item line : lines) {
-            if (!LABEL_ONE.matcher(line.text).find()) continue;
+            Matcher label = LABEL_ONE.matcher(line.text);
+            if (!label.find()) continue;
             Box box = line.box;
             Matcher number = NUMBER.matcher(line.text);
             String imei = number.find() ? number.group().replaceAll("\\D", "") : "";
             Hit hit = new Hit(new Box(box), imei);
             hit.length = line.text.length();
-            for (int i = 0; i < line.text.length(); i++) if (Character.isDigit(line.text.charAt(i))) hit.digits++;
+            // Digits of the number only: the "1" of "IMEI 1" is not one of them (counting it made a line with 14 of 15 digits look complete,
+            // so a number cut off by the photo edge was not recognised as cut off; seen on real photos).
+            for (int i = label.end(); i < line.text.length(); i++) if (Character.isDigit(line.text.charAt(i))) hit.digits++;
             boolean duplicate = false;
             int replace = -1;
             for (int index = 0; index < hits.size(); index++) {
@@ -138,7 +143,9 @@ final class LabelGeometry {
         boolean guess = stackedVertically(found, width, height);
         Grouping first = groupAlong(copyOf(found), guess, width, height);
         Grouping other = groupAlong(copyOf(found), !guess, width, height);
-        return other.groups.size() < first.groups.size() ? other : first;
+        if (other.groups.size() != first.groups.size()) return other.groups.size() < first.groups.size() ? other : first;
+        // Same number of labels both ways: the way that explains more lines (fewer left over as border scraps) wins; a full tie keeps the old guess.
+        return other.fragments < first.fragments ? other : first;
     }
 
     /** One grouping attempt with the labels assumed stacked top-to-bottom (vertical) or side by side. */
@@ -152,6 +159,12 @@ final class LabelGeometry {
         java.util.Comparator<Hit> along = (a, b) -> Integer.compare(vertical ? a.box.centerY() : a.box.centerX(), vertical ? b.box.centerY() : b.box.centerX());
         numbered.sort(along);
         partial.sort(along);
+        // Lines misread in the open first (each stays a label of its own, unchanged), then lines cut off by the edge, so a cut-off line can join
+        // the label of a misread line on the same row (a label whose only full-width IMEI 1 line was misread; seen on a real photo).
+        List<Hit> ordered = new ArrayList<>(partial.size());
+        for (Hit hit : partial) if (!cutOffByEdge(hit, width)) ordered.add(hit);
+        for (Hit hit : partial) if (cutOffByEdge(hit, width)) ordered.add(hit);
+        partial = ordered;
         List<String> groupNumbers = new ArrayList<>();
         for (Hit hit : numbered) {
             int match = -1;
@@ -163,6 +176,10 @@ final class LabelGeometry {
                 int span = vertical ? Math.max(hit.box.bottom, group.bottom) - Math.min(hit.box.top, group.top)
                     : Math.max(hit.box.right, group.right) - Math.min(hit.box.left, group.left);
                 if (gap < major * 0.18 && cross < minor * 0.65 && span < major * 0.27) { match = groupIndex; break; }
+                // One device has one IMEI 1: the same full number printed again on the same row of the label (left and right
+                // columns of a wide label, further apart than the cross limit) is that label, not a second one. Still limited along
+                // the stacking direction, so two far-apart reads of one number are not glued over another label.
+                if (span < major * 0.27) { match = groupIndex; hit.note = "joined label " + groupIndex + " (same number on the same row)"; break; }
             }
             if (match >= 0) { result.groups.get(match).union(hit.box); hit.group = match; }
             else {
@@ -173,26 +190,72 @@ final class LabelGeometry {
         int numberedGroups = result.groups.size();
         for (Hit hit : partial) {
             int best = -1, bestDistance = Integer.MAX_VALUE;
-            if (cutOffByEdge(hit, width)) {
-                int centre = vertical ? hit.box.centerY() : hit.box.centerX();
-                for (int groupIndex = 0; groupIndex < numberedGroups; groupIndex++) {
-                    Box group = result.groups.get(groupIndex);
-                    int span = vertical ? Math.max(hit.box.bottom, group.bottom) - Math.min(hit.box.top, group.top)
-                        : Math.max(hit.box.right, group.right) - Math.min(hit.box.left, group.left);
-                    if (span >= major * 0.27) continue; // it would make the label taller than a label can be: not this one
-                    int distance = Math.abs(centre - (vertical ? group.centerY() : group.centerX()));
-                    if (distance < bestDistance) { best = groupIndex; bestDistance = distance; }
-                }
+            boolean cut = cutOffByEdge(hit, width);
+            int centre = vertical ? hit.box.centerY() : hit.box.centerX();
+            // A number cut off by the photo edge may join any label close enough along the stacking direction, including a label made of
+            // other cut-off lines (the right column of a label whose numbered line was not read). A line misread in the open is never
+            // attached (unchanged rule): it stays a label of its own and is reviewed, rather than being guessed into a neighbour.
+            if (cut) for (int groupIndex = 0; groupIndex < result.groups.size(); groupIndex++) {
+                Box group = result.groups.get(groupIndex);
+                int span = vertical ? Math.max(hit.box.bottom, group.bottom) - Math.min(hit.box.top, group.top)
+                    : Math.max(hit.box.right, group.right) - Math.min(hit.box.left, group.left);
+                int cross = vertical ? Math.abs(hit.box.centerX() - group.centerX()) : Math.abs(hit.box.centerY() - group.centerY());
+                if (span >= major * 0.27) continue; // it would make the label taller than a label can be: not this one
+                // A label without a read number: the cut-off right column of a wide label sits up to about 0.7 of the photo width away.
+                if (groupIndex >= numberedGroups && cross >= minor * 0.80) continue;
+                int distance = Math.abs(centre - (vertical ? group.centerY() : group.centerX()));
+                if (distance < bestDistance) { best = groupIndex; bestDistance = distance; }
             }
             if (best >= 0) {
                 result.groups.get(best).union(hit.box); hit.group = best;
                 hit.note = "joined label " + best + " (line cut off at the photo edge)";
+            } else if (edgeFragment(hit, width, height) && numberedGroups > 0) {
+                // A scrap of a neighbouring label at the photo's border ("IMEI 1" with almost no digits): it cannot become a product and
+                // must not stop the visible labels from being cut apart. Counted, never silently: see Grouping.fragments.
+                hit.note = "edge fragment (" + hit.digits + " digits at the photo border), not a label";
+                result.fragments++;
             } else {
                 hit.note = explain(hit, result.groups, groupNumbers, vertical, major, minor, width, height);
                 result.groups.add(new Box(hit.box)); groupNumbers.add(""); hit.group = result.groups.size() - 1;
             }
         }
         return result;
+    }
+
+    static final Pattern SERIAL = Pattern.compile("(?i)\\bS\\s*/\\s*N\\b");
+
+    /**
+     * How many labels the "S/N" lines show (one per label on every label seen so far), as a second opinion on the label count that does not
+     * need the "Model" line (cut off by the frame on 3 of 11 real photos) or a readable IMEI 1. Repeats at the same place count once.
+     * "IMEI 2" is NOT used: some labels print it several times or on one line with IMEI 1 (it counted 4 and 9 labels on 2- and 4-label photos).
+     */
+    static int landmarkLabels(List<Item> lines) {
+        return distinctPlaces(lines, SERIAL);
+    }
+
+    private static int distinctPlaces(List<Item> lines, Pattern pattern) {
+        List<Box> found = new ArrayList<>();
+        for (Item line : lines) {
+            if (!pattern.matcher(line.text).find()) continue;
+            boolean seen = false;
+            // The line's thickness is its smaller side: on a photo turned by 90 degrees the text runs downwards.
+            int thick = Math.min(line.box.width(), line.box.height());
+            boolean upright = line.box.width() >= line.box.height();
+            for (Box known : found) {
+                int across = upright ? Math.abs(known.centerY() - line.box.centerY()) : Math.abs(known.centerX() - line.box.centerX());
+                int along = upright ? Math.abs(known.centerX() - line.box.centerX()) : Math.abs(known.centerY() - line.box.centerY());
+                if (across < Math.max(12, thick * 3 / 2) && along < Math.max(40, thick * 6)) seen = true;
+            }
+            if (!seen) found.add(line.box);
+        }
+        return found.size();
+    }
+
+    /** "IMEI 1" with fewer than 6 digits, touching the photo border: a cut-off scrap of a neighbouring label. */
+    static boolean edgeFragment(Hit hit, int width, int height) {
+        if (hit.digits >= 6) return false;
+        int marginX = Math.max(4, width / 100), marginY = Math.max(4, height / 100);
+        return hit.box.left <= marginX || hit.box.top <= marginY || hit.box.right >= width - marginX || hit.box.bottom >= height - marginY;
     }
 
     /**

@@ -124,6 +124,10 @@ final class ImageScanner {
             int target = expected > 0 ? expected : counted;
             int barcodeLabels = (distinctImeiBarcodes(codes) + 1) / 2;
             if (expected == 0 && barcodeLabels > target) target = Math.min(MAX_PRODUCTS, barcodeLabels);
+            // Labels whose "Model" line the frame cut off still show their "S/N" line: a second opinion for Auto. It only starts the
+            // re-read and, if a label is still missing, marks the photo for review ("1 device or N?"); it never creates a record.
+            int serialLabels = LabelGeometry.landmarkLabels(items(linesOf(full)));
+            if (expected == 0 && serialLabels > target) target = Math.min(MAX_PRODUCTS, serialLabels);
             List<Line> lines = null;
             final int firstGroups = labels.size();
             final List<Rect> firstLabels = labels;
@@ -171,6 +175,8 @@ final class ImageScanner {
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             final JSONObject diag = diagStart(filename, bitmap, rotation, tilt, speed, expected, counted, barcodeLabels, target, grouping, firstGroups, tilePasses);
+            diagAnchors(diag, linesOf(full));
+            try { diag.put("serialLabels", serialLabels); } catch (Exception ignored) { /* diagnostics only */ }
             if (labels.size() <= 1) {
                 output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0));
                 markOrphans(diag, codes, output);
@@ -258,11 +264,13 @@ final class ImageScanner {
             diag.put("v", 1).put("photo", filename).put("w", bitmap.getWidth()).put("h", bitmap.getHeight()).put("rot", rotation)
                 .put("tilt", Math.round(tilt * 10) / 10.0).put("speed", speed).put("expected", expected)
                 .put("modelLines", counted).put("barcodeLabels", barcodeLabels).put("target", target)
-                .put("groupsFirstRead", firstGroups).put("tilePasses", tilePasses).put("groups", grouping.groups.size()).put("vertical", grouping.vertical);
+                .put("groupsFirstRead", firstGroups).put("tilePasses", tilePasses).put("groups", grouping.groups.size()).put("vertical", grouping.vertical)
+                .put("edgeFragments", grouping.fragments);
             JSONArray hits = new JSONArray();
             for (LabelGeometry.Hit hit : grouping.hits)
                 hits.put(new JSONObject().put("b", new JSONArray().put(hit.box.left).put(hit.box.top).put(hit.box.right).put(hit.box.bottom))
-                    .put("n", LabelGeometry.mask(hit.number)).put("g", hit.group).put("why", hit.note));
+                    .put("n", LabelGeometry.mask(hit.number)).put("g", hit.group).put("why", hit.note)
+                    .put("d", hit.digits).put("len", hit.length));
             diag.put("imeiOneLines", hits);
         } catch (Exception ignored) { /* diagnostics must never break a scan */ }
         return diag;
@@ -286,6 +294,23 @@ final class ImageScanner {
             diag.put("orphanBarcodes", masked);
             for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("orphanBarcodes", orphans.size());
         } catch (Exception ignored) { /* a hint only */ }
+    }
+
+    private static final Pattern DIAG_IMEI_TWO = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\b");
+    private static final Pattern DIAG_SERIAL = Pattern.compile("(?i)\\bS\\s*/\\s*N\\b");
+
+    /** Diagnostics only: where the first read saw label landmarks (Model, IMEI 2, S/N lines). Positions and text length, never digits. */
+    private static void diagAnchors(JSONObject diag, List<Line> lines) {
+        try {
+            JSONArray model = new JSONArray(), imeiTwo = new JSONArray(), serial = new JSONArray();
+            for (Line line : lines) {
+                JSONArray where = new JSONArray().put(line.box.left).put(line.box.top).put(line.box.right).put(line.box.bottom).put(line.text.length());
+                if (MODEL_LINE.matcher(line.text).find()) model.put(where);
+                else if (DIAG_IMEI_TWO.matcher(line.text).find()) imeiTwo.put(where);
+                else if (DIAG_SERIAL.matcher(line.text).find()) serial.put(where);
+            }
+            diag.put("anchors", new JSONObject().put("model", model).put("imei2", imeiTwo).put("sn", serial));
+        } catch (Exception ignored) { /* diagnostics must never break a scan */ }
     }
 
     private static void diagFinish(JSONObject diag, JSONArray output, String path, String why, int regions) {
