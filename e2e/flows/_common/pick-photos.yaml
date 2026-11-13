@@ -1,0 +1,27 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Opens the system photo picker from the Scan tab, searches for ${PHOTO_PREFIX}, selects every result and confirms.
+- tapOn: "Choose photos and scan"
+- extendedWaitUntil:
+    visible: "Recent"
+    timeout: 10000
+- tapOn: "Search"
+- inputText: ${PHOTO_PREFIX}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Images"
+    timeout: 10000
+- longPressOn:
+    point: "20%,29%"
+- tapOn: "More options"
+- runFlow:
+    when:
+      visible: "Select all"
+    commands:
+      - tapOn: "Select all"
+- runFlow:
+    when:
+      visible: "Deselect all"
+    commands:
+      - pressKey: Back
+- tapOn: "Select"

@@ -1,0 +1,8 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Returns to the running app without restarting it and waits for the scan result.
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: ".*photos scanned · completed.*"
+    timeout: 60000

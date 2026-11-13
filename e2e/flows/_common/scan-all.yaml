@@ -1,0 +1,9 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Fresh start, then scan all five synthetic photos from the gallery and wait for completion.
+- runFlow: clean-start.yaml
+- runFlow:
+    file: pick-photos.yaml
+    env:
+      PHOTO_PREFIX: "E2E-"
+- runFlow: wait-scan.yaml

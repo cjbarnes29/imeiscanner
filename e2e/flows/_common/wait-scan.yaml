@@ -1,0 +1,6 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Waits until the background scan says it is completed.
+- extendedWaitUntil:
+    visible: ".*photos scanned · completed.*"
+    timeout: 180000

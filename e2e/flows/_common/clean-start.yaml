@@ -1,0 +1,14 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Fresh start of IMEI Lens Test ONLY (appId comes from the calling flow; the runner refuses any other id).
+- launchApp:
+    clearState: true
+    stopApp: true
+    permissions:
+      all: allow
+- runFlow:
+    when:
+      visible: "Welcome to IMEI Lens"
+    commands:
+      - tapOn: "Close"
+- assertVisible: "Choose photos and scan"

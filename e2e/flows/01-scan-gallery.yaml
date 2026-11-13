@@ -1,0 +1,20 @@
+# Gallery upload of the five synthetic photos (single labels, a two-product photo, a duplicate, an IMEI-2-only label), scan report and records.
+# The saved data is verified afterwards by scripts/verify-01-scan-gallery.mjs.
+appId: com.imeilens.scanner.phonetest
+---
+- runFlow: _common/clean-start.yaml
+- runFlow:
+    file: _common/pick-photos.yaml
+    env:
+      PHOTO_PREFIX: "E2E-"
+- runFlow: _common/wait-scan.yaml
+- takeScreenshot: scan-completed
+- tapOn: "Show scan report"
+- assertVisible: ".*5 photos.*"
+- takeScreenshot: scan-report
+- tapOn: "Records.*"
+- scrollUntilVisible:
+    element: ".*490154203237518.*"
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: records

@@ -1,0 +1,33 @@
+# Smoke test: WebView interaction, tab navigation, screenshots and the Android file picker (open, search, cancel, select, confirm).
+appId: com.imeilens.scanner.phonetest
+---
+- runFlow: _common/clean-start.yaml
+- takeScreenshot: 00-first-launch
+# WebView: web text is visible and tappable
+- assertVisible: "Upload photos"
+- tapOn: "Records.*"
+- assertVisible: ".*Scanned records.*"
+- takeScreenshot: 01-records-empty
+- tapOn: "Scan"
+- assertVisible: "Choose photos and scan"
+# File picker: open and cancel (must return to the app unchanged)
+- tapOn: "Choose photos and scan"
+- extendedWaitUntil:
+    visible: "Recent"
+    timeout: 10000
+- takeScreenshot: 02-picker-open
+- pressKey: Back
+- assertVisible: "Choose photos and scan"
+# File picker: pick one synthetic photo and scan it
+- runFlow:
+    file: _common/pick-photos.yaml
+    env:
+      PHOTO_PREFIX: "single-A"
+- runFlow: _common/wait-scan.yaml
+- takeScreenshot: 03-scan-completed
+- tapOn: "Records.*"
+- scrollUntilVisible:
+    element: ".*490154203237518.*"
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 04-record-visible

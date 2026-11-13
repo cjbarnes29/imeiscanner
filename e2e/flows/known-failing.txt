@@ -1,0 +1,3 @@
+# Tests that currently FAIL because of confirmed product defects. They are skipped by default (run with -IncludeKnownFailing) and reported as XFAIL.
+# A test that starts passing is reported as XPASS: remove it from this list then.
+07-export-interrupted          App process ended during the Save dialog leaves a 0-byte file (confirmed root cause, Phase 3 fix designed)

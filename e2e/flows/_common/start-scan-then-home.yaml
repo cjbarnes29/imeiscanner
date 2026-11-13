@@ -1,0 +1,9 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Starts a scan of the five synthetic photos and immediately sends the app to the background (Home).
+- runFlow: clean-start.yaml
+- runFlow:
+    file: pick-photos.yaml
+    env:
+      PHOTO_PREFIX: "E2E-"
+- pressKey: Home

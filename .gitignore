@@ -27,3 +27,7 @@ src/version.ts
 # Phase results hold backups and real-IMEI evidence
 phase1-results/
 phase2-results/
+
+# Emulator test output and generated synthetic photos
+e2e/reports/
+e2e/fixtures/out/
