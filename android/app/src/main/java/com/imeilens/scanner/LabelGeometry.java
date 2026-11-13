@@ -144,8 +144,28 @@ final class LabelGeometry {
         Grouping first = groupAlong(copyOf(found), guess, width, height);
         Grouping other = groupAlong(copyOf(found), !guess, width, height);
         if (other.groups.size() != first.groups.size()) return other.groups.size() < first.groups.size() ? other : first;
-        // Same number of labels both ways: the way that explains more lines (fewer left over as border scraps) wins; a full tie keeps the old guess.
-        return other.fragments < first.fragments ? other : first;
+        // Same number of labels both ways: the way that explains more lines (fewer left over as border scraps) wins.
+        if (other.fragments != first.fragments) return other.fragments < first.fragments ? other : first;
+        // Still a tie: every label prints one "S/N" line, so the labels are stacked in the direction the S/N lines are spread. (The old guess
+        // from the IMEI 1 lines fails on wide labels, whose right-column lines spread sideways as much as the labels spread downwards.)
+        Boolean bySerial = stackedBySerial(lines, width, height);
+        if (bySerial != null && bySerial != first.vertical) return other;
+        return first;
+    }
+
+    /** True / false when at least two distinct "S/N" lines show the stacking direction clearly; null when they do not. */
+    static Boolean stackedBySerial(List<Item> lines, int width, int height) {
+        List<Box> serials = distinctBoxes(lines, SERIAL);
+        if (serials.size() < 2) return null;
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        for (Box box : serials) {
+            minX = Math.min(minX, box.centerX()); maxX = Math.max(maxX, box.centerX());
+            minY = Math.min(minY, box.centerY()); maxY = Math.max(maxY, box.centerY());
+        }
+        double down = (double) (maxY - minY) / height, across = (double) (maxX - minX) / width;
+        if (down > across * 2 && down > 0.15) return true;
+        if (across > down * 2 && across > 0.15) return false;
+        return null; // diagonal or too close together: no opinion
     }
 
     /** One grouping attempt with the labels assumed stacked top-to-bottom (vertical) or side by side. */
@@ -223,17 +243,24 @@ final class LabelGeometry {
     }
 
     static final Pattern SERIAL = Pattern.compile("(?i)\\bS\\s*/\\s*N\\b");
+    /**
+     * The memory line of a label: the whole line is RAM and storage ("4GB |128GB", "8GB 256GB"). A single capacity is not enough (some layouts
+     * print RAM and storage on separate lines). Glare misreads seen on real photos are allowed in the units ("128G8", "4PG", "128 GE") as long
+     * as one of the two units reads exactly GB or TB.
+     */
+    static final Pattern STORAGE = Pattern.compile("(?i)^(?=.*\\d\\s*[GT]B)\\s*\\d{1,2}\\s*[A-Z68]{1,2}\\s*[|/Il1!]?\\s*\\d{2,4}\\s*[A-Z68]{1,2}\\s*$");
 
     /**
-     * How many labels the "S/N" lines show (one per label on every label seen so far), as a second opinion on the label count that does not
-     * need the "Model" line (cut off by the frame on 3 of 11 real photos) or a readable IMEI 1. Repeats at the same place count once.
+     * How many labels the landmarks show, as a second opinion on the label count that does not need the "Model" line (cut off by the frame on
+     * 3 of 11 real photos) or a readable IMEI 1: the larger of the distinct "S/N" lines and the distinct memory lines, one of each per label on
+     * every label seen so far. Repeats at the same place count once.
      * "IMEI 2" is NOT used: some labels print it several times or on one line with IMEI 1 (it counted 4 and 9 labels on 2- and 4-label photos).
      */
     static int landmarkLabels(List<Item> lines) {
-        return distinctPlaces(lines, SERIAL);
+        return Math.max(distinctBoxes(lines, SERIAL).size(), distinctBoxes(lines, STORAGE).size());
     }
 
-    private static int distinctPlaces(List<Item> lines, Pattern pattern) {
+    private static List<Box> distinctBoxes(List<Item> lines, Pattern pattern) {
         List<Box> found = new ArrayList<>();
         for (Item line : lines) {
             if (!pattern.matcher(line.text).find()) continue;
@@ -248,7 +275,7 @@ final class LabelGeometry {
             }
             if (!seen) found.add(line.box);
         }
-        return found.size();
+        return found;
     }
 
     /** "IMEI 1" with fewer than 6 digits, touching the photo border: a cut-off scrap of a neighbouring label. */

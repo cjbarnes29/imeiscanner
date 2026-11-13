@@ -298,18 +298,25 @@ final class ImageScanner {
 
     private static final Pattern DIAG_IMEI_TWO = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\b");
     private static final Pattern DIAG_SERIAL = Pattern.compile("(?i)\\bS\\s*/\\s*N\\b");
+    private static final Pattern DIAG_STORAGE = Pattern.compile("(?i)\\b\\d{1,4}\\s*[GT]B\\b");
 
     /** Diagnostics only: where the first read saw label landmarks (Model, IMEI 2, S/N lines). Positions and text length, never digits. */
     private static void diagAnchors(JSONObject diag, List<Line> lines) {
         try {
-            JSONArray model = new JSONArray(), imeiTwo = new JSONArray(), serial = new JSONArray();
+            JSONArray model = new JSONArray(), imeiTwo = new JSONArray(), serial = new JSONArray(), storage = new JSONArray(), other = new JSONArray();
             for (Line line : lines) {
                 JSONArray where = new JSONArray().put(line.box.left).put(line.box.top).put(line.box.right).put(line.box.bottom).put(line.text.length());
                 if (MODEL_LINE.matcher(line.text).find()) model.put(where);
                 else if (DIAG_IMEI_TWO.matcher(line.text).find()) imeiTwo.put(where);
                 else if (DIAG_SERIAL.matcher(line.text).find()) serial.put(where);
+                else if (DIAG_STORAGE.matcher(line.text).find()) storage.put(where.put(line.text.replaceAll("[0-9]", "#")).put(LabelGeometry.STORAGE.matcher(line.text).find()));
+                else {
+                    // Other text as a shape only: every digit becomes '#', so no number can appear in the log.
+                    String shape = line.text.replaceAll("[0-9]", "#").replaceAll("[^#A-Za-z/|:. -]", "");
+                    other.put(where.put(shape.substring(0, Math.min(14, shape.length()))));
+                }
             }
-            diag.put("anchors", new JSONObject().put("model", model).put("imei2", imeiTwo).put("sn", serial));
+            diag.put("anchors", new JSONObject().put("model", model).put("imei2", imeiTwo).put("sn", serial).put("storage", storage).put("other", other));
         } catch (Exception ignored) { /* diagnostics must never break a scan */ }
     }
 

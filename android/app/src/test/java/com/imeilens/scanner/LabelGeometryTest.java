@@ -3,6 +3,7 @@ package com.imeilens.scanner;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -220,5 +221,49 @@ public class LabelGeometryTest {
         assertEquals(0, LabelGeometry.differences("351973137770365", "351973137770365"));
         assertEquals(1, LabelGeometry.differences("351973137770365", "351973137770366"));
         assertEquals("different lengths count as fully different", 15, LabelGeometry.differences("1", "351973137770365"));
+    }
+
+    @Test public void landmarkCountUsesSerialAndMemoryLinesOncePerLabel() {
+        List<LabelGeometry.Item> lines = new ArrayList<>();
+        // two stacked labels: S/N of the top one is lost to glare, both memory lines are read
+        lines.add(new LabelGeometry.Item("4GB |128GB", new LabelGeometry.Box(100, 200, 400, 240)));
+        lines.add(new LabelGeometry.Item("4GB | 128GB", new LabelGeometry.Box(100, 1100, 400, 1140)));
+        lines.add(new LabelGeometry.Item("S/N : RFGL81XXXXX", new LabelGeometry.Box(1100, 1150, 1500, 1190)));
+        assertEquals(2, LabelGeometry.landmarkLabels(lines));
+        // the same memory line read twice (a tile re-read) counts once
+        lines.add(new LabelGeometry.Item("4GB l128GB", new LabelGeometry.Box(104, 203, 398, 242)));
+        assertEquals(2, LabelGeometry.landmarkLabels(lines));
+    }
+
+    @Test public void separateRamAndStorageLinesAreNotTwoLabels() {
+        // A layout that prints RAM and storage on separate lines must not double the count: single capacities are ignored.
+        List<LabelGeometry.Item> lines = new ArrayList<>();
+        lines.add(new LabelGeometry.Item("RAM 8GB", new LabelGeometry.Box(100, 200, 300, 240)));
+        lines.add(new LabelGeometry.Item("ROM 256GB", new LabelGeometry.Box(100, 260, 330, 300)));
+        assertEquals(0, LabelGeometry.landmarkLabels(lines));
+        assertFalse(LabelGeometry.STORAGE.matcher("128GB").find());
+        assertTrue(LabelGeometry.STORAGE.matcher("8GB 256GB").find());
+        assertTrue(LabelGeometry.STORAGE.matcher("12GB|512GB").find());
+        // glare misreads seen on real photos (multi-10, multi-06, multi-08)
+        assertTrue(LabelGeometry.STORAGE.matcher("4GB |128G8").find());
+        assertTrue(LabelGeometry.STORAGE.matcher("4PG |128GB").find());
+        assertTrue(LabelGeometry.STORAGE.matcher("4GB |128 GE").find());
+        // but not when neither unit is a real GB/TB, and not other short lines
+        assertFalse(LabelGeometry.STORAGE.matcher("4PG |128G8").find());
+        assertFalse(LabelGeometry.STORAGE.matcher("RAM 8GB").find());
+        assertFalse(LabelGeometry.STORAGE.matcher("A 5G").find());
+    }
+
+    @Test public void stackingDirectionFromSerialLinesNeedsAClearSpread() {
+        List<LabelGeometry.Item> lines = new ArrayList<>();
+        lines.add(new LabelGeometry.Item("S/N : R1", new LabelGeometry.Box(1000, 300, 1300, 330)));
+        lines.add(new LabelGeometry.Item("S/N : R2", new LabelGeometry.Box(1010, 1200, 1310, 1230)));
+        assertEquals(Boolean.TRUE, LabelGeometry.stackedBySerial(lines, 1430, 1600));
+        lines.clear();
+        lines.add(new LabelGeometry.Item("S/N : R1", new LabelGeometry.Box(100, 300, 300, 330)));
+        lines.add(new LabelGeometry.Item("S/N : R2", new LabelGeometry.Box(900, 320, 1100, 350)));
+        assertEquals(Boolean.FALSE, LabelGeometry.stackedBySerial(lines, 1430, 1600));
+        lines.remove(1);
+        assertNull("one S/N line gives no direction", LabelGeometry.stackedBySerial(lines, 1430, 1600));
     }
 }

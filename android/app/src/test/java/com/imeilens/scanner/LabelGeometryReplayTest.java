@@ -18,6 +18,7 @@ import org.junit.Test;
 public class LabelGeometryReplayTest {
     static final class Photo {
         String id; int width, height, labels, deviceGroups, deviceTarget, modelLines, barcodeLabels;
+        boolean deviceVertical;
         final List<LabelGeometry.Item> lines = new ArrayList<>();
     }
 
@@ -33,13 +34,19 @@ public class LabelGeometryReplayTest {
                     photo = new Photo(); photo.id = p[1]; photo.width = Integer.parseInt(p[2]); photo.height = Integer.parseInt(p[3]);
                     photo.labels = Integer.parseInt(p[4]); photo.deviceGroups = Integer.parseInt(p[5]); photo.deviceTarget = Integer.parseInt(p[6]);
                     photo.modelLines = Integer.parseInt(p[7]); photo.barcodeLabels = Integer.parseInt(p[8]);
+                    photo.deviceVertical = p.length > 9 && p[9].equals("1");
                     photos.add(photo);
                 } else if (p[0].equals("i1")) {
                     String text = row.substring(row.indexOf(p[5], p[0].length() + p[1].length() + p[2].length() + p[3].length() + p[4].length() + 5));
                     photo.lines.add(new LabelGeometry.Item(text, box(p, 1)));
                 } else if (p[0].equals("a")) {
                     int length = Integer.parseInt(p[6]);
-                    String text = p[1].equals("model") ? "Model : SM-A000X/DS" : p[1].equals("imei2") ? "IMEI 2 : 99" : "S/N : RXXX";
+                    // a storage line carries its real text shape (8th field, may contain spaces) when the capture logged it
+                    String[] withText = row.split(" ", 8);
+                    String real = withText.length == 8 ? withText[7] : null;
+                    String text = p[1].equals("model") ? "Model : SM-A000X/DS" : p[1].equals("imei2") ? "IMEI 2 : 99"
+                        : p[1].equals("storage") ? (real != null ? real : "4GB |128GB") : "S/N : RXXX";
+                    if (real != null) { photo.lines.add(new LabelGeometry.Item(real, box(p, 2))); continue; }
                     StringBuilder padded = new StringBuilder(text); while (padded.length() < length) padded.append('x');
                     photo.lines.add(new LabelGeometry.Item(padded.toString(), box(p, 2)));
                 }
@@ -89,6 +96,23 @@ public class LabelGeometryReplayTest {
         assertEquals("the Auto estimate never exceeds the real labels on this set (no false review flags)\n" + report, 0, overTarget);
         assertTrue("grouping must improve, not regress\n" + report, exactGroups > exactBefore);
         assertTrue("the Auto estimate must improve\n" + report, underTarget < underTargetBefore);
+    }
+
+    /**
+     * Stacking direction. All 16 photos are stacked top to bottom except the turned photo real-04 (labels side by side in the image) and the
+     * single-label real-01. real-08 was read sideways (its wide labels' right columns joined across both labels, so no seam could be found).
+     */
+    @Test public void stackingDirectionFollowsTheSerialLines() throws Exception {
+        StringBuilder report = new StringBuilder();
+        int changed = 0;
+        for (Photo photo : load()) {
+            LabelGeometry.Grouping grouping = LabelGeometry.group(photo.lines, photo.width, photo.height);
+            if (grouping.vertical != photo.deviceVertical) { changed++; report.append(photo.id).append(" device ").append(photo.deviceVertical).append(" now ").append(grouping.vertical).append('\n'); }
+            if (photo.id.equals("real-08")) assertTrue("real-08 labels are stacked top to bottom", grouping.vertical);
+            if (photo.id.equals("real-04")) assertTrue("real-04 (turned photo) labels lie side by side", !grouping.vertical);
+            if (photo.id.startsWith("lab-")) assertTrue(photo.id + " stays top to bottom", grouping.vertical);
+        }
+        System.out.println("orientation changes vs the phone's old code:\n" + report);
     }
 
     /** Photos that were right before must stay exactly as they were. */
