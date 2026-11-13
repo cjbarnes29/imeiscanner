@@ -57,6 +57,13 @@ foreach ($flow in $all) {
   $name = $flow.BaseName
   $xfail = $knownFailing -contains $name
   if ($xfail -and -not $IncludeKnownFailing) { $rows += [pscustomobject]@{ Flow = $name; Result = "SKIPPED (known failing)"; Seconds = 0; Crashes = 0; Notes = "" }; continue }
+  # The emulator can disappear (seen: a crash of its desktop window). adb would then wait forever: stop with a clear result instead.
+  $online = (adb devices) -join "`n"
+  if ($online -notmatch [regex]::Escape($Device) + "\s+device") {
+    Write-Host "ABORT: $Device is no longer connected (emulator closed or crashed); remaining tests not run." -ForegroundColor Red
+    $rows += [pscustomobject]@{ Flow = $name; Result = "NOT RUN (device gone)"; Seconds = 0; Crashes = 0; Notes = "emulator disconnected before this test" }
+    break
+  }
   Write-Host "== $name" -ForegroundColor Cyan
   adb -s $Device shell pm clear com.google.android.documentsui | Out-Null
   adb -s $Device shell am force-stop $App | Out-Null
@@ -70,7 +77,9 @@ foreach ($flow in $all) {
   }
   $log | Out-File "$out\run.log" -Encoding utf8
   $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds)
-  adb -s $Device logcat -d | Out-File "$out\logcat.txt" -Encoding utf8
+  # Bounded: "adb logcat -d" waits forever when the device has gone away (that hung a whole batch once).
+  $lc = Start-Process adb -ArgumentList "-s", $Device, "logcat", "-d" -RedirectStandardOutput "$out\logcat.txt" -NoNewWindow -PassThru
+  if (-not $lc.WaitForExit(60000)) { try { $lc.Kill() } catch { }; Add-Content "$out\logcat.txt" "(logcat timed out after 60 s: the device may be gone)" }
   $crash = @(Select-String -Path "$out\logcat.txt" -Pattern 'FATAL EXCEPTION|ANR in|OutOfMemoryError').Count
   $crashes += $crash
   $notes = ""
