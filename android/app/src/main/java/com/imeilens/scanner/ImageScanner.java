@@ -176,6 +176,13 @@ final class ImageScanner {
             JSONArray output = new JSONArray();
             final JSONObject diag = diagStart(filename, bitmap, rotation, tilt, speed, expected, counted, barcodeLabels, target, grouping, firstGroups, tilePasses);
             diagAnchors(diag, linesOf(full));
+            try {
+                // Diagnostics only: every decoded barcode, masked, with its place and whether its checksum is valid.
+                JSONArray barcodes = new JSONArray();
+                for (Code code : codes) barcodes.put(new JSONArray().put(LabelGeometry.mask(code.value.replaceAll("\\D", "").length() == 15 ? code.value.replaceAll("\\D", "") : ""))
+                    .put(code.box.left).put(code.box.top).put(code.box.right).put(code.box.bottom).put(luhn(code.value)).put(code.value.length()));
+                diag.put("barcodes", barcodes);
+            } catch (Exception ignored) { /* diagnostics only */ }
             try { diag.put("serialLabels", serialLabels); } catch (Exception ignored) { /* diagnostics only */ }
             if (labels.size() <= 1) {
                 output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0));
@@ -361,6 +368,29 @@ final class ImageScanner {
         }
         // Barcodes are exact: pair each with the "IMEI 1" / "IMEI 2" text printed under it.
         String barcode1 = labelledBarcode(ocr, codes, region, LABEL_ONE), barcode2 = labelledBarcode(ocr, codes, region, LABEL_TWO);
+        // IMEI 1's own text line was not read: find IMEI 1's barcode by the same-device rule (same serial part as this label's IMEI 2).
+        // The number is the barcode's own; IMEI 1 is never computed from IMEI 2.
+        if (barcode1.isEmpty()) {
+            String anchor = ImeiSource.secondImeiInText(raw);
+            if (anchor.isEmpty()) anchor = barcode2;
+            if (!anchor.isEmpty()) {
+                List<String> values = new ArrayList<>();
+                if (codes != null) for (Code code : codes) values.add(code.value);
+                String found = ImeiSource.sameDeviceImei1(anchor, values);
+                // Not among the photo's barcodes: read the barcodes of this label again, enlarged (only for a record that would show IMEI 2 only).
+                if (found.isEmpty() && (imei.isEmpty() || ImeiSource.usesSecondImei(raw, imei))) {
+                    long tb = Prof.now();
+                    for (Code code : barcodesEnlarged(photo)) values.add(code.value);
+                    found = ImeiSource.sameDeviceImei1(anchor, values);
+                    Prof.add(found.isEmpty() ? "barcodeRetryMiss" : "barcodeRetryHit", tb);
+                }
+                if (!found.isEmpty()) {
+                    barcode1 = found;
+                    if (barcode2.equals(found)) barcode2 = ""; // that barcode was IMEI 1, wrongly taken as IMEI 2 (a wide barcode box over both lines)
+                }
+            }
+        }
+        if (!barcode2.isEmpty() && barcode2.equals(barcode1)) barcode2 = "";
         if (!barcode1.isEmpty()) { imei = barcode1; raw += "\nIMEI 1 (barcode): " + barcode1; }
         if (!barcode2.isEmpty()) raw += "\nIMEI 2 (barcode): " + barcode2;
         String id = UUID.randomUUID().toString();
@@ -383,7 +413,11 @@ final class ImageScanner {
         row.put("personId", personId);
         row.put("name", filename);
         row.put("imageName", id + ".jpg");
-        row.put("model", model(raw + " " + filename));
+        String modelText = raw + " " + filename;
+        row.put("model", model(modelText));
+        // Never silent about an unclear model code: the record asks for a check (the IMEI status is not affected).
+        SamsungModel.Reading modelReading = SamsungModel.read(modelText);
+        if (modelReading.uncertain && !modelReading.note.isEmpty()) { row.put("modelNeedsReview", true); row.put("modelNote", modelReading.note); }
         row.put("imei", imei);
         // Never silent: when only the label's IMEI 2 could be read, the number is kept but marked so the app asks for a review.
         if (!imei.isEmpty() && ImeiSource.usesSecondImei(raw, imei)) row.put("imeiFallback", true);
@@ -747,6 +781,19 @@ final class ImageScanner {
     static final class Code { final String value; final Rect box; Code(String value, Rect box) { this.value = value; this.box = box; } }
 
     /** Every Code 128 / EAN-13 barcode in the photo. A failure only means no barcode help for this photo. */
+    /** Barcodes of a label read again at up to twice the size (long edge at most 2400 px, so memory stays bounded). Empty when it cannot help. */
+    private static List<Code> barcodesEnlarged(Bitmap photo) {
+        int longest = Math.max(photo.getWidth(), photo.getHeight());
+        float factor = Math.min(2f, 2400f / longest);
+        if (factor < 1.25f) return new ArrayList<>();
+        Bitmap big = null;
+        try {
+            big = Bitmap.createScaledBitmap(photo, Math.round(photo.getWidth() * factor), Math.round(photo.getHeight() * factor), true);
+            return barcodes(big);
+        } catch (Throwable error) { return new ArrayList<>(); } // never break a scan (out of memory included)
+        finally { if (big != null && big != photo) big.recycle(); }
+    }
+
     private static List<Code> barcodes(Bitmap bitmap) {
         List<Code> found = new ArrayList<>();
         BarcodeScanner scanner = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder()
@@ -823,21 +870,13 @@ final class ImageScanner {
         return total % 10 == 0;
     }
 
+    /** The model as stored (see SamsungModel for the rules); modelReading() says whether it needs a review. */
     private static String model(String text) {
-        java.util.regex.Matcher labelled = java.util.regex.Pattern.compile("\\bmodel\\s*[:：-]?\\s*S\\s*M\\s*[-–—]?\\s*([A-Z0-9]{5})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+        SamsungModel.Reading reading = SamsungModel.read(text);
+        if (!reading.model.isEmpty()) return reading.model;
+        // No usable code shape at all: an unreadable code is kept as read (as before), then the series names.
         java.util.regex.Matcher visible = java.util.regex.Pattern.compile("\\bS\\s*M\\s*[-–—]\\s*([A-Z0-9]{5})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
-        String labelledCode = labelled.find() ? labelled.group(1).toUpperCase(java.util.Locale.US) : "";
-        java.util.HashSet<String> exactCodes = new java.util.HashSet<>();
-        String firstCode = "";
-        while (visible.find()) {
-            String code = visible.group(1).toUpperCase(java.util.Locale.US);
-            if (firstCode.isEmpty()) firstCode = code;
-            if (code.matches("[A-Z][0-9]{3}[A-Z0-9]")) exactCodes.add(code);
-        }
-        if (!labelledCode.isEmpty() && exactCodes.contains(labelledCode)) return "SM-" + labelledCode;
-        if (exactCodes.size() == 1) return "SM-" + exactCodes.iterator().next();
-        if (!labelledCode.isEmpty()) return "SM-" + labelledCode;
-        if (!firstCode.isEmpty()) return "SM-" + firstCode;
+        if (visible.find()) return "SM-" + visible.group(1).toUpperCase(java.util.Locale.US);
         String value = text.toLowerCase(java.util.Locale.ROOT);
         if (value.matches("(?s).*samsung.*s26.*|.*sm[- ]?s94.*")) return "Samsung Galaxy S26 series";
         if (value.matches("(?s).*samsung.*s25.*|.*sm[- ]?s93.*")) return "Samsung Galaxy S25 series";
