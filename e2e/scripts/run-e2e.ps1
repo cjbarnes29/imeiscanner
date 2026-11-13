@@ -1,10 +1,14 @@
 # Runs the IMEI Lens emulator tests against the ISOLATED test app only: Maestro flows (e2e\flows\NN-*.yaml) and hybrid scenarios (e2e\scenarios\NN-*.mjs).
 #   powershell -ExecutionPolicy Bypass -File e2e\scripts\run-e2e.ps1 [-Flows 00-smoke,03-crop-archive-undo] [-Device emulator-5554] [-IncludeKnownFailing]
 # Output: e2e\reports\<timestamp>\REPORT.md (+ JUnit XML, screenshots, logcat per test). Reports are git-ignored; IMEIs in them are synthetic or masked.
+#   Real phone: add -RealPhone. Then the runner never clears any other app's data, skips tests that delete or read shared files
+#   (Download exports: the phone may hold the owner's real exports), removes only the folders it created itself, and checks before and after
+#   that the owner's files in Download, Documents and Pictures are unchanged (names, sizes and dates only; contents are never read).
 param(
   [string[]]$Flows = @(),
   [string]$Device = "emulator-5554",
-  [switch]$IncludeKnownFailing
+  [switch]$IncludeKnownFailing,
+  [switch]$RealPhone
 )
 $ErrorActionPreference = "Continue"
 $Flows = @($Flows | ForEach-Object { $_ -split "," } | Where-Object { $_ })
@@ -34,6 +38,17 @@ foreach ($f in Get-ChildItem $scenDir -File -ErrorAction SilentlyContinue) {
 }
 $devices = (adb devices) -join "`n"
 if ($devices -notmatch [regex]::Escape($Device) + "\s+device") { Fail "device $Device is not connected" }
+$isEmulator = ((adb -s $Device shell getprop ro.kernel.qemu) -join "").Trim() -eq "1" -or $Device -like "emulator-*"
+if (-not $isEmulator -and -not $RealPhone) { Fail "$Device is a real phone. Run with -RealPhone (safe mode for a person's phone)." }
+if ($isEmulator -and $RealPhone) { Write-Host "Note: -RealPhone on an emulator (safe mode used anyway)." }
+$safe = $RealPhone.IsPresent
+if ($safe) { $env:E2E_REAL_PHONE = "1" } else { Remove-Item Env:E2E_REAL_PHONE -ErrorAction SilentlyContinue }
+# Tests that delete or read files in shared folders the owner also uses (Download: imei-scanner-export* may be real exports).
+$sharedFileTests = @("06-export-csv", "07-export-interrupted", "11-export-lost-staging")
+# The owner's files: listing only (name, size, date), compared before and after. Our own folders and temporary files are left out.
+$ownFolders = 'e2e-fixtures|E2E-fx|e2e-ui\.xml'
+# A 15-digit run in a file name is masked (first 8 + last 4) before it is written to the report.
+function OwnerFiles { (adb -s $Device shell "find /sdcard/Download /sdcard/Documents /sdcard/Pictures /sdcard/DCIM -type f -print0 2>/dev/null | xargs -0 stat -c '%n|%s|%Y' 2>/dev/null | sort") | Where-Object { $_ -and $_ -notmatch $ownFolders } | ForEach-Object { $_ -replace '(?<!\d)(\d{8})\d{3}(\d{4})(?!\d)', '$1***$2' } }
 $packages = (adb -s $Device shell pm list packages) -join "`n"
 if ($packages -notmatch "package:$([regex]::Escape($App))\r?\n") { Fail "$App is not installed. Install the phone-test APK first (adb install ...phonetest.apk)." }
 
@@ -41,7 +56,16 @@ if ($packages -notmatch "package:$([regex]::Escape($App))\r?\n") { Fail "$App is
 $fix = Join-Path $root "e2e\fixtures\out"
 if (-not (Test-Path "$fix\truth.json")) { node (Join-Path $root "e2e\fixtures\make-fixtures.mjs") | Out-Null }
 $remote = "/sdcard/Pictures/e2e-fixtures"
-adb -s $Device shell "rm -rf $remote; mkdir -p $remote" | Out-Null
+if ($safe) {
+  # Our folders must be ours: refuse when they already exist without our marker (never delete something the owner made).
+  foreach ($dir in @($remote, "/sdcard/Documents/E2E-fx")) {
+    $state = ((adb -s $Device shell "if [ -e $dir ]; then if [ -e $dir/.imei-lens-e2e ] || [ -z `"`$(ls -A $dir)`" ]; then echo ours; else echo foreign; fi; else echo none; fi") -join "").Trim()
+    if ($state -eq "foreign") { Fail "$dir exists on the phone and was not made by these tests. Not touching it." }
+  }
+  $before = OwnerFiles
+  $before | Out-File (Join-Path $report "owner-files-before.txt") -Encoding utf8
+}
+adb -s $Device shell "rm -rf $remote; mkdir -p $remote; touch $remote/.imei-lens-e2e" | Out-Null
 Get-ChildItem $fix -Filter *.jpg | ForEach-Object { cmd /c "adb -s $Device push `"$($_.FullName)`" $remote/$($_.Name) >nul 2>&1" }
 adb -s $Device shell "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$remote" | Out-Null
 
@@ -57,6 +81,10 @@ foreach ($flow in $all) {
   $name = $flow.BaseName
   $xfail = $knownFailing -contains $name
   if ($xfail -and -not $IncludeKnownFailing) { $rows += [pscustomobject]@{ Flow = $name; Result = "SKIPPED (known failing)"; Seconds = 0; Crashes = 0; Notes = "" }; continue }
+  # Seen on a real phone (POCO X7 Pro, 2026-11-14): the picker search did not narrow to the test photos and "Select all" selected 64 of the
+  # owner's photos (the count guard stopped it). Until photos can be given to the app without the system picker, those tests do not run on phones.
+  if ($safe -and ((Get-Content $flow.FullName -Raw) -match 'scanAll|pick-photos|scan-all|start-scan-then-home|scan-real|pickFolder')) { $rows += [pscustomobject]@{ Flow = $name; Result = "BLOCKED (real phone: system picker)"; Seconds = 0; Crashes = 0; Notes = "picker selection is not safe on a person's phone" }; continue }
+  if ($safe -and $sharedFileTests -contains $name) { $rows += [pscustomobject]@{ Flow = $name; Result = "SKIPPED (real phone: shared Download files)"; Seconds = 0; Crashes = 0; Notes = "manual checks E1/E2 cover it" }; continue }
   # The emulator can disappear (seen: a crash of its desktop window). adb would then wait forever: stop with a clear result instead.
   $online = (adb devices) -join "`n"
   if ($online -notmatch [regex]::Escape($Device) + "\s+device") {
@@ -65,7 +93,8 @@ foreach ($flow in $all) {
     break
   }
   Write-Host "== $name" -ForegroundColor Cyan
-  adb -s $Device shell pm clear com.google.android.documentsui | Out-Null
+  # Emulator only: resets the system folder picker between tests. Never on a person's phone (it would clear their picker history).
+  if (-not $safe) { adb -s $Device shell pm clear com.google.android.documentsui | Out-Null }
   adb -s $Device shell am force-stop $App | Out-Null
   adb -s $Device logcat -c
   $out = Join-Path $report $name; New-Item -ItemType Directory -Force $out | Out-Null
@@ -99,6 +128,18 @@ foreach ($flow in $all) {
   if ($xfail) { $result = if ($code -eq 0) { "XPASS (known failing test passed)" } else { "XFAIL (known failing)" } }
   $rows += [pscustomobject]@{ Flow = $name; Result = $result; Seconds = $secs; Crashes = $crash; Notes = $notes }
   Write-Host "   $result in ${secs}s" -ForegroundColor $(if ($result -like "PASS*" -or $result -like "XFAIL*") { "Green" } else { "Red" })
+}
+
+$ownerNote = ""
+if ($safe) {
+  # Remove only what this run created, then prove the owner's files did not change.
+  adb -s $Device shell "rm -rf $remote; rm -f /sdcard/e2e-ui.xml; if [ -e /sdcard/Documents/E2E-fx/.imei-lens-e2e ] || [ -z `"`$(ls -A /sdcard/Documents/E2E-fx 2>/dev/null)`" ]; then rm -rf /sdcard/Documents/E2E-fx; fi" | Out-Null
+  adb -s $Device shell "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$remote" | Out-Null
+  $after = OwnerFiles
+  $after | Out-File (Join-Path $report "owner-files-after.txt") -Encoding utf8
+  $diff = Compare-Object @($before) @($after)
+  if ($diff) { $ownerNote = "OWNER FILES CHANGED: $(@($diff).Count) listing lines differ (see owner-files-before/after.txt)"; $rows += [pscustomobject]@{ Flow = "owner-files-unchanged"; Result = "FAIL"; Seconds = 0; Crashes = 0; Notes = $ownerNote } }
+  else { $ownerNote = "Owner files in Download, Documents, Pictures and DCIM: unchanged ($(@($before).Count) listing lines)."; $rows += [pscustomobject]@{ Flow = "owner-files-unchanged"; Result = "PASS"; Seconds = 0; Crashes = 0; Notes = "$(@($before).Count) files: identical names, sizes and dates before and after" } }
 }
 
 # ---- report ---------------------------------------------------------------------------------------------------------------------

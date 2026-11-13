@@ -23,6 +23,7 @@ appId: com.imeilens.scanner.phonetest
     file: _common/pick-photos.yaml
     env:
       PHOTO_PREFIX: "single-A"
+      EXPECTED_SELECTED: "1"
 - runFlow: _common/wait-scan.yaml
 - takeScreenshot: 03-scan-completed
 - tapOn: "Records.*"

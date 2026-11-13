@@ -1,9 +1,10 @@
 // Helpers for the hybrid scenarios: Maestro for system UI, DevTools (CDP) for the WebView, adb input for exact gestures.
 // Everything is limited to the isolated test app (guardApp).
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { adb, guardApp, check, finish } from '../scripts/lib.mjs';
+import { adb, guardApp, check, finish, isEmulator } from '../scripts/lib.mjs';
 import { evaluate, webState } from '../scripts/cdp-state.mjs';
 
 export { check, finish, webState, adb };
@@ -14,6 +15,7 @@ export const ctx = () => { const [, , device = 'emulator-5554', app = 'com.imeil
 /** Runs a Maestro flow file (relative to e2e/flows) with the current session environment. Throws when it fails. */
 export function maestro(device, flow) {
   const file = join(here, '..', 'flows', flow);
+  if (!isEmulator(device) && /pick-photos|scan-all|start-scan-then-home|scan-real/.test(flow + readFileSync(file, 'utf8'))) throw new Error(`refused on a real phone: ${flow} selects photos in the system picker`);
   // Same session-only environment as scripts/env.ps1 when the caller did not set it up.
   const home = process.env.USERPROFILE || '';
   const mh = process.env.MAESTRO_HOME || join(home, 'tools', 'maestro-2.12.1', 'maestro');
@@ -66,6 +68,7 @@ export function pressBack(c) { adb(c.device, 'shell', 'input', 'keyevent', 'KEYC
 
 /** Fresh state: scan the five synthetic photos through the real picker (Maestro), then wait until the web list shows them. */
 export async function scanAll(c) {
+  if (!isEmulator(c.device)) throw new Error('refused on a real phone: selecting photos in the system picker is not safe there');
   adb(c.device, 'shell', 'pm', 'clear', 'com.google.android.documentsui');
   maestro(c.device, '_common/scan-all.yaml');
   await sleep(1500);
@@ -121,6 +124,7 @@ export function focusedWindow(c) { return adb(c.device, 'shell', 'dumpsys window
 
 /** In the system folder picker: open each folder of the path in turn, then "Use this folder" and "Allow". Returns false when a step is missing. */
 export async function pickFolder(c, path) {
+  if (!isEmulator(c.device)) throw new Error('refused on a real phone: choosing a folder in the system picker is not safe there');
   for (const name of path) { if (!tapSystemText(c, name)) return false; await sleep(1500); }
   if (!tapSystemText(c, 'USE THIS FOLDER') && !tapSystemText(c, 'Use this folder')) return false;
   await sleep(1500);

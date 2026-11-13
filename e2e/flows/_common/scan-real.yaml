@@ -6,6 +6,7 @@ appId: com.imeilens.scanner.phonetest
     file: pick-photos.yaml
     env:
       PHOTO_PREFIX: "REAL-"
+      EXPECTED_SELECTED: '[0-9]+'  # emulator-only baseline flow: any count
 - extendedWaitUntil:
     visible: ".*photos scanned · completed.*"
     timeout: 300000

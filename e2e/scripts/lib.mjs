@@ -11,7 +11,30 @@ const adbPath = () => join(process.env.ANDROID_HOME || join(process.env.LOCALAPP
 
 // The host adb daemon sometimes drops for a moment (seen once in 36 suite runs). A connection failure means the command never ran:
 // restart the server and try again (up to 3 times) instead of failing a test for an infrastructure reason.
+// Safety net for real phones (anything that is not an emulator): a person's phone. Whatever a test asks for,
+// - clearing another app's data (for example the system folder picker) is skipped,
+// - uninstalling is refused,
+// - deleting in the shared Download folder is refused (it may hold the owner's real exports).
+const emulatorCache = new Map();
+export function isEmulator(device) {
+  if (!emulatorCache.has(device)) {
+    let qemu = '';
+    try { qemu = execFileSync(adbPath(), ['-s', device, 'shell', 'getprop', 'ro.kernel.qemu'], { encoding: 'utf8' }).trim(); } catch { /* unknown: treat as a phone */ }
+    emulatorCache.set(device, qemu === '1' || device.startsWith('emulator-'));
+  }
+  return emulatorCache.get(device) && process.env.E2E_REAL_PHONE !== '1';
+}
+function phoneGuard(device, args) {
+  if (isEmulator(device)) return 'run';
+  const line = args.join(' ');
+  if (/\bpm\s+clear\b/.test(line) && !/\bpm\s+clear\s+com\.imeilens\.scanner\.phonetest\b/.test(line)) return 'skip';
+  if (args[0] === 'uninstall' || /\bpm\s+uninstall\b/.test(line)) throw new Error('refused on a real phone: uninstall');
+  if (/\brm\b[^;|&]*\/sdcard\/Download/.test(line)) throw new Error('refused on a real phone: deleting in Download');
+  return 'run';
+}
+
 export function adb(device, ...args) {
+  if (phoneGuard(device, args) === 'skip') return '';
   for (let attempt = 1; ; attempt++) {
     try { return execFileSync(adbPath(), ['-s', device, ...args], { encoding: 'utf8', maxBuffer: 1 << 28 }); }
     catch (error) {

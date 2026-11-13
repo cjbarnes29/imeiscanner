@@ -6,4 +6,5 @@ appId: com.imeilens.scanner.phonetest
     file: pick-photos.yaml
     env:
       PHOTO_PREFIX: "E2E-"
+      EXPECTED_SELECTED: "5"
 - runFlow: wait-scan.yaml

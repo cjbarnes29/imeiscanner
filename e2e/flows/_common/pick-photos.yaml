@@ -1,6 +1,7 @@
 appId: com.imeilens.scanner.phonetest
 ---
 # Opens the system photo picker from the Scan tab, searches for ${PHOTO_PREFIX}, selects every result and confirms.
+# Safety (real phones): "Select" is pressed only when exactly ${EXPECTED_SELECTED} items are selected, so a photo of the owner is never picked.
 - tapOn: "Choose photos and scan"
 - extendedWaitUntil:
     visible: "Recent"
@@ -24,4 +25,5 @@ appId: com.imeilens.scanner.phonetest
       visible: "Deselect all"
     commands:
       - pressKey: Back
+- assertVisible: "${EXPECTED_SELECTED} selected"
 - tapOn: "Select"
