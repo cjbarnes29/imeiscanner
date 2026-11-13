@@ -12,7 +12,7 @@ const seed=await import(pathToFileURL(join(dir,'seed-layout.mjs')).href);
 const md=await import(pathToFileURL(join(dir,'multi-detect.mjs')).href);
 const L=(text,x0,y0,w=300,h=24)=>({text,bbox:{x0,y0,x1:x0+w,y1:y0+h}});
 // One printed label: Model line at the top, storage, S/N, then the IMEI strips at the bottom.
-const label=(x,y)=>[L('Model : SM-A077F/DS',x,y),L('4GB | 64GB',x,y+60),L('S/N : R83L80ZJYCP',x,y+110),L('IMEI 1 : 351124071926755',x,y+210,500),L('IMEI 1 : 351124071926755  IMEI 2 : 351570781926750',x,y+250,700)];
+const label=(x,y)=>[L('Model : SM-A077F/DS',x,y),L('4GB | 64GB',x,y+60),L('S/N : RSYN80ZJYCP',x,y+110),L('IMEI 1 : 351124070435824',x,y+210,500),L('IMEI 1 : 351124070435824  IMEI 2 : 351570780435829',x,y+250,700)];
 
 // 1. Five boxes stacked.
 let lines=[0,1,2,3,4].flatMap(i=>label(100,100+i*420));
@@ -31,7 +31,7 @@ assert.equal(seed.labelSeeds(twice,1200).length,5,'a line read twice is one seed
 // 3. A grid: two columns of stacked boxes (text of the two columns is joined into wide lines by the OCR).
 const col=(x)=>[0,1,2].flatMap(i=>label(x,100+i*420));
 lines=[...col(60),...col(1160)];
-lines.push(L('IMEI 1 : 351124071926755          Model : SM-A077F/DS',60,520,1400));   // a line that spans the gap
+lines.push(L('IMEI 1 : 351124070435824          Model : SM-A077F/DS',60,520,1400));   // a line that spans the gap
 const white=(w,h)=>{const data=new Uint8ClampedArray(w*h*4).fill(230);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;const inGap=x>1000&&x<1100;if(!inGap&&(x%11<4)&&(y%7<3)){data[i]=data[i+1]=data[i+2]=30;}}return {data,width:w,height:h};};
 seeds=seed.labelSeeds(lines,2200);
 const plan=seed.seedPlan(lines,seeds,2200,1500,white(2200,1500));
@@ -61,14 +61,14 @@ assert.ok(md.medianLineHeight([L('a',0,0,10,10),L('b',0,20,10,12),L('c',0,40,10,
 
 // 7. IMEI 2 pairing: checksum and the shared serial digits (Samsung labels).
 const iv=await import(pathToFileURL(join(dir,'imei-validate.mjs')).href);
-assert.equal(iv.pairedImei2('351973130856613','353749140856613','SM-A376B'),'353749140856613','a real pair is kept');
-assert.equal(iv.pairedImei2('351973130856613','357937313713945','SM-A376B'),'','IMEI 2 of another box is dropped');
-assert.equal(iv.pairedImei2('351973130869491','355749140869498','SM-A376B'),'','IMEI 2 that fails the checksum is dropped');
+assert.equal(iv.pairedImei2('351973137125509','353749147125509','SM-A376B'),'353749147125509','a real pair is kept');
+assert.equal(iv.pairedImei2('351973137125509','357937316806498','SM-A376B'),'','IMEI 2 of another box is dropped');
+assert.equal(iv.pairedImei2('351973137154947','355749140869498','SM-A376B'),'','IMEI 2 that fails the checksum is dropped');
 assert.equal(iv.pairedImei2('490154203237518','356938035643809','iPhone 15'),'356938035643809','other brands keep a valid IMEI 2');
-assert.equal(iv.pairedImei2('351973130856613','','SM-A376B'),'');
+assert.equal(iv.pairedImei2('351973137125509','','SM-A376B'),'');
 
 const sr=await import(pathToFileURL(join(dir,'serial.mjs')).href);
-assert.equal(sr.extractSerial('S/N : RFGL20HBO2P'),'RFGL20HB02P','O read for 0 in a Samsung serial');
+assert.equal(sr.extractSerial('S/N : RSYN20HBO2P'),'RSYN20HB02P','O read for 0 in a Samsung serial');
 assert.equal(sr.extractSerial('S/N : R5GL8OLDKFM'),'R5GL80LDKFM');
 assert.equal(sr.extractSerial('S/N : ABCDOEFGH1'),'ABCDOEFGH1','other serials are left as read');
 

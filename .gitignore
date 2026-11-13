@@ -23,3 +23,7 @@ test-photos/
 public/ocr/
 android/build/
 src/version.ts
+
+# Phase results hold backups and real-IMEI evidence
+phase1-results/
+phase2-results/

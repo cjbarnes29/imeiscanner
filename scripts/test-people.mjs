@@ -117,22 +117,22 @@ try {
 
   // Final review: model by model, who gets how many (the text that is shared).
   const models = [
-    { label: 'Galaxy A37 5G', holders: [{ name: 'Carlou', count: 2, numbers: ['351973130210365', '351973130219432'] }, { name: 'Raseen', count: 1, numbers: ['351973130856613'] }] },
+    { label: 'Galaxy A37 5G', holders: [{ name: 'Carlou', count: 2, numbers: ['351973137307651', '351973137304963'] }, { name: 'Raseen', count: 1, numbers: ['351973137125509'] }] },
     { label: 'Nothing held', holders: [] },
     { label: 'Galaxy Buds3 FE', holders: [{ name: 'Unassigned', count: 1, numbers: ['S/N R5ABC'] }] },
   ];
   assert.equal(formatModelReview(models, false), 'Galaxy A37 5G (3)\nCarlou × 2\nRaseen × 1\n\nGalaxy Buds3 FE (1)\nUnassigned × 1', 'one block per model, one line per person; empty models left out');
-  assert.equal(formatModelReview(models, true).split('\n').slice(0, 5).join('|'), 'Galaxy A37 5G (3)|Carlou × 2|  351973130210365|  351973130219432|Raseen × 1', 'numbers sit under their person, without numbering');
+  assert.equal(formatModelReview(models, true).split('\n').slice(0, 5).join('|'), 'Galaxy A37 5G (3)|Carlou × 2|  351973137307651|  351973137304963|Raseen × 1', 'numbers sit under their person, without numbering');
   assert.equal(formatModelReview([], true), '');
 
   // The text sent to one person on WhatsApp: name, then each model with its numbers, no numbering.
   const person = [
-    { name: 'Carlou', items: [{ label: 'Galaxy A37 5G', count: 2, numbers: ['351973130210365', '351973130219432'] }, { label: 'Galaxy S25 Ultra', count: 1, numbers: ['356049669060748'] }] },
+    { name: 'Carlou', items: [{ label: 'Galaxy A37 5G', count: 2, numbers: ['351973137307651', '351973137304963'] }, { label: 'Galaxy S25 Ultra', count: 1, numbers: ['356049664757892'] }] },
     { name: 'Nobody', items: [] },
     { name: 'Raseen', items: [{ label: 'Galaxy Buds3 FE', count: 1, numbers: ['S/N R5ABC'] }] },
   ];
-  assert.equal(formatPersonShare([person[0]]), 'Carlou (3)\nGalaxy A37 5G (2)\n351973130210365\n351973130219432\nGalaxy S25 Ultra (1)\n356049669060748');
-  assert.equal(formatPersonShare(person), 'Carlou (3)\nGalaxy A37 5G (2)\n351973130210365\n351973130219432\nGalaxy S25 Ultra (1)\n356049669060748\n\nRaseen (1)\nGalaxy Buds3 FE (1)\nS/N R5ABC', 'everyone: blocks separated by a blank line, people with nothing left out');
+  assert.equal(formatPersonShare([person[0]]), 'Carlou (3)\nGalaxy A37 5G (2)\n351973137307651\n351973137304963\nGalaxy S25 Ultra (1)\n356049664757892');
+  assert.equal(formatPersonShare(person), 'Carlou (3)\nGalaxy A37 5G (2)\n351973137307651\n351973137304963\nGalaxy S25 Ultra (1)\n356049664757892\n\nRaseen (1)\nGalaxy Buds3 FE (1)\nS/N R5ABC', 'everyone: blocks separated by a blank line, people with nothing left out');
   assert.equal(formatPersonShare([]), '');
 
   console.log('PASS: moving IMEIs between people (previous owner loses them, no duplicates, All IMEIs moved), delete-under-a-person becomes unassigned under Everyone, unassigned filter.');

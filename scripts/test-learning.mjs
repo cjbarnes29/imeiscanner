@@ -9,9 +9,9 @@ const load=async name=>{await writeFile(join(dir,name+'.mjs'),ts.transpileModule
 const c=await load('confidence'),l=await load('learning');
 
 // Confidence
-const good=c.scoreConfidence({imei:'351326788205072',luhnOk:true,barcodeConfirmed:true,imei2Valid:true,serial:'RFGL81NKELD',model:'SM-A165F',catalogMatched:true,duplicate:false});
+const good=c.scoreConfidence({imei:'351326781372788',luhnOk:true,barcodeConfirmed:true,imei2Valid:true,serial:'RFGL81NKELD',model:'SM-A165F',catalogMatched:true,duplicate:false});
 assert.equal(good.level,'high');assert.ok(good.score>=95);
-const plain=c.scoreConfidence({imei:'351326788205072',luhnOk:true,barcodeConfirmed:false,imei2Valid:false,serial:'',model:'Unknown unit — review',catalogMatched:false,duplicate:false});
+const plain=c.scoreConfidence({imei:'351326781372788',luhnOk:true,barcodeConfirmed:false,imei2Valid:false,serial:'',model:'Unknown unit — review',catalogMatched:false,duplicate:false});
 assert.equal(plain.level,'medium','a valid IMEI alone is medium, not flagged');
 const bad=c.scoreConfidence({imei:'351326788205073',luhnOk:false,barcodeConfirmed:false,imei2Valid:false,serial:'',model:'',catalogMatched:false,duplicate:true,cropNeedsReview:true});
 assert.equal(bad.level,'low');assert.ok(bad.reasons.some(r=>/NOT valid/.test(r)));
