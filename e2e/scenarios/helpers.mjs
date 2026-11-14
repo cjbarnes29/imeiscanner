@@ -77,7 +77,7 @@ export async function scanAll(c) {
 export async function openStudioAndDrawTwoBoxes(c) {
   await clickText(c, '^Records');
   await sleep(800);
-  const opened = await js(c, `(()=>{const name=[...document.querySelectorAll('*')].find(e=>e.children.length===0&&(e.innerText||'').trim()==='E2E-single-B.jpg');if(!name)return 'no record';let e=name;for(let i=0;i<8&&e;i++){const b=[...e.querySelectorAll('button')].find(b=>(b.innerText||'').trim()==='Edit photo');if(b){b.click();return 'opened'}e=e.parentElement}return 'no edit button'})()`);
+  const opened = await js(c, `(()=>{const name=[...document.querySelectorAll('*')].find(e=>e.children.length===0&&(e.innerText||'').trim()==='E2E-single-B.jpg');if(!name)return 'no record';let e=name;for(let i=0;i<8&&e;i++){const b=[...e.querySelectorAll('button')].find(b=>(b.innerText||'').trim()==='E2E-single-B.jpg');if(b){b.click();return 'opened'}e=e.parentElement}return 'no edit button'})()`);
   if (opened !== 'opened') throw new Error('could not open the record: ' + opened);
   await sleep(2500);
   await clickText(c, '^Crop / edit photo');
