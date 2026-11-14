@@ -1,11 +1,13 @@
 // Shared helpers for the data verification scripts. Reads the isolated test app's own data with adb run-as (debuggable build only).
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const truth = JSON.parse(readFileSync(join(here, '..', 'fixtures', 'out', 'truth.json'), 'utf8')).photos;
+// The generated fixtures (git-ignored) may not exist yet (a fresh checkout, CI unit tests): then there is no truth and nothing can be staged or shared.
+const truthFile = join(here, '..', 'fixtures', 'out', 'truth.json');
+export const truth = existsSync(truthFile) ? JSON.parse(readFileSync(truthFile, 'utf8')).photos : {};
 export const mask = d => (d && /^\d{15}$/.test(d)) ? `${d.slice(0, 8)}***${d.slice(-4)}` : (d || '(none)');
 const adbPath = () => join(process.env.ANDROID_HOME || join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk'), 'platform-tools', 'adb.exe');
 
