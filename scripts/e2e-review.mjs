@@ -2,7 +2,7 @@
 //   node scripts/e2e-review.mjs [screenshot-folder]
 // Checks: the sheet fits the screen; header, body and footer never overlap; every field is fully visible and
 // not clipped; the photo preview is compact and opens full size on tap; typing is instant and kept; Save works;
-// One Save button (saves, then moves on); Previous / Next behave; closing with unsaved changes asks first.
+// One Save button (saves, then moves on); Previous / Next behave; closing with unsaved changes saves them (nothing is discarded).
 import assert from 'node:assert/strict';
 import {readFile,readdir,mkdtemp,mkdir,writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -123,15 +123,14 @@ try{
   await shot('4-last');
   ok('Previous / Next move between records; Next is off on the last one');
   await typeInto('#manual-serial','CHANGEDX1');
+  await typeInto('#manual-imei','3509505');
   await run(`document.querySelector('#manual-serial').blur()`);
   await run(`document.querySelector('[aria-label="Close photo review"]').click()`);
-  await waitFor(`!!document.querySelector('.finish-modal, [role="alertdialog"]')||!document.querySelector('.review-modal')`,'finish prompt');
-  assert.ok(await run(`!!document.querySelector('.review-modal')`),'sheet is still open: unsaved work asks first');
-  const finishOptions=await run(`[...document.querySelectorAll('.finish-modal button')].map(b=>b.textContent.trim())`);
-  assert.ok(finishOptions.length>=2,'finish prompt has choices: '+finishOptions);
-  await shot('5-finish-prompt');
-  ok('Closing with unsaved changes asks first: '+finishOptions.join(' | '));
-  await run(`[...document.querySelectorAll('.finish-modal button')].find(b=>/Keep editing/.test(b.textContent)).click()`);
+  await waitFor(`!document.querySelector('.review-modal')`,'review closes without a popup');
+  assert.ok(await run(`!document.querySelector('.finish-modal, [role="alertdialog"]')`),'no Save/Discard popup');
+  await waitFor(`/Saved 1 picture/.test(document.body.innerText)&&/unfinished IMEI/.test(document.body.innerText)`,'saved note');
+  await shot('5-closed-saved');
+  ok('Closing with unsaved changes saves them (no popup); the half-typed IMEI is kept and flagged for review');
   console.log(`\nAll ${results.length} review checks passed.`);
 }catch(error){console.error('FAIL:',error.message);await shot('failure');process.exitCode=1;}
 finally{try{ws.close();}catch{}proc.kill();server.close();}

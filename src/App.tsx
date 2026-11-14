@@ -1891,7 +1891,6 @@ export default function App() {
   /** What you typed for pictures you moved past without saving. Decided at the end: save all or discard. */
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
   const draftsRef = useRef<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
-  const [finishOpen, setFinishOpen] = useState(false);
   /** A warning that must be seen: shown as a pop-up with OK instead of a small message. */
   const [warning, setWarning] = useState('');
   const [manualModel, setManualModelState] = useState('');
@@ -2205,7 +2204,6 @@ export default function App() {
 
   // Back button / swipe-back closes the top popup instead of leaving the app.
   useBackLayer(!!selected, closePhotoReview, 'review');
-  useBackLayer(finishOpen, () => setFinishOpen(false), 'finish-review');
   useBackLayer(!!warning, () => setWarning(''), 'warning');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
   useBackLayer(!!confirmDupes, () => setConfirmDupes(null), 'confirm-dupes');
@@ -3690,10 +3688,20 @@ export default function App() {
     const next = reviewRecords[reviewIndex + direction];
     if (next) setSelected(next);
   }
-  /** After the last picture, or when closing: ask what to do with unsaved changes. */
+  /** When closing: save everything that was typed (nothing is ever thrown away) and close. */
   function finishReview() {
     if (rotatingPhoto) return;
-    if (Object.keys(stashDraft()).length) setFinishOpen(true); else closePhotoReviewNow();
+    if (Object.keys(stashDraft()).length) saveAllDrafts(); else closePhotoReviewNow();
+  }
+  /** Like buildReviewPatch, but never refuses: an unfinished IMEI is kept in the record's note and the record is flagged for review. */
+  function lenientReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem>; unfinished: boolean } {
+    const bad1 = !!fields.imei && !/^\d{15}$/.test(fields.imei);
+    const bad2 = !!fields.imei2 && !/^\d{15}$/.test(fields.imei2);
+    const built = buildReviewPatch(record, { ...fields, imei: bad1 ? record.imei : fields.imei, imei2: bad2 ? recordImeiPair(record).imei2 : fields.imei2 });
+    if ('error' in built) return { patch: {}, unfinished: false }; // cannot happen: the bad values were replaced
+    if (!bad1 && !bad2) return { patch: built.patch, unfinished: false };
+    const typed = [bad1 ? `IMEI 1 "${fields.imei}"` : '', bad2 ? `IMEI 2 "${fields.imei2}"` : ''].filter(Boolean).join(' and ');
+    return { patch: { ...built.patch, imeiNeedsReview: true, imeiNote: `Unfinished ${typed} was typed (not 15 digits). Check it against the label.` }, unfinished: true };
   }
   function buildReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem> } | { error: string } {
     if (fields.imei && !/^\d{15}$/.test(fields.imei)) return { error: 'Enter all 15 IMEI digits or leave it empty.' };
@@ -3733,21 +3741,18 @@ export default function App() {
   }
   function saveAllDrafts() {
     const patches: Record<string, Partial<RecordItem>> = {};
+    let unfinished = 0;
     for (const [id, fields] of Object.entries(draftsRef.current)) {
       const record = records.find(row => row.id === id);
       if (!record) continue;
-      const built = buildReviewPatch(record, fields);
-      if ('error' in built) { setFinishOpen(false); setSelected(record); setWarning(`${record.name}: ${built.error}`); return; }
+      const built = lenientReviewPatch(record, fields);
+      if (built.unfinished) unfinished++;
       patches[id] = built.patch;
     }
     setRecords(old => markDuplicateRecords(old.map(row => patches[row.id] ? { ...row, ...patches[row.id] } : row)));
-    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
+    setDrafts({}); closePhotoReviewNow();
     const count = Object.keys(patches).length;
-    setToast(`Saved ${count} picture${count === 1 ? '' : 's'}.`);
-  }
-  function discardAllDrafts() {
-    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
-    setToast('Changes discarded.');
+    setToast(`Saved ${count} picture${count === 1 ? '' : 's'}.${unfinished ? ` ${unfinished} ha${unfinished === 1 ? 's' : 've'} an unfinished IMEI and need${unfinished === 1 ? 's' : ''} review.` : ''}`);
   }
   const pendingChanges = Object.keys(reviewDrafts).filter(id => id !== selected?.id).length + (selected && fieldsDiffer(selected, currentFields()) ? 1 : 0);
 
@@ -4381,15 +4386,6 @@ export default function App() {
       </header>
 
       {settingsOpen && <SettingsPanel onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
-      {finishOpen && <div className="modal-backdrop finish-backdrop"><section className="modal finish-modal" role="alertdialog" aria-modal="true" aria-label="Save or discard changes">
-        <h2>Save your changes?</h2>
-        <p>You changed {Object.keys(reviewDrafts).length} picture{Object.keys(reviewDrafts).length === 1 ? '' : 's'} and did not save {Object.keys(reviewDrafts).length === 1 ? 'it' : 'them'} yet. Save everything, discard it, or go back and keep editing.</p>
-        <div className="finish-actions">
-          <button type="button" className="primary" onClick={saveAllDrafts}>Save all ({Object.keys(reviewDrafts).length})</button>
-          <button type="button" className="subtle-btn danger" onClick={discardAllDrafts}>Discard changes</button>
-          <button type="button" className="subtle-btn" autoFocus onClick={() => setFinishOpen(false)}>Keep editing</button>
-        </div>
-      </section></div>}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
         <h2>Check this</h2>
         <p>{warning}</p>
