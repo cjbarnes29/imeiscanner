@@ -4039,8 +4039,22 @@ export default function App() {
   // ---- Fast review list: every record that still needs a look, edited in place. ----
   const needsLook = (r: RecordItem) => !r.checked && reviewStatus(r).includes('Needs review');
   const looksRight = (r: RecordItem) => luhnValid(r.imei) && !r.duplicate && !r.imeiNeedsReview && !imeiIsFallback(r) && !r.cropNeedsReview && !activeIssue(r);
+  /** Archived records (not restored) by IMEI 1 and IMEI 2. Split originals and their crops are left out: they share an IMEI by design. */
+  const archivedByImei = useMemo(() => {
+    const map = new Map<string, ArchiveEntry<RecordItem>[]>();
+    for (const entry of archive) {
+      if (entry.restoredAt) continue;
+      const pair = recordImeiPair(entry.record);
+      for (const value of new Set([entry.record.imei, pair.imei1, pair.imei2])) if (/^\d{15}$/.test(value)) map.set(value, [...(map.get(value) || []), entry]);
+    }
+    return map;
+  }, [archive]);
+  const inArchive = (r: RecordItem) => {
+    const pair = recordImeiPair(r);
+    return [r.imei, pair.imei1, pair.imei2].some(value => (archivedByImei.get(value) || []).some(entry => entry.id !== r.sourceRecordId && !entry.cropIds.includes(r.id)));
+  };
   const bulkRecords = bulkIds.map(id => records.find(r => r.id === id)).filter((r): r is RecordItem => !!r && needsLook(r));
-  const bulkRows: BulkRow[] = bulkRecords.map(r => ({ id: r.id, name: r.name, photo: recordPhoto(r), imei: r.imei, serial: recordSerial(r), model: exportModel(r.model), note: reviewNote(r), status: reviewStatus(r), looksRight: looksRight(r) }));
+  const bulkRows: BulkRow[] = bulkRecords.map(r => ({ id: r.id, name: r.name, photo: recordPhoto(r), imei: r.imei, serial: recordSerial(r), model: exportModel(r.model), note: [reviewNote(r), inArchive(r) ? 'Also in archive' : ''].filter(Boolean).join(' · '), status: reviewStatus(r), looksRight: looksRight(r) }));
   const bulkGood = bulkRecords.filter(looksRight);
   const scanningNow = busy || androidJob?.status === 'queued' || androidJob?.status === 'processing';
   function openBulk(ids: string[]) { if (!ids.length) return; setBulkIds(ids); setBulkAccepted([]); setBulkOpen(true); }
@@ -5095,7 +5109,6 @@ export default function App() {
                           <img src={recordPhoto(r)} />
                           <span>{r.name}</span>
                         </button>
-                        <button className="subtle-btn edit-photo-action" title="Edit or crop this photo" onClick={() => openCropReview(r)}>Edit photo</button>
                         </div>
                       </td>
 
@@ -5280,6 +5293,7 @@ export default function App() {
               </div>
             </div>
 
+            {inArchive(selected) && <div className="review-question" role="note"><div><strong>Also in your archive</strong><span>An archived record has this IMEI too. Nothing was changed.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={() => setArchiveOpen(true)}>View archive</button></div></div>}
             {(() => { const issue = issueTextFor(selected); return issue && <div className="review-question retake-prompt" role="alert" aria-label="Retake this photo"><div><strong>{issue.title}</strong><span>{issue.text}</span><small>Nothing is filled in for you, and your original photo is kept.</small></div><div className="review-question-buttons"><button className="primary" onClick={() => { setSelected(null); openNativeCamera(); }}>Retake photo</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop manually</button><button className="subtle-btn" onClick={() => { updateRow(selected.id, { labelIssueDismissed: true }); setSelected(current => current && { ...current, labelIssueDismissed: true }); }}>Keep as is</button></div></div>; })()}
             {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={autoSplitBusy.current} onClick={() => void autoSplitRecords([selected]).then(n => { if (n) setSelected(null); })}>Split automatically</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop each myself</button></div></div>}
             {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}

@@ -44,7 +44,7 @@ try{
   await send('Page.addScriptToEvaluateOnNewDocument',{source:"localStorage.setItem('imei-lens-simple-view','false');"});
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'load');
-  await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');${seed(1,'490154203237518','Valid','modelNeedsReview:true,serialNeedsReview:true,brandNeedsReview:true')}${seed(2,'','Review','serialNeedsReview:true')}${seed(3,'356938035643808','Invalid','')}tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
+  await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');${seed(1,'490154203237518','Valid','modelNeedsReview:true,serialNeedsReview:true,brandNeedsReview:true')}${seed(2,'','Review','serialNeedsReview:true')}${seed(3,'356938035643808','Invalid','')}tx.objectStore('inventory').put({id:'arch-1',record:{id:'arch-1',imei:'356938035643808',status:'Invalid',model:'SM-A576B',name:'old.jpg',dataUrl:'',raw:''},cropIds:[],archivedAt:new Date().toISOString(),reason:'duplicate-removal'},'archive:arch-1');tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'reload');
   await sleep(1500);
@@ -89,6 +89,11 @@ try{
   await waitFor(`/Unfinished IMEI 1 "3569380"/.test(document.querySelector('.bulk-review').textContent)`,'unfinished IMEI kept in the note');
   ok('Closing keeps a half-typed IMEI in the record note and it stays in the list for review');
 
+  // The record whose IMEI is also in the archive gets a soft hint (no Duplicate flag); the other row does not
+  assert.match(await text(`document.querySelector('.bulk-row:last-child .bulk-meta').textContent`),/Also in archive/);
+  assert.ok(!(await text(`document.querySelector('.bulk-row:first-child .bulk-meta').textContent`)).includes('Also in archive'),'only the matching row has the hint');
+  ok('A record whose IMEI is also in the archive shows "Also in archive"; the other row does not');
+
   // Tapping the photo opens the full review on top of the list
   await run(`document.querySelector('.bulk-photo').click()`);
   await waitFor(`!!document.querySelector('.review-modal')`,'full review opens');
@@ -96,6 +101,12 @@ try{
   assert.ok(zs,'full review is drawn above the list');
   await shot('3-full-over-list');
   ok('Tapping the photo opens the full review above the list');
+  await run(`document.querySelector('[aria-label="Close photo review"]').click()`);
+  await waitFor(`!document.querySelector('.review-modal')`,'full review closes');
+  await run(`document.querySelector('.bulk-row:last-child .bulk-photo').click()`);
+  await waitFor(`/Also in your archive/.test(document.querySelector('.review-modal')?.textContent||'')`,'archive hint in the full review');
+  assert.ok(!(await run(`/Duplicate/.test(document.querySelector('.review-modal .eyebrow')?.textContent||'')`)),'not flagged as a duplicate');
+  ok('The full review shows "Also in your archive" with a View archive button, and no Duplicate flag');
   console.log(`\nAll ${results.length} bulk-review checks passed.`);
 }catch(error){console.error('FAIL:',error.message);try{console.log('DB-AFTER:',await run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const g=o.result.transaction('inventory').objectStore('inventory').getAll();g.onsuccess=()=>res(JSON.stringify(g.result.map(r=>[r.id,r.imei,r.status,r.modelNeedsReview,r.serialNeedsReview,r.brandNeedsReview,r.checked])));};})`),'| banner:',await run(`document.querySelector('.archive-banner')?.textContent`));}catch{}await shot('failure');process.exitCode=1;}
 finally{try{ws.close();}catch{}proc.kill();server.close();}
