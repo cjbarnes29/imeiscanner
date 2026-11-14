@@ -2882,7 +2882,7 @@ export default function App() {
         <div className="share-toolbar">
           <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp text — everyone</button>
           <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
-          <button className="subtle-btn" onClick={() => setOverviewOpen(true)}>Review by model</button>
+          <button className="subtle-btn" onClick={() => setOverviewOpen(true)}>Who gets how many</button>
           <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Include serial numbers</label>
         </div>
         <ul className="overview-list">
@@ -2893,7 +2893,7 @@ export default function App() {
               <button className="primary whatsapp-btn" aria-label={`WhatsApp ${section.name}: pictures and IMEI`} onClick={() => startWhatsApp(section)}>WhatsApp · pictures + IMEI</button>
               <button className="subtle-btn" aria-label={`Text only for ${section.name}`} onClick={() => openWhatsApp(formatPersonShare([sharePayload(section)]))}>Text only</button>
               <button className="subtle-btn" aria-label={`Bluetooth or nearby share for ${section.name}`} onClick={() => startWhatsApp(section, true)}>Bluetooth / nearby</button>
-              <button className="subtle-btn" aria-label={`One by one for ${section.name}`} onClick={() => startOneByOne(section)}>One by one</button>
+              <button className="subtle-btn" aria-label={`Send one at a time for ${section.name}`} onClick={() => startOneByOne(section)}>Send one at a time</button>
               <button className="subtle-btn" aria-label={`Save ${section.name} to my phone`} onClick={() => void saveToMyself(section.name, rowsOfSection(section.id))}>Save to my phone</button>
               <button className="subtle-btn" aria-label={`Copy ${section.name}`} onClick={() => void copyText(formatPersonShare([sharePayload(section)])).then(ok => setToast(ok ? `${section.name}'s list copied.` : 'Copy failed.'))}>Copy</button>
             </div>
@@ -5419,8 +5419,8 @@ export default function App() {
           <button className="subtle-btn" onClick={() => setDeletePersonId('')}>Cancel</button>
         </div>
       </section></div>; })()}
-      {overviewOpen && <div className="modal-backdrop"><section className="modal overview-modal" role="dialog" aria-modal="true" aria-label="Final review">
-        <div className="modal-head"><h2>Final review</h2><button className="subtle-btn" onClick={() => setOverviewOpen(false)}>Close</button></div>
+      {overviewOpen && <div className="modal-backdrop"><section className="modal overview-modal" role="dialog" aria-modal="true" aria-label="Who gets how many">
+        <div className="modal-head"><h2>Who gets how many</h2><button className="subtle-btn" onClick={() => setOverviewOpen(false)}>Close</button></div>
         {review.length === 0 ? <p>No phones yet.</p> : <>
           <p className="settings-help">Model by model: who gets how many.</p>
           <div className="review-filters">
@@ -5505,8 +5505,8 @@ export default function App() {
         const doneCount = rows.filter(item => obState.done.includes(item.id)).length;
         const remaining = rows.length - doneCount;
         const last = obState.index === rows.length - 1;
-        return <div className="modal-backdrop"><section className="modal onebyone-modal" role="dialog" aria-modal="true" aria-label={`One by one: ${oneByOne.name}`}>
-          <div className="modal-head"><h2>One by one · {oneByOne.name}</h2><button className="subtle-btn" onClick={() => setOneByOne(null)}>Close</button></div>
+        return <div className="modal-backdrop"><section className="modal onebyone-modal" role="dialog" aria-modal="true" aria-label={`Send one at a time: ${oneByOne.name}`}>
+          <div className="modal-head"><h2>Send one at a time · {oneByOne.name}</h2><button className="subtle-btn" onClick={() => setOneByOne(null)}>Close</button></div>
           <div className="wa-progress" role="status">
             <strong>Phone {obState.index + 1} of {rows.length}</strong>
             <div className="wa-bar" aria-hidden="true"><span style={{ width: `${Math.round(doneCount / rows.length * 100)}%` }} /></div>
