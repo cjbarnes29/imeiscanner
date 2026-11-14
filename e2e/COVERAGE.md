@@ -18,6 +18,8 @@ Results of the last run are in `e2e/reports/<time>/REPORT.md` (git-ignored). Num
 | Background scan (Home while scanning) | `09-background-scan` | A | screen off / doze, battery optimisation, long scans |
 | Background crop queue | `10-background-queue` | A | process killed by low memory, many queued photos |
 | Crash and ANR watch | logcat of every test | A | real-device vendor behaviour |
+| Photos shared to the app (no picker, no gallery, no shared storage): arrival, names, scan results, no storage access | `16-share-photos` (+ data check, same as 01) | A | real phone not run yet (needs the owner's opt-in, see `phase2-results/phase3-prep/PHONE-SHARE-TEST-PLAN.md`) |
+| Phone checklist, camera / crop / review / export result collection (masked) | `e2e/phone-tools` (11 unit tests; server exercised against the emulator) | P | camera results need a real label; review diffs checked with synthetic snapshots only |
 | Camera capture and Scan all | none | M | needs a real camera and real labels |
 | Real accuracy, speed and memory | none (emulator numbers only) | M | the 20 to 30 photo phone test |
 | Installing over the real app, signature, data compatibility | none | M | needs a release-signed build and a decision |

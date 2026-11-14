@@ -46,7 +46,11 @@ if ($safe) { $env:E2E_REAL_PHONE = "1" } else { Remove-Item Env:E2E_REAL_PHONE -
 # Tests that delete or read files in shared folders the owner also uses (Download: imei-scanner-export* may be real exports).
 $sharedFileTests = @("06-export-csv", "07-export-interrupted", "11-export-lost-staging")
 # The owner's files: listing only (name, size, date), compared before and after. Our own folders and temporary files are left out.
-$ownFolders = 'e2e-fixtures|E2E-fx|e2e-ui\.xml'
+$ownFolders = 'e2e-fixtures|E2E-fx|e2e-ui\.xml|/\.thumbnails/'
+# Android keeps thumbnails of gallery pictures in Pictures/.thumbnails and removes orphans on its own schedule (seen on the emulator: 5 thumbnails of
+# long-deleted test pictures vanished during a run that put nothing in shared storage). That cache is not the owner's files, so it is compared
+# separately and reported as information; every other file in the listing must be identical.
+function ThumbFiles { (adb -s $Device shell "find /sdcard/Pictures/.thumbnails /sdcard/DCIM/.thumbnails -type f 2>/dev/null | sort") | Where-Object { $_ } }
 # A 15-digit run in a file name is masked (first 8 + last 4) before it is written to the report.
 function OwnerFiles { (adb -s $Device shell "find /sdcard/Download /sdcard/Documents /sdcard/Pictures /sdcard/DCIM -type f -print0 2>/dev/null | xargs -0 stat -c '%n|%s|%Y' 2>/dev/null | sort") | Where-Object { $_ -and $_ -notmatch $ownFolders } | ForEach-Object { $_ -replace '(?<!\d)(\d{8})\d{3}(\d{4})(?!\d)', '$1***$2' } }
 $packages = (adb -s $Device shell pm list packages) -join "`n"
@@ -63,11 +67,16 @@ if ($safe) {
     if ($state -eq "foreign") { Fail "$dir exists on the phone and was not made by these tests. Not touching it." }
   }
   $before = OwnerFiles
+  $thumbsBefore = ThumbFiles
   $before | Out-File (Join-Path $report "owner-files-before.txt") -Encoding utf8
 }
-adb -s $Device shell "rm -rf $remote; mkdir -p $remote; touch $remote/.imei-lens-e2e" | Out-Null
-Get-ChildItem $fix -Filter *.jpg | ForEach-Object { cmd /c "adb -s $Device push `"$($_.FullName)`" $remote/$($_.Name) >nul 2>&1" }
-adb -s $Device shell "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$remote" | Out-Null
+# Safe mode (a person's phone, or -RealPhone): nothing is put in shared storage. The synthetic photos reach the app only through its own
+# cache folder (test 16), never through Pictures/MediaStore, so they do not show up in the owner's gallery.
+if (-not $safe) {
+  adb -s $Device shell "rm -rf $remote; mkdir -p $remote; touch $remote/.imei-lens-e2e" | Out-Null
+  Get-ChildItem $fix -Filter *.jpg | ForEach-Object { cmd /c "adb -s $Device push `"$($_.FullName)`" $remote/$($_.Name) >nul 2>&1" }
+  adb -s $Device shell "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$remote" | Out-Null
+}
 
 # ---- which tests ---------------------------------------------------------------------------------------------------------------
 $all = @(Get-ChildItem $flowDir -File | Where-Object { $_.Name -match '^[0-9][0-9]-.*\.yaml$' }) + @(Get-ChildItem $scenDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[0-9][0-9]-.*\.mjs$' })
@@ -85,6 +94,8 @@ foreach ($flow in $all) {
   # owner's photos (the count guard stopped it). Until photos can be given to the app without the system picker, those tests do not run on phones.
   if ($safe -and ((Get-Content $flow.FullName -Raw) -match 'scanAll|pick-photos|scan-all|start-scan-then-home|scan-real|pickFolder')) { $rows += [pscustomobject]@{ Flow = $name; Result = "BLOCKED (real phone: system picker)"; Seconds = 0; Crashes = 0; Notes = "picker selection is not safe on a person's phone" }; continue }
   if ($safe -and $sharedFileTests -contains $name) { $rows += [pscustomobject]@{ Flow = $name; Result = "SKIPPED (real phone: shared Download files)"; Seconds = 0; Crashes = 0; Notes = "manual checks E1/E2 cover it" }; continue }
+  # Synthetic photos shared to the app (no picker, app's own cache only). Proven on the emulator first; a real phone needs the owner's go-ahead.
+  if ($safe -and -not $isEmulator -and $name -eq "16-share-photos" -and $env:E2E_ALLOW_SYNTHETIC_SHARE -ne "1") { $rows += [pscustomobject]@{ Flow = $name; Result = "BLOCKED (real phone: awaiting owner approval)"; Seconds = 0; Crashes = 0; Notes = "set E2E_ALLOW_SYNTHETIC_SHARE=1 after approving PHONE-SHARE-TEST-PLAN.md" }; continue }
   # The emulator can disappear (seen: a crash of its desktop window). adb would then wait forever: stop with a clear result instead.
   $online = (adb devices) -join "`n"
   if ($online -notmatch [regex]::Escape($Device) + "\s+device") {
@@ -130,12 +141,14 @@ foreach ($flow in $all) {
   Write-Host "   $result in ${secs}s" -ForegroundColor $(if ($result -like "PASS*" -or $result -like "XFAIL*") { "Green" } else { "Red" })
 }
 
-$ownerNote = ""
+$ownerNote = ""; $thumbNote = ""
 if ($safe) {
   # Remove only what this run created, then prove the owner's files did not change.
-  adb -s $Device shell "rm -rf $remote; rm -f /sdcard/e2e-ui.xml; if [ -e /sdcard/Documents/E2E-fx/.imei-lens-e2e ] || [ -z `"`$(ls -A /sdcard/Documents/E2E-fx 2>/dev/null)`" ]; then rm -rf /sdcard/Documents/E2E-fx; fi" | Out-Null
-  adb -s $Device shell "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$remote" | Out-Null
+  adb -s $Device shell "if [ -e $remote/.imei-lens-e2e ]; then rm -rf $remote; fi; rm -f /sdcard/e2e-ui.xml; if [ -e /sdcard/Documents/E2E-fx/.imei-lens-e2e ] || [ -z `"`$(ls -A /sdcard/Documents/E2E-fx 2>/dev/null)`" ]; then rm -rf /sdcard/Documents/E2E-fx; fi" | Out-Null
   $after = OwnerFiles
+  $thumbsAfter = ThumbFiles
+  $thumbDiff = @(Compare-Object @($thumbsBefore) @($thumbsAfter))
+  if ($thumbDiff.Count) { $thumbNote = "System thumbnail cache (Android-managed, not the owner's files): $(@($thumbDiff | Where-Object { $_.SideIndicator -eq '<=' }).Count) removed, $(@($thumbDiff | Where-Object { $_.SideIndicator -eq '=>' }).Count) added during the run. Informational." } else { $thumbNote = "System thumbnail cache: unchanged." }
   $after | Out-File (Join-Path $report "owner-files-after.txt") -Encoding utf8
   $diff = Compare-Object @($before) @($after)
   if ($diff) { $ownerNote = "OWNER FILES CHANGED: $(@($diff).Count) listing lines differ (see owner-files-before/after.txt)"; $rows += [pscustomobject]@{ Flow = "owner-files-unchanged"; Result = "FAIL"; Seconds = 0; Crashes = 0; Notes = $ownerNote } }
@@ -147,6 +160,7 @@ $mv = (& cmd /c 'maestro --version 2>&1') | Select-Object -Last 1
 $md = @("# Emulator test report $stamp", "", "Device: $Device. App: $App (isolated test app). Maestro $mv.", "",
   "| Test | Result | Seconds | Crashes | Notes |", "|---|---|---|---|---|")
 foreach ($r in $rows) { $md += "| $($r.Flow) | $($r.Result) | $($r.Seconds) | $($r.Crashes) | $($r.Notes) |" }
+if ($thumbNote) { $md += ""; $md += $thumbNote }
 $md += ""; $md += "Passed: $(@($rows | Where-Object { $_.Result -like 'PASS*' }).Count) / $($rows.Count). Crashes in logcat: $crashes."
 $md | Out-File (Join-Path $report "REPORT.md") -Encoding utf8
 $md | ForEach-Object { Write-Host $_ }

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMEI Lens Test checklist</title>
+<style>
+  :root { --ink:#1b1f24; --mut:#5b6672; --line:#d8dee4; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700; --bg:#f6f8fa; --card:#fff; --acc:#0b57d0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.4 system-ui, sans-serif; color:var(--ink); background:var(--bg); padding-bottom:80px; }
+  header { position:sticky; top:0; background:var(--card); border-bottom:1px solid var(--line); padding:10px 14px; z-index:5; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .mut { color:var(--mut); font-size:13px; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:6px; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  section { padding:8px 12px; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:14px 4px 6px; }
+  .case { background:var(--card); border:1px solid var(--line); border-radius:12px; margin:8px 0; overflow:hidden; }
+  .case > button.head { all:unset; display:flex; gap:10px; align-items:center; width:100%; padding:12px 14px; box-sizing:border-box; cursor:pointer; }
+  .tag { font-weight:700; min-width:34px; }
+  .st { margin-left:auto; font-size:13px; font-weight:600; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); } .skip { color:var(--mut); }
+  .body { display:none; padding:0 14px 14px; border-top:1px solid var(--line); }
+  .case.open .body { display:block; }
+  ol { padding-left:20px; margin:10px 0; } li { margin:4px 0; }
+  .expect { background:#eef6ff; border-radius:8px; padding:8px 10px; margin:8px 0; font-size:15px; }
+  button.act { font:inherit; font-weight:600; padding:12px 16px; border-radius:10px; border:1px solid var(--line); background:#fff; margin:4px 6px 4px 0; min-height:48px; }
+  button.go { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button.p { background:var(--ok); color:#fff; border-color:var(--ok); } button.f { background:var(--bad); color:#fff; border-color:var(--bad); }
+  button.sel { outline:3px solid var(--ink); }
+  button:disabled { opacity:.5; }
+  .auto { border-radius:8px; padding:8px 10px; margin:8px 0; font-size:14px; white-space:pre-wrap; }
+  .auto.ok { background:#e8f5ec; } .auto.attention { background:#fff4d6; }
+  .prod { border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin:8px 0; font-size:14px; }
+  .prod b { font-family: ui-monospace, monospace; }
+  .flag { color:var(--warn); font-weight:600; }
+  textarea { width:100%; font:inherit; padding:8px; border:1px solid var(--line); border-radius:8px; min-height:64px; }
+  .net { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); padding:8px 14px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IMEI Lens Test · phone checklist</h1>
+  <div class="mut" id="status">Connecting…</div>
+  <div class="bar"><i id="prog" style="width:0"></i></div>
+  <div class="mut" id="count"></div>
+</header>
+<section id="list"></section>
+<div class="net">Only masked numbers (first 8 + last 4) are shown or saved. Never type a full IMEI in a note.</div>
+<script>
+const token = new URLSearchParams(location.search).get('t') || '';
+const api = (path, body) => fetch(path, { method: body ? 'POST' : 'GET', headers: { 'x-token': token, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+  .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+let state = null, open = null;
+const checks = {}; // caseId -> last Check result with product ticks
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); for (const k of kids) e.append(k); return e; };
+
+async function load() {
+  state = await api('/api/state');
+  render();
+}
+function renderStatus() {
+  const s = state.status;
+  document.getElementById('status').textContent = `${s.appRunning ? '●' : '○'} ${s.appRunning ? 'IMEI Lens Test is open' : 'IMEI Lens Test is NOT open: open it on the phone'} · APK ${s.apkSha || '?'}${s.expectLabel ? ' · expected build ' + s.expectLabel : ''}`;
+  const done = Object.values(state.answers).filter(a => a.result).length;
+  document.getElementById('prog').style.width = (100 * done / state.cases.length) + '%';
+  document.getElementById('count').textContent = `${done} of ${state.cases.length} answered · saved on the computer`;
+}
+function render() {
+  renderStatus();
+  const list = document.getElementById('list'); list.replaceChildren();
+  let group = '';
+  for (const c of state.cases) {
+    if (c.group !== group) { group = c.group; list.append(el('h2', { textContent: group })); }
+    const a = state.answers[c.id] || {};
+    const card = el('div', { className: 'case' + (open === c.id ? ' open' : '') });
+    const head = el('button', { className: 'head' }, el('span', { className: 'tag', textContent: c.id }), el('span', { textContent: c.title }), el('span', { className: 'st ' + (a.result || ''), textContent: a.result ? a.result.toUpperCase() : '' }));
+    head.onclick = () => { open = open === c.id ? null : c.id; render(); };
+    card.append(head);
+    if (open === c.id) card.append(body(c, a));
+    list.append(card);
+  }
+}
+function body(c, a) {
+  const d = el('div', { className: 'body' });
+  d.append(el('ol', {}, ...c.steps.map(s => el('li', { textContent: s }))), el('div', { className: 'expect', textContent: 'Should happen: ' + c.expect }));
+  const out = el('div');
+  const note = el('textarea', { placeholder: 'Note (optional). Masked numbers only.', value: a.note || '' });
+  const started = state.started.includes(c.id);
+  const auto = c.kind !== 'manual';
+  if (auto) {
+    const start = el('button', { className: 'act go', textContent: started ? 'Start again' : 'Start' });
+    start.onclick = async () => { start.disabled = true; try { const r = await api('/api/start', { id: c.id }); state.started.push(c.id); out.replaceChildren(el('div', { className: 'auto ok', textContent: `Baseline taken (${r.records} products now). Do the steps on the phone, then press Check.` })); } catch (e) { out.replaceChildren(el('div', { className: 'auto attention', textContent: e.message })); } start.disabled = false; };
+    const check = el('button', { className: 'act go', textContent: 'Check' });
+    check.onclick = async () => { check.disabled = true; try { checks[c.id] = await api('/api/check', { id: c.id }); showCheck(c, out); } catch (e) { out.replaceChildren(el('div', { className: 'auto attention', textContent: e.message })); } check.disabled = false; };
+    d.append(start, check);
+  }
+  d.append(out);
+  if (checks[c.id]) showCheck(c, out);
+  d.append(note);
+  const answer = result => async () => {
+    const products = {}; for (const p of (checks[c.id]?.products || [])) if (p._tick) products[p.id] = p._tick;
+    try { await api('/api/answer', { id: c.id, result, note: note.value, products }); await load(); } catch (e) { out.append(el('div', { className: 'auto attention', textContent: e.message })); }
+  };
+  for (const [r, label, cls] of [['pass', 'Pass', 'p'], ['fail', 'Fail', 'f'], ['skip', 'Skip', '']]) { const b = el('button', { className: 'act ' + cls + (a.result === r ? ' sel' : ''), textContent: label }); b.onclick = answer(r); d.append(b); }
+  return d;
+}
+function showCheck(c, out) {
+  const r = checks[c.id]; out.replaceChildren();
+  out.append(el('div', { className: 'auto ' + r.auto.verdict, textContent: (r.auto.verdict === 'ok' ? 'Computer check: nothing odd.\n' : 'Computer check: please look.\n') + r.auto.findings.join('\n') }));
+  for (const p of r.products) {
+    const row = el('div', { className: 'prod' });
+    row.append(el('div', {}, el('b', { textContent: p.name })), el('div', { textContent: `${p.flags.fallback ? 'IMEI 1 not read: the app shows IMEI 2 ' + p.imeiShown : 'IMEI 1 ' + (p.imei1 || '(none)') + (p.imei2 ? ' · IMEI 2 ' + p.imei2 : '')} · ${p.model || 'no model'}` }),
+      el('div', { className: p.needsReview ? 'flag' : '', textContent: p.needsReview ? 'Marked Needs review' + (p.note ? ': ' + p.note : '') : 'Shown as fine' }));
+    const ok = el('button', { className: 'act' + (p._tick === 'ok' ? ' sel p' : ''), textContent: 'Matches the label' });
+    const bad = el('button', { className: 'act' + (p._tick === 'wrong' ? ' sel f' : ''), textContent: 'Wrong' });
+    ok.onclick = () => { p._tick = 'ok'; showCheck(c, out); }; bad.onclick = () => { p._tick = 'wrong'; showCheck(c, out); };
+    row.append(ok, bad); out.append(row);
+  }
+}
+load().catch(e => { document.getElementById('status').textContent = 'Not connected: ' + e.message; });
+setInterval(() => api('/api/status').then(s => { if (state) { state.status = s; renderStatus(); } }).catch(() => {}), 10000);
+</script>
+</body>
+</html>

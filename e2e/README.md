@@ -20,6 +20,11 @@ powershell -ExecutionPolicy Bypass -File e2e\scripts\run-e2e.ps1 -Flows 00-smoke
 ```
 The report is written to `e2e\reports\<time>\REPORT.md` with per-test logs, Maestro screenshots, JUnit XML and logcat (git-ignored).
 
+## Real phone (safe mode) and the phone checklist
+* `run-e2e.ps1 -RealPhone -Device <serial>`: never clears another app's data, skips tests that touch Download, blocks every test that uses the system picker, puts nothing in shared storage, and compares the owner's files (Download, Documents, Pictures, DCIM; names, sizes, dates) before and after. Android's own thumbnail cache is compared separately as information.
+* `16-share-photos`: gives the app 5 synthetic photos through share intents (the app's own cache and FileProvider). Needs `E2E_ALLOW_SYNTHETIC_SHARE=1` on a real phone; the plan is in `phase2-results/phase3-prep/PHONE-SHARE-TEST-PLAN.md`.
+* `phone-tools/`: the digital phone checklist and automatic, masked result collection. See `phone-tools/README.md`.
+
 ## What is where
 * `flows\*.yaml`: Maestro flows for native and system UI and for web screens that Maestro can read (file picker, save dialog, share dialog, records, background).
 * `scenarios\*.mjs`: hybrid scenarios for screens Maestro cannot read (Crop Studio sits in stacked modal dialogs): they drive the WebView through DevTools and use real `adb input` swipes, and still call Maestro for the picker.
