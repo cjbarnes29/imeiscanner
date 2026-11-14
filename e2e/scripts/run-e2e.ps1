@@ -103,6 +103,20 @@ foreach ($flow in $all) {
     $rows += [pscustomobject]@{ Flow = $name; Result = "NOT RUN (device gone)"; Seconds = 0; Crashes = 0; Notes = "emulator disconnected before this test" }
     break
   }
+  # A display that does not render (seen on the emulator after ~17 h: blank screenshots) makes every Maestro test fail for the wrong reason.
+  # A real picture of the screen is 20 KB to hundreds of KB; the blank one seen was 10195 bytes. Wake the screen once, then stop with a clear result.
+  $needsScreen = $flow.Extension -eq ".yaml" -or ((Get-Content $flow.FullName -Raw) -match 'maestro\(|scanAll|pickFolder')
+  if ($needsScreen) {
+    $shotSize = { [int]((adb -s $Device shell "screencap -p | wc -c") -join "").Trim() }
+    if ((& $shotSize) -lt 10400) {
+      adb -s $Device shell input keyevent KEYCODE_WAKEUP | Out-Null; Start-Sleep 2
+      if ((& $shotSize) -lt 10400) {
+        Write-Host "ABORT: the screen of $Device is blank (display not rendering or phone locked). Remaining screen tests not run." -ForegroundColor Red
+        $rows += [pscustomobject]@{ Flow = $name; Result = "NOT RUN (screen blank)"; Seconds = 0; Crashes = 0; Notes = "cold-boot the emulator / unlock the phone" }
+        break
+      }
+    }
+  }
   Write-Host "== $name" -ForegroundColor Cyan
   # Emulator only: resets the system folder picker between tests. Never on a person's phone (it would clear their picker history).
   if (-not $safe) { adb -s $Device shell pm clear com.google.android.documentsui | Out-Null }
