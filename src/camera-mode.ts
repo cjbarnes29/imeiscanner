@@ -1,4 +1,4 @@
-/** How "Take photo" behaves on the phone, which always uses the phone's own camera app. */
+/** How "Take photo" behaves on the phone, which always uses the phone's own camera app. The default (series) scans each photo while the next one is being taken, so little is left to scan after the last photo. */
 export type CameraMode = 'now' | 'series' | 'collect';
 
 export const CAMERA_MODE_KEY = 'imei-camera-mode';
@@ -10,7 +10,7 @@ export const CAMERA_MODES: { value: CameraMode; label: string; help: string }[] 
 ];
 
 export function normalizeCameraMode(value: unknown): CameraMode {
-  return value === 'series' || value === 'collect' ? value : 'now';
+  return value === 'now' || value === 'collect' ? value : 'series';
 }
 
 export type CameraEventDetail = { state?: string; waiting?: number };

@@ -5,7 +5,7 @@ What changed in each Android app / web release since 1.7. The web and the Androi
 ## Unreleased — the phone camera app is the only camera (Android)
 - **Take photo / Scan with camera now open the phone's own camera app.** The in-app live preview (small, wrong shape, often did not scan) is no longer used on the phone; the browser version keeps it.
 - The camera writes the full-size photo straight into a private folder inside the app (never the gallery) and it is scanned by the same background scanner as chosen photos. A photo survives the app being closed while the camera is open.
-- **After taking a photo** (setting under the camera button): scan each photo right away (default) / keep taking photos, scanning each one / take several, then scan them together (**Scan now**, or **Discard waiting photos**, which deletes only this app's own unscanned camera photos).
+- **After taking a photo** (setting under the camera button): keep taking photos, scanning each one while you shoot (default, so only the last photo is left to scan when you stop) / scan each photo right away / take several, then scan them together (**Scan now**, or **Discard waiting photos**, which deletes only this app's own unscanned camera photos).
 - Clear messages for: camera permission refused, no camera app, cancelled camera, photo not saved. A photo with no IMEI is reported (to review / to retake), never hidden.
 - Tests: JVM `CameraInboxTest` (9), `scripts/test-camera-mode.mjs`, emulator `18-camera-native`. **Not verified:** the real phone camera (POCO/HyperOS) returning the full-size photo.
 ## 1.26.0 — crop queue with statuses (Pending, Processing, Process later, Needs review, Completed)

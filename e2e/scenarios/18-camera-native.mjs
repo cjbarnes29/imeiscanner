@@ -61,6 +61,7 @@ check(results, 'a refused permission opens no camera and keeps no photo', !inCam
 // 3. Permission allowed: the phone's own camera opens, one photo is taken and scanned right away.
 adb(c.device, 'shell', 'pm', 'grant', c.app, 'android.permission.CAMERA');
 adb(c.device, 'logcat', '-c');
+await setMode('now'); // the default is now "keep taking photos" (series); this part checks a single photo
 check(results, 'the phone\'s own camera app opens from the button', await openCamera());
 check(results, 'the photo is taken and the app comes back', await shootAndConfirm());
 check(results, 'the photo was scanned (listed in the scan, nothing hidden)', await waitUntil(() => photosScanned() >= 1 && ['completed', 'idle'].includes(nativeStore(c.device, c.app).status), 120000, 1500), `ledger ${photosScanned()}`);
@@ -104,6 +105,23 @@ check(results, 'a file that is not ours was not deleted', dir('camera-waiting').
 check(results, 'the scanned photos were not deleted', dir('camera-photos').length === 2, `${dir('camera-photos').length}`);
 adb(c.device, 'shell', `run-as ${c.app} rm -f files/native-scans/camera-waiting/holiday.jpg`);
 
+
+// 7. Series (the default): the photo is scanned while the camera opens again by itself; Back in the camera ends the series.
+await setMode('series');
+const photosBefore = dir('camera-photos').length, ledgerBefore = photosScanned();
+check(results, 'the camera opens in series mode', await openCamera());
+const [sw, sh] = size();
+await sleep(2500);
+for (let i = 0; i < 8 && dir('camera-photos').length === photosBefore; i++) { adb(c.device, 'shell', 'input', 'tap', String(sw / 2 | 0), String(sh * 0.93 | 0)); await sleep(3500); }
+check(results, 'series: the photo was kept and sent to the scanner', dir('camera-photos').length === photosBefore + 1, `${dir('camera-photos').length} photos`);
+check(results, 'series: the camera opened again by itself for the next photo', await waitUntil(() => inCamera(), 25000));
+await sleep(1500);
+adb(c.device, 'shell', 'input', 'keyevent', 'KEYCODE_BACK');
+check(results, 'series: Back in the camera ends the series (back in the app)', await waitUntil(() => inApp(), 20000));
+await sleep(3000);
+check(results, 'series: the camera did not open a third time', !inCamera());
+check(results, 'series: the photo taken while shooting is scanned', await waitUntil(() => photosScanned() >= ledgerBefore + 1 && ['completed', 'idle'].includes(nativeStore(c.device, c.app).status), 120000, 1500), `ledger ${photosScanned()}`);
+check(results, 'series: nothing is left waiting and no empty file remains', dir('camera-waiting').filter(n => /^camera-/.test(n)).length === 0);
 } catch (error) { check(results, 'the test stopped early: ' + String(error.message).split('\n')[0], false, focusedWindow(c).trim()); }
 const log = adb(c.device, 'logcat', '-d', '-s', 'AndroidRuntime:E', 'IMEI-Lens:E');
 check(results, 'no crash', !/FATAL EXCEPTION/.test(log));

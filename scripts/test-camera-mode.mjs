@@ -1,4 +1,4 @@
-// Phone camera modes: unknown settings fall back to "scan right away", and every camera outcome has a plain sentence (failures are never silent).
+// Phone camera modes: unknown settings fall back to "keep taking photos, scan each one" (scanning overlaps shooting), and every camera outcome has a plain sentence (failures are never silent).
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -11,8 +11,9 @@ const m=await import(pathToFileURL(join(dir,'camera-mode.mjs')).href);
 
 assert.deepEqual(m.CAMERA_MODES.map(x=>x.value),['now','series','collect']);
 assert.equal(m.normalizeCameraMode('series'),'series');
+assert.equal(m.normalizeCameraMode('now'),'now');
 assert.equal(m.normalizeCameraMode('collect'),'collect');
-for(const bad of [undefined,null,'',' now','NOW','burst',3,{}])assert.equal(m.normalizeCameraMode(bad),'now',`fallback for ${String(bad)}`);
+for(const bad of [undefined,null,'',' now','NOW','burst',3,{}])assert.equal(m.normalizeCameraMode(bad),'series',`fallback for ${String(bad)}`);
 
 assert.match(m.cameraMessage({state:'queued'},'now'),/scanning it in the background/i);
 assert.match(m.cameraMessage({state:'queued'},'series'),/opens again/i);
