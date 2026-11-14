@@ -399,6 +399,7 @@ final class ImageScanner {
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
                                          String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation,
                                          List<Code> codes, Rect region, int deviceCount, String printedImei1) throws Exception {
+        BrandRegistry.init(context); // brand profiles (assets/brands/*.json), loaded once
         // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
         long tm = Prof.now();
         Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
@@ -414,22 +415,25 @@ final class ImageScanner {
         }
         // Barcodes are exact: pair each with the "IMEI 1" / "IMEI 2" text printed under it.
         String barcode1 = labelledBarcode(ocr, codes, region, LABEL_ONE), barcode2 = labelledBarcode(ocr, codes, region, LABEL_TWO);
-        // IMEI 1's own text line was not read: find IMEI 1's barcode by the Samsung same-device rule (same serial part as this label's IMEI 2).
-        // Samsung labels only (the label's text must show SAMSUNG or an SM- model code); the number is the barcode's own, never computed from
-        // IMEI 2; and unless the printed IMEI 1 confirms it, the record is marked for review.
+        // The brand is decided from THIS label's own text only (brand profiles, brands/profiles/*.json). A brand-only IMEI rule can run only for the
+        // brand that was decided; no evidence (or evidence of several brands) = the generic profile, which has no rules, and a "brand unclear" mark.
+        final BrandRegistry.Decision brand = BrandRegistry.detect(raw);
+        final BrandProfile.Rule sharedRule = brand.brand.rule("shared-digits");
+        // IMEI 1's own text line was not read: find IMEI 1's barcode by the brand's same-device rule (Samsung: same serial part as this label's IMEI 2).
+        // The number is the barcode's own, never computed from IMEI 2; and unless the printed IMEI 1 confirms it, the record is marked for review.
         boolean imei1ByRule = false;
-        if (barcode1.isEmpty() && SamsungImei.isSamsungLabel(raw)) {
+        if (barcode1.isEmpty() && sharedRule != null) {
             String anchor = ImeiSource.secondImeiInText(raw);
             if (anchor.isEmpty()) anchor = barcode2;
             if (!anchor.isEmpty()) {
                 List<String> values = new ArrayList<>();
                 if (codes != null) for (Code code : codes) values.add(code.value);
-                String found = SamsungImei.sameDeviceImei1(anchor, values);
+                String found = BrandProfile.sharedDigitsCounterpart(sharedRule, anchor, values);
                 // Not among the photo's barcodes: read the barcodes of this label again, enlarged (only for a record that would show IMEI 2 only).
                 if (found.isEmpty() && (imei.isEmpty() || ImeiSource.usesSecondImei(raw, imei))) {
                     long tb = Prof.now();
                     for (Code code : barcodesEnlarged(photo)) values.add(code.value);
-                    found = SamsungImei.sameDeviceImei1(anchor, values);
+                    found = BrandProfile.sharedDigitsCounterpart(sharedRule, anchor, values);
                     Prof.add(found.isEmpty() ? "barcodeRetryMiss" : "barcodeRetryHit", tb);
                 }
                 if (!found.isEmpty()) {
@@ -474,12 +478,14 @@ final class ImageScanner {
         SamsungModel.Reading modelReading = SamsungModel.read(modelText);
         if (modelReading.uncertain && !modelReading.note.isEmpty()) { row.put("modelNeedsReview", true); row.put("modelNote", modelReading.note); }
         // No model code read at all (only a series name, or nothing): never presented as a checked model.
-        else if (modelReading.model.isEmpty()) { row.put("modelNeedsReview", true); row.put("modelNote", SamsungModel.NO_CODE_NOTE); }
+        else if (modelReading.model.isEmpty()) { row.put("modelNeedsReview", true); row.put("modelNote", brand.brand.note("noCode")); }
         row.put("imei", imei);
+        row.put("brand", brand.brand.id);
+        if (brand.unclear) row.put("brandNeedsReview", true); // no brand evidence on the label: a person confirms the model and numbers
         // Never silent: when only the label's IMEI 2 could be read, the number is kept but marked so the app asks for a review.
         if (!imei.isEmpty() && ImeiSource.usesSecondImei(raw, imei)) row.put("imeiFallback", true);
         // IMEI 1 found by a rule, not read from its own printed line: kept, but never accepted without a person's check.
-        if (imei1ByRule && imei.equals(barcode1)) { row.put("imeiNeedsReview", true); row.put("imeiNote", SamsungImei.RULE_NOTE); }
+        if (imei1ByRule && imei.equals(barcode1)) { row.put("imeiNeedsReview", true); row.put("imeiNote", sharedRule.note); }
         else if (imei1FromPhoto) { row.put("imeiNeedsReview", true); row.put("imeiNote", ImeiSource.PHOTO_READ_NOTE); }
         row.put("status", imei.isEmpty() ? "Review" : "Valid");
         row.put("cropNeedsReview", cropReview);

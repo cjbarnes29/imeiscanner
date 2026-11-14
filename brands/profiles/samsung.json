@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "id": "samsung",
+  "name": "Samsung",
+  "status": "active",
+  "evidence": {
+    "note": "Evidence must be in THE LABEL'S OWN text. Words are matched as whole words, case-insensitively; code shapes as written (case-sensitive).",
+    "words": [
+      "SAMSUNG"
+    ],
+    "codeShapes": [
+      "\\bS\\s*M\\s*[-–—]\\s*[A-Z0-9|]{5}"
+    ]
+  },
+  "model": {
+    "prefix": "SM-",
+    "labelled": "\\bmodel\\s*[:：;.-]?\\s*S\\s*M\\s*[-–—]?\\s*([A-Z0-9|]{5})",
+    "visible": "\\bS\\s*M\\s*[-–—]\\s*([A-Z0-9|]{5})",
+    "core": "[A-Z][0-9]{3}[A-Z0-9]",
+    "digitPositions": [
+      1,
+      2,
+      3
+    ],
+    "repairs": {
+      "O": "0",
+      "D": "0",
+      "Q": "0",
+      "I": "1",
+      "L": "1",
+      "|": "1",
+      "T": "1",
+      "Z": "2",
+      "S": "5",
+      "G": "6",
+      "b": "6",
+      "B": "8"
+    },
+    "editShape": "^SM-[A-Z][0-9]{3}[A-Z0-9][A-Z0-9/]*$",
+    "notes": {
+      "noCode": "No model code was read. Type the code from the label (for example SM-A165F).",
+      "unclear": "The model code could not be read clearly. Check the model.",
+      "repaired": "The model code was not clearly readable; read as {prefix}{code}. Check the model.",
+      "repairedMany": "The model code was not clearly readable. Check the model.",
+      "disagree": "The two model lines disagree ({prefix}{code} / {prefix}{other}). Check the model.",
+      "different": "Different model codes were read ({codes}). Check the model.",
+      "editShape": "Not a Samsung model code (for example SM-A165F). Check the model."
+    }
+  },
+  "imeiRules": [
+    {
+      "id": "same-device-imei1",
+      "type": "shared-digits",
+      "from": 8,
+      "to": 14,
+      "trust": "observed",
+      "evidence": "Seen on every label of three Samsung models in the test data (IMEI 1 and IMEI 2 of one device share digits 9 to 14 and differ in the first 8). Not documented by the manufacturer.",
+      "note": "IMEI 1 was taken from its barcode because its printed number could not be read. Check it against the label."
+    }
+  ]
+}
