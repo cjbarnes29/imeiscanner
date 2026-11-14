@@ -36,11 +36,19 @@ async function setMode(mode) {
 }
 const click = text => js(c, `(()=>{const re=new RegExp(${JSON.stringify(text)});const b=[...document.querySelectorAll('button')].find(e=>re.test((e.innerText||'').trim())&&e.offsetParent!==null);if(!b)return false;b.click();return true})()`);
 
+try {
 // 1. Fresh test app, camera permission NOT granted yet.
 adb(c.device, 'shell', 'pm', 'clear', c.app);
 try { adb(c.device, 'shell', 'pm', 'grant', c.app, 'android.permission.POST_NOTIFICATIONS'); } catch { /* older Android */ }
-adb(c.device, 'shell', 'am', 'start', '-n', `${c.app}/com.imeilens.scanner.MainActivity`);
-check(results, 'the app opens', await waitForText(c, 'Scan', 40000));
+// Android may still be removing the previous test's app task right after pm clear and kills a process started in that moment
+// (seen in logcat: "Destroy timeout of remove-task"): wait, then start the app again until the page is there.
+await sleep(3000);
+let opened = false;
+for (let attempt = 0; attempt < 4 && !opened; attempt++) {
+  adb(c.device, 'shell', 'am', 'start', '-n', `${c.app}/com.imeilens.scanner.MainActivity`);
+  opened = await waitForText(c, 'Scan', 20000);
+}
+check(results, 'the app opens', opened, opened ? '' : focusedWindow(c).trim());
 await sleep(3000);
 
 // 2. Permission refused: a clear message, no photo, nothing created.
@@ -96,6 +104,7 @@ check(results, 'a file that is not ours was not deleted', dir('camera-waiting').
 check(results, 'the scanned photos were not deleted', dir('camera-photos').length === 2, `${dir('camera-photos').length}`);
 adb(c.device, 'shell', `run-as ${c.app} rm -f files/native-scans/camera-waiting/holiday.jpg`);
 
+} catch (error) { check(results, 'the test stopped early: ' + String(error.message).split('\n')[0], false, focusedWindow(c).trim()); }
 const log = adb(c.device, 'logcat', '-d', '-s', 'AndroidRuntime:E', 'IMEI-Lens:E');
 check(results, 'no crash', !/FATAL EXCEPTION/.test(log));
 finish('18-camera-native', results);
