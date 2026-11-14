@@ -12,6 +12,8 @@ export type ReportSummary = {
   needRescanInJob: number;
   /** Photos from any scan that still need a new scan. */
   needRescan: number;
+  /** Photos of this scan that miss a label the scanner could explain (cut by an edge, partly read, unreadable): "retake these". */
+  retake: number;
 };
 
 export type ReportPhoto = {
@@ -20,6 +22,8 @@ export type ReportPhoto = {
   products: number; saved: number; savedIds?: string[]; imeis: string[]; missingImei: number; orphanBarcodes?: number;
   duplicates: { imei: string; of: string }[]; emptyRepeats: { of: string }[]; supersedes: string[]; review: number; reason: string; needsRescan: boolean;
   duplicateOfUri?: string; scans?: number;
+  /** Why a label of this photo is missing (see label-issue.ts); empty when nothing is known. */
+  retake: boolean; retakeKind: string; retakeSide: string; retakeMissing: number; retakeDigits: number;
 };
 
 export type ScanReportData = { jobId: string; report: ReportSummary; photos: ReportPhoto[] };
@@ -27,7 +31,7 @@ export type ScanReportData = { jobId: string; report: ReportSummary; photos: Rep
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
-export const EMPTY_SUMMARY: ReportSummary = { photos: 0, scanned: 0, failed: 0, duplicatePhotos: 0, products: 0, saved: 0, imeisDetected: 0, missingImei: 0, duplicateImeis: 0, emptyRepeats: 0, review: 0, needRescanInJob: 0, needRescan: 0 };
+export const EMPTY_SUMMARY: ReportSummary = { photos: 0, scanned: 0, failed: 0, duplicatePhotos: 0, products: 0, saved: 0, imeisDetected: 0, missingImei: 0, duplicateImeis: 0, emptyRepeats: 0, review: 0, needRescanInJob: 0, needRescan: 0, retake: 0 };
 
 /** Reads the summary the app sends with every status; anything missing (an older app, a bad value) counts as 0. */
 export function readSummary(value: unknown): ReportSummary {
@@ -35,7 +39,7 @@ export function readSummary(value: unknown): ReportSummary {
   return {
     photos: num(v.photos), scanned: num(v.scanned), failed: num(v.failed), duplicatePhotos: num(v.duplicatePhotos),
     products: num(v.products), saved: num(v.saved), imeisDetected: num(v.imeisDetected), missingImei: num(v.missingImei),
-    duplicateImeis: num(v.duplicateImeis), emptyRepeats: num(v.emptyRepeats), review: num(v.review), needRescanInJob: num(v.needRescanInJob), needRescan: num(v.needRescan)
+    duplicateImeis: num(v.duplicateImeis), emptyRepeats: num(v.emptyRepeats), review: num(v.review), needRescanInJob: num(v.needRescanInJob), needRescan: num(v.needRescan), retake: num(v.retake)
   };
 }
 
@@ -53,7 +57,8 @@ export function parseReport(raw: string): ScanReportData | null {
         duplicates: Array.isArray(e.duplicates) ? (e.duplicates as unknown[]).map(d => ({ imei: text((d as Record<string, unknown>)?.imei), of: text((d as Record<string, unknown>)?.of) })) : [],
         emptyRepeats: Array.isArray(e.emptyRepeats) ? (e.emptyRepeats as unknown[]).map(d => ({ of: text((d as Record<string, unknown>)?.of) })) : [],
         supersedes: Array.isArray(e.supersedes) ? (e.supersedes as unknown[]).map(text).filter(Boolean) : [],
-        review: num(e.review), reason: text(e.reason), needsRescan: e.needsRescan === true, duplicateOfUri: text(e.duplicateOfUri), scans: num(e.scans) || 1
+        review: num(e.review), reason: text(e.reason), needsRescan: e.needsRescan === true, duplicateOfUri: text(e.duplicateOfUri), scans: num(e.scans) || 1,
+        retake: e.retake === true, retakeKind: text(e.retakeKind), retakeSide: text(e.retakeSide), retakeMissing: num(e.retakeMissing) || 1, retakeDigits: num(e.retakeDigits)
       };
     });
     return { jobId: text(data.jobId), report: readSummary(data.report), photos };
@@ -82,6 +87,7 @@ export function summaryLine(summary: ReportSummary): string {
   if (summary.duplicatePhotos) parts.push(`${plural(summary.duplicatePhotos, 'repeated picture')}`);
   if (summary.failed) parts.push(`${plural(summary.failed, 'photo')} could not be read`);
   if (summary.review) parts.push(`${summary.review} to review`);
+  if (summary.retake) parts.push(`${summary.retake} to retake`);
   return parts.join(' · ');
 }
 
@@ -98,7 +104,8 @@ export function photoStatus(photo: ReportPhoto): PhotoStatus {
   if (photo.emptyRepeats.length) bits.push(`${photo.emptyRepeats.length} unreadable already listed, not added again`);
   if (photo.duplicates.length) bits.push(`${plural(photo.duplicates.length, 'duplicate')} not saved again`);
   if (photo.review) bits.push(`${photo.review} to review`);
-  const tone = photo.missingImei || photo.review || photo.orphanBarcodes ? 'warn' : 'ok';
+  if (photo.retake) bits.push('retake this photo');
+  const tone = photo.missingImei || photo.review || photo.orphanBarcodes || photo.retake ? 'warn' : 'ok';
   return { label: bits.join(' · '), tone };
 }
 
@@ -107,4 +114,9 @@ export function orderPhotos(data: ScanReportData): { current: ReportPhoto[]; old
   const current = data.photos.filter(p => p.jobId === data.jobId);
   const older = data.photos.filter(p => p.jobId !== data.jobId && p.needsRescan);
   return { current, older };
+}
+
+/** The photos of this scan to retake (names only, with the reason kind): the list the person can copy. Nothing else is in it. */
+export function retakePhotos(data: ScanReportData): ReportPhoto[] {
+  return data.photos.filter(p => p.jobId === data.jobId && p.retake);
 }

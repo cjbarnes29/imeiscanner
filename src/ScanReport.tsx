@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { orderPhotos, parseReport, photoStatus, summaryLine, type ReportSummary, type ScanReportData } from './scan-report';
+import { orderPhotos, parseReport, photoStatus, retakePhotos, summaryLine, type ReportSummary, type ScanReportData } from './scan-report';
+import { issueText, type LabelIssueKind } from './label-issue';
 
 type ReportBridge = { scanReport?: () => string; rescanNeeded?: (personId: string) => number };
 
@@ -23,6 +24,7 @@ export function ScanReport({ bridge, summary, status, personId, onMessage }: {
   if (!line && !summary.needRescan) return null;
   const grouped = data ? orderPhotos(data) : { current: [], older: [] };
   const needRescan = summary.needRescan;
+  const retake = data ? retakePhotos(data) : [];
   return (
     <div className="scan-report">
       {line && <p className="scan-report-line">{line}</p>}
@@ -38,6 +40,14 @@ export function ScanReport({ bridge, summary, status, personId, onMessage }: {
       {open && (
         <div className="scan-report-list">
           {!data && <p>Loading the report…</p>}
+          {retake.length > 0 && (
+            <div className="scan-report-retake" role="group" aria-label="Photos to retake">
+              <p className="scan-report-sub">Retake {retake.length === 1 ? 'this photo' : `these ${retake.length} photos`}</p>
+              {retake.map(photo => <p key={`retake-${photo.uri || photo.name}`}><strong>{photo.name}</strong>: {issueText(photo.retakeKind as LabelIssueKind, photo.retakeSide, photo.retakeMissing, photo.retakeDigits).text}</p>)}
+              <button type="button" className="subtle-btn" onClick={() => { void navigator.clipboard?.writeText(retake.map(photo => photo.name).join('\n')).then(() => onMessage('Photo names copied.'), () => onMessage('Could not copy the names.')); }}>Copy the photo names</button>
+              <small>Your original photos and the records made from them are kept; a new photo is added next to them.</small>
+            </div>
+          )}
           {data && grouped.current.length === 0 && <p>No photos in this scan yet.</p>}
           {grouped.current.map(photo => <ReportRow key={photo.uri || photo.name} photo={photo} />)}
           {grouped.older.length > 0 && <>

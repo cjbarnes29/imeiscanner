@@ -41,6 +41,20 @@ public class ScanLedgerTest {
         assertFalse(entry.getBoolean("needsRescan"));
     }
 
+    @Test public void aPhotoMissingALabelIsReportedForRetakeWithItsReason() throws Exception {
+        JSONObject row = product("a", "351973130000001", true).put("labelIssue", "cut-edge").put("labelIssueSide", "bottom").put("labelsMissing", 1);
+        JSONArray products = new JSONArray().put(row);
+        JSONObject entry = scanned("content://x/9", "cut.jpg", "h9", "job1", products, products, NONE);
+        assertTrue(entry.getBoolean("retake"));
+        assertEquals("cut-edge", entry.getString("retakeKind"));
+        assertEquals("bottom", entry.getString("retakeSide"));
+        assertEquals(1, entry.getInt("retakeMissing"));
+        JSONObject plain = scanned("content://x/10", "ok.jpg", "h10", "job1", new JSONArray().put(product("b", "351973130000002", false)), new JSONArray().put(product("b", "351973130000002", false)), NONE);
+        assertFalse("no issue, no retake entry", plain.has("retake"));
+        JSONObject summary = ScanLedger.summarize(new JSONArray().put(entry).put(plain), "job1");
+        assertEquals(1, summary.getInt("retake"));
+    }
+
     @Test public void aProductWithoutImeiMakesThePhotoEligibleForRescan() throws Exception {
         JSONArray products = new JSONArray().put(product("a", "", true));
         JSONObject entry = scanned("content://x/2", "blank.jpg", "h2", "job1", products, products, NONE);

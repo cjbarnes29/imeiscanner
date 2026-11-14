@@ -51,9 +51,11 @@ final class ScanLedger {
             orphans = Math.max(orphans, products.getJSONObject(index).optInt("orphanBarcodes"));
         }
         int review = 0;
+        JSONObject retake = null; // the photo is missing a label and the scanner can say why (LabelIssue): "retake this photo"
         JSONArray ids = new JSONArray();
         for (int index = 0; index < saved.length(); index++) {
             JSONObject row = saved.getJSONObject(index);
+            if (retake == null && !row.optString("labelIssue").isEmpty()) retake = row;
             ids.put(row.optString("id"));
             if ("Review".equals(row.optString("status")) || row.optBoolean("cropNeedsReview") || row.optBoolean("imeiFallback")) review++;
         }
@@ -61,6 +63,8 @@ final class ScanLedger {
             .put("imeis", imeis).put("missingImei", missing).put("duplicates", duplicates)
             .put("emptyRepeats", emptyRepeats).put("supersedes", supersedes).put("review", review)
             .put("orphanBarcodes", orphans).put("needsRescan", missing > 0 || orphans > 0);
+        if (retake != null) entry.put("retake", true).put("retakeKind", retake.optString("labelIssue")).put("retakeSide", retake.optString("labelIssueSide"))
+            .put("retakeMissing", retake.optInt("labelsMissing", 1)).put("retakeDigits", retake.optInt("labelIssueDigits"));
         return entry;
     }
 
@@ -183,7 +187,7 @@ final class ScanLedger {
      * Invariants the tests check: products = saved + duplicateImeis + emptyRepeats; photos = scanned + failed + duplicatePhotos.
      */
     static JSONObject summarize(JSONArray photos, String jobId) throws JSONException {
-        int photosInJob = 0, scanned = 0, failed = 0, duplicatePhotos = 0, products = 0, saved = 0, imeis = 0, missing = 0, duplicateImeis = 0, emptyRepeats = 0, review = 0, needRescanInJob = 0, needRescanAll = 0;
+        int photosInJob = 0, scanned = 0, failed = 0, duplicatePhotos = 0, products = 0, saved = 0, imeis = 0, missing = 0, duplicateImeis = 0, emptyRepeats = 0, review = 0, needRescanInJob = 0, needRescanAll = 0, retake = 0;
         for (int index = 0; index < photos.length(); index++) {
             JSONObject entry = photos.optJSONObject(index);
             if (entry == null) continue;
@@ -199,12 +203,13 @@ final class ScanLedger {
             duplicateImeis += entry.optJSONArray("duplicates") == null ? 0 : entry.optJSONArray("duplicates").length();
             emptyRepeats += entry.optJSONArray("emptyRepeats") == null ? 0 : entry.optJSONArray("emptyRepeats").length();
             review += entry.optInt("review");
+            if (entry.optBoolean("retake")) retake++;
             if (entry.optBoolean("needsRescan")) needRescanInJob++;
         }
         return new JSONObject().put("photos", photosInJob).put("scanned", scanned).put("failed", failed).put("duplicatePhotos", duplicatePhotos)
             .put("products", products).put("saved", saved).put("imeisDetected", imeis).put("missingImei", missing)
             .put("duplicateImeis", duplicateImeis).put("emptyRepeats", emptyRepeats).put("review", review)
-            .put("needRescanInJob", needRescanInJob).put("needRescan", needRescanAll);
+            .put("needRescanInJob", needRescanInJob).put("needRescan", needRescanAll).put("retake", retake);
     }
 
     /** The photos that failed or show a product without an IMEI, as a scan queue ({uri, name}). */

@@ -41,6 +41,11 @@ await sharp(page(H, labelSvg(devices.A))).resize({ width: 1100 }).jpeg({ quality
 // IMEI 1 not readable, IMEI 2 clear: must be flagged, never shown as a clean IMEI 1
 await jpg(page(H, labelSvg({ ...devices.B, imei2: imei('35693803', '123456') }, { hideImei1: true })), 'E2E-imei2-only.jpg');
 
+// A label that runs off the bottom edge of the photo (its IMEI 1 line is cut through): the app must say it is cut off and ask for a retake.
+// Prefix EDGE- (not E2E-) so the picker tests that search for "E2E-" still select exactly five photos.
+const CUT = 352;
+await jpg(page(H + 30 + CUT, labelSvg(devices.C) + labelSvg(devices.D, { yOff: H + 30 })), 'EDGE-cut-bottom.jpg');
+
 const truth = {
   note: 'Synthetic data for emulator tests. No real device.',
   photos: {
@@ -49,6 +54,10 @@ const truth = {
     'E2E-two-box-CD.jpg': { devices: 2, imei1: [devices.C.imei1, devices.D.imei1], models: [devices.C.model, devices.D.model] },
     'E2E-dup-of-A.jpg': { devices: 1, imei1: [devices.A.imei1], models: [devices.A.model], duplicateOf: 'E2E-single-A.jpg' },
     'E2E-imei2-only.jpg': { devices: 1, imei1: [], imei2: [imei('35693803', '123456')], models: [devices.B.model], expectFlag: 'imei2-fallback' },
+  },
+  // Extra synthetic photos for single tests (not part of the five-photo set above).
+  extras: {
+    'EDGE-cut-bottom.jpg': { devices: 2, imei1: [devices.C.imei1], models: [devices.C.model, devices.D.model], expectIssue: 'cut-edge:bottom' },
   },
 };
 await writeFile(join(out, 'truth.json'), JSON.stringify(truth, null, 2));

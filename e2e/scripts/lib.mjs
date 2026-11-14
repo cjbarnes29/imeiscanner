@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 // The generated fixtures (git-ignored) may not exist yet (a fresh checkout, CI unit tests): then there is no truth and nothing can be staged or shared.
 const truthFile = join(here, '..', 'fixtures', 'out', 'truth.json');
-export const truth = existsSync(truthFile) ? JSON.parse(readFileSync(truthFile, 'utf8')).photos : {};
+const truthData = existsSync(truthFile) ? JSON.parse(readFileSync(truthFile, 'utf8')) : {};
+export const truth = truthData.photos || {};
+/** Extra synthetic photos for single tests (EDGE-*.jpg): not part of the five-photo set. */
+export const extras = truthData.extras || {};
+const isFixture = name => Object.hasOwn(truth, name) || Object.hasOwn(extras, name);
 export const mask = d => (d && /^\d{15}$/.test(d)) ? `${d.slice(0, 8)}***${d.slice(-4)}` : (d || '(none)');
 const adbPath = () => join(process.env.ANDROID_HOME || join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk'), 'platform-tools', 'adb.exe');
 
@@ -53,7 +57,7 @@ export function guardApp(app) { if (app !== 'com.imeilens.scanner.phonetest') th
 // folder (run-as) and handed over as ACTION_SEND intents with a content URI of the app's own FileProvider (the same path WhatsApp or Gallery
 // shares take). Only fixture files named E2E-*.jpg from e2e/fixtures/out are ever staged.
 const SHARE_TMP = '/data/local/tmp/imei-lens-e2e-share'; // shell-owned scratch folder: not user storage, not indexed by the gallery
-export const SYNTHETIC_NAME = /^E2E-[A-Za-z0-9-]+\.jpg$/;
+export const SYNTHETIC_NAME = /^(E2E|EDGE)-[A-Za-z0-9-]+\.jpg$/;
 const fixturesDir = join(here, '..', 'fixtures', 'out');
 export const shareUri = (app, name) => `content://${app}.files/shared/${name}`;
 
@@ -66,7 +70,7 @@ export function stageSyntheticPhotos(device, app, names) {
   guardApp(app); requireShareAllowed(device);
   for (const name of names) {
     if (!SYNTHETIC_NAME.test(name)) throw new Error(`refusing to stage ${name}: only synthetic E2E-*.jpg fixtures are allowed`);
-    if (!Object.hasOwn(truth, name)) throw new Error(`refusing to stage ${name}: not a known synthetic fixture`);
+    if (!isFixture(name)) throw new Error(`refusing to stage ${name}: not a known synthetic fixture`);
   }
   adb(device, 'shell', `rm -rf ${SHARE_TMP}; mkdir -p ${SHARE_TMP}`);
   adb(device, 'shell', `run-as ${app} mkdir -p cache`); // a freshly cleared app has no cache folder yet
@@ -80,13 +84,13 @@ export function stageSyntheticPhotos(device, app, names) {
 /** Sends one photo to the test app only (-p), as another app would share it. */
 export function sharePhoto(device, app, name) {
   guardApp(app); requireShareAllowed(device);
-  if (!SYNTHETIC_NAME.test(name) || !Object.hasOwn(truth, name)) throw new Error(`refusing to share ${name}: not a synthetic fixture`);
+  if (!SYNTHETIC_NAME.test(name) || !isFixture(name)) throw new Error(`refusing to share ${name}: not a synthetic fixture`);
   return adb(device, 'shell', 'am', 'start', '-a', 'android.intent.action.SEND', '-t', 'image/jpeg', '-p', app, '--eu', 'android.intent.extra.STREAM', shareUri(app, name));
 }
 /** Removes the staged copies (only E2E-*.jpg in the test app's own cache folder). */
 export function unstageSyntheticPhotos(device, app) {
   guardApp(app);
-  adb(device, 'shell', `run-as ${app} sh -c 'rm -f cache/E2E-*.jpg'`);
+  adb(device, 'shell', `run-as ${app} sh -c 'rm -f cache/E2E-*.jpg cache/EDGE-*.jpg'`);
 }
 export function nativeStore(device, app) {
   guardApp(app);

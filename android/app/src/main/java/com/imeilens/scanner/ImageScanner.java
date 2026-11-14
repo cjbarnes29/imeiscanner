@@ -129,6 +129,7 @@ final class ImageScanner {
             int serialLabels = LabelGeometry.landmarkLabels(items(linesOf(full)));
             if (expected == 0 && serialLabels > target) target = Math.min(MAX_PRODUCTS, serialLabels);
             List<Line> lines = null;
+            final List<Line> firstLines = linesOf(full); // the first read: used when no re-read in tiles happened
             final int firstGroups = labels.size();
             final List<Rect> firstLabels = labels;
             final LabelGeometry.Grouping firstGrouping = grouping;
@@ -172,6 +173,9 @@ final class ImageScanner {
             }
             // Fewer products found than expected: never save them quietly as if all were found.
             final boolean short_ = target >= 2 && labels.size() < target;
+            // Why a label is missing (cut by an edge, partly read, unreadable): explained to the person, never guessed; set on every record of the photo.
+            final LabelIssue.Result issue = short_ ? LabelIssue.classify(items(lines != null ? lines : firstLines), grouping.hits, bitmap.getWidth(), bitmap.getHeight()) : null;
+            final int missingLabels = short_ ? target - labels.size() : 0;
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
             final JSONObject diag = diagStart(filename, bitmap, rotation, tilt, speed, expected, counted, barcodeLabels, target, grouping, firstGroups, tilePasses);
@@ -186,6 +190,8 @@ final class ImageScanner {
             try { diag.put("serialLabels", serialLabels); } catch (Exception ignored) { /* diagnostics only */ }
             if (labels.size() <= 1) {
                 output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0, ""));
+                if (issue == null && output.length() == 1) markRecordIssue(output.getJSONObject(0), items(lines != null ? lines : firstLines), grouping.hits, bitmap.getWidth(), bitmap.getHeight());
+                markIssue(output, issue, missingLabels, diag);
                 markOrphans(diag, codes, output);
                 diagFinish(diag, output, "single", "one label or fewer", 0);
                 return output;
@@ -202,6 +208,7 @@ final class ImageScanner {
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
                 output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null, Math.max(target, labels.size()), ""));
+                markIssue(output, issue, missingLabels, diag);
                 markOrphans(diag, codes, output);
                 diagFinish(diag, output, "whole-photo", why[0], 0);
                 return output;
@@ -217,10 +224,17 @@ final class ImageScanner {
             for (int index = 0; index < regions.size(); index++) {
                 Rect region = regions.get(index);
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0, printed.get(index))); }
-                finally { crop.recycle(); }
+                try {
+                    JSONObject made = makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0, printed.get(index));
+                    {
+                        LabelGeometry.Box area = new LabelGeometry.Box(region.left, region.top, region.right, region.bottom);
+                        markRecordIssue(made, LabelIssue.itemsIn(items(lines != null ? lines : firstLines), area), LabelIssue.hitsIn(grouping.hits, area), bitmap.getWidth(), bitmap.getHeight());
+                    }
+                    output.put(made);
+                } finally { crop.recycle(); }
             }
             for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("siblings", output.length());
+            markIssue(output, issue, missingLabels, diag);
             markOrphans(diag, codes, output);
             diagFinish(diag, output, "split", "ok", regions.size());
             return output;
@@ -254,6 +268,32 @@ final class ImageScanner {
             try { for (java.util.Map.Entry<String, long[]> entry : map.entrySet()) out.put(entry.getKey(), entry.getValue()[0] + "ms x" + entry.getValue()[1]); } catch (Exception ignored) { /* diagnostics only */ }
             return out;
         }
+    }
+
+    /** A record without any IMEI: say why, from the lines of its own label area only (the photo's edges decide "cut off"). Never adds a number. */
+    private static void markRecordIssue(JSONObject row, List<LabelGeometry.Item> lines, List<LabelGeometry.Hit> hits, int width, int height) {
+        if (!row.optString("imei").isEmpty() || row.optBoolean("imeiFallback")) return;
+        try {
+            LabelIssue.Result issue = LabelIssue.classify(lines, hits, width, height);
+            row.put("labelIssue", issue.kind).put("labelsMissing", 1);
+            if (!issue.side.isEmpty()) row.put("labelIssueSide", issue.side);
+            if (issue.digits > 0) row.put("labelIssueDigits", issue.digits);
+        } catch (Exception ignored) { /* the explanation is optional */ }
+    }
+
+    /** Adds the explanation (never a number) to every record of a photo that is missing a label. */
+    private static void markIssue(JSONArray output, LabelIssue.Result issue, int missing, JSONObject diag) {
+        if (issue == null) return;
+        try {
+            for (int index = 0; index < output.length(); index++) {
+                JSONObject row = output.getJSONObject(index);
+                if (row.has("labelIssue")) continue; // a more specific reason for this very record is already there
+                row.put("labelIssue", issue.kind).put("labelsMissing", Math.max(1, missing));
+                if (!issue.side.isEmpty()) row.put("labelIssueSide", issue.side);
+                if (issue.digits > 0) row.put("labelIssueDigits", issue.digits);
+            }
+            diag.put("labelIssue", issue.kind + (issue.side.isEmpty() ? "" : ":" + issue.side));
+        } catch (Exception ignored) { /* the explanation is optional: never breaks a scan */ }
     }
 
     private static List<LabelGeometry.Item> items(List<Line> lines) {

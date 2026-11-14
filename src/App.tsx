@@ -1,3 +1,4 @@
+import { activeIssue, issueTextFor } from './label-issue';
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { scoreConfidence } from './confidence';
@@ -68,6 +69,10 @@ type RecordItem = {
   /** IMEI 1 was found by a rule (Samsung: its own barcode, matched to IMEI 2), not read from its printed line; cleared when a person checks or types it. */
   imeiNeedsReview?: boolean;
   imeiNote?: string;
+  /** Why a label of this photo could not be read (cut by an edge, partly read, unreadable); see label-issue.ts. Words only, never a number. */
+  labelIssue?: string; labelIssueSide?: string; labelsMissing?: number; labelIssueDigits?: number;
+  /** The person chose "Keep as is": no retake prompt, the record still needs review. */
+  labelIssueDismissed?: boolean;
   /** Set on crops: the record of the original photo they were cut from (kept in the archive, can be restored). */
   sourceRecordId?: string;
   /** Where the label text is in the photo (fractions of its size). The review screen opens zoomed on it. */
@@ -265,10 +270,11 @@ function imeiIsFallback(row: RecordItem) {
 function reviewNote(row: RecordItem) {
   return imeiIsFallback(row) ? 'IMEI 1 could not be read; the number shown is IMEI 2. Check it or type IMEI 1.'
     : row.imeiNeedsReview ? (row.imeiNote || 'Check IMEI 1 against the label.')
-    : row.modelNeedsReview ? (row.modelNote || 'Check the model code.') : '';
+    : row.modelNeedsReview ? (row.modelNote || 'Check the model code.')
+    : issueTextFor(row)?.short || '';
 }
 function reviewStatus(row: RecordItem) {
-  const serialOnly = !row.imei && !!recordSerial(row);
+  const serialOnly = !row.imei && !!recordSerial(row) && !activeIssue(row); // a label with an unresolved cut-off explanation is not a deliberate serial-only record
   const needsReview = row.cropNeedsReview || row.serialNeedsReview || row.modelNeedsReview || row.imeiNeedsReview || imeiIsFallback(row) || (!serialOnly && row.status !== 'Valid');
   return row.duplicate ? needsReview ? 'Duplicate IMEI · Needs review' : 'Duplicate IMEI' : needsReview ? 'Needs review' : serialOnly ? 'Serial only' : 'Valid';
 }
@@ -5166,6 +5172,7 @@ export default function App() {
               </div>
             </div>
 
+            {(() => { const issue = issueTextFor(selected); return issue && <div className="review-question retake-prompt" role="alert" aria-label="Retake this photo"><div><strong>{issue.title}</strong><span>{issue.text}</span><small>Nothing is filled in for you, and your original photo is kept.</small></div><div className="review-question-buttons"><button className="primary" onClick={() => { setSelected(null); openNativeCamera(); }}>Retake photo</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop manually</button><button className="subtle-btn" onClick={() => { updateRow(selected.id, { labelIssueDismissed: true }); setSelected(current => current && { ...current, labelIssueDismissed: true }); }}>Keep as is</button></div></div>; })()}
             {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={autoSplitBusy.current} onClick={() => void autoSplitRecords([selected]).then(n => { if (n) setSelected(null); })}>Split automatically</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop each myself</button></div></div>}
             {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}
 

@@ -63,3 +63,17 @@ const grouped=r.orderPhotos(data);
 assert.deepEqual(grouped.current.map(p=>p.name),['a.jpg','b.jpg','c.jpg','d.jpg']);
 assert.deepEqual(grouped.older.map(p=>p.name),['e.jpg'],'a finished older photo is not listed again');
 console.log('PASS: scan report (reading the app\'s numbers, honest wording, accounting rules: photos = scanned + failed + repeated, products = saved + duplicates, read + without IMEI = products; garbage input; current vs older photos).');
+
+// retake: the summary and the per-photo entries carry the reason; the list names only photos of this scan
+assert.equal(r.readSummary({photos:2,retake:1}).retake,1);
+assert.equal(r.readSummary(undefined).retake,0);
+assert.match(r.summaryLine({...r.EMPTY_SUMMARY,photos:2,products:2,saved:2,imeisDetected:2,retake:1}),/1 to retake/);
+const rp=r.parseReport(JSON.stringify({jobId:'j',report:{},photos:[
+  {uri:'a',name:'cut.jpg',jobId:'j',outcome:'scanned',products:1,imeis:[],retake:true,retakeKind:'cut-edge',retakeSide:'bottom',retakeMissing:1},
+  {uri:'b',name:'fine.jpg',jobId:'j',outcome:'scanned',products:1,imeis:[]},
+  {uri:'c',name:'old.jpg',jobId:'older',outcome:'scanned',products:1,imeis:[],retake:true,retakeKind:'unreadable'}]}));
+assert.deepEqual(r.retakePhotos(rp).map(p=>p.name),['cut.jpg'],'only photos of this scan that need a retake');
+assert.equal(r.photoStatus(rp.photos[0]).tone,'warn');
+assert.match(r.photoStatus(rp.photos[0]).label,/retake this photo/);
+assert.equal(r.photoStatus(rp.photos[1]).tone,'ok');
+console.log('scan-report retake: ok');

@@ -11,7 +11,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "laptop": "node server/index.mjs",
     "check:private": "node scripts/check-private-data.mjs",
-    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs && node scripts/test-learning.mjs && node scripts/test-crop-engine.mjs && node scripts/test-crop-apply.mjs && node scripts/test-frame-quality.mjs && node scripts/test-seed-layout.mjs && node scripts/test-crop-queue.mjs && node scripts/test-ocr-config.mjs && node scripts/test-scan-report.mjs && node scripts/test-stall-guard.mjs && node scripts/test-archive.mjs && node scripts/test-privacy-check.mjs && node --test e2e/phone-tools/page-snapshot.test.mjs",
+    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs && node scripts/test-learning.mjs && node scripts/test-crop-engine.mjs && node scripts/test-crop-apply.mjs && node scripts/test-frame-quality.mjs && node scripts/test-seed-layout.mjs && node scripts/test-crop-queue.mjs && node scripts/test-ocr-config.mjs && node scripts/test-scan-report.mjs && node scripts/test-stall-guard.mjs && node scripts/test-archive.mjs && node scripts/test-privacy-check.mjs && node scripts/test-label-issue.mjs && node --test e2e/phone-tools/page-snapshot.test.mjs",
     "laptop:build": "npm run build && npm run laptop",
     "pretypecheck": "node scripts/write-version.mjs",
     "typecheck": "tsc -b",
