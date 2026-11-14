@@ -18,6 +18,7 @@ helpers += layout.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.te
 helpers += await readFile('src/serial.ts','utf8');
 helpers += await readFile('src/share-package.ts','utf8');
 helpers += await readFile('src/barcode-imei.ts','utf8');
+helpers += await readFile('src/label-issue.ts','utf8');
 // Browser-only image decoding is stubbed; the package logic under test is unchanged.
 helpers += '\nasync function workbookImage(r){return {dataUrl:recordPhoto(r),width:120,height:90};}\nconst androidBridge=undefined;\n';
 const catalogAst=ts.createSourceFile('SamsungCatalog.tsx',await readFile('src/SamsungCatalog.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
