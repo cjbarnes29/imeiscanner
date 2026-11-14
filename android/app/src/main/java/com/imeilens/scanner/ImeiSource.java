@@ -10,6 +10,9 @@ final class ImeiSource {
 
     private ImeiSource() {}
 
+    /** Shown on a record whose IMEI 1 came from the whole-photo read because the label's own crop gave none. Never accepted without a person's check. */
+    static final String PHOTO_READ_NOTE = "IMEI 1 was read from the whole photo because this label's own crop could not be read. Check it against the label.";
+
     static boolean luhn(String value) {
         if (value == null || !value.matches("[0-9]{15}")) return false;
         int sum = 0;

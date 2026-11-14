@@ -56,6 +56,23 @@ final class LabelGeometry {
         int fragments;
     }
 
+    /**
+     * The printed IMEI 1 of ONE label as the whole-photo read saw it: the checksum-valid 15-digit numbers on "IMEI 1" lines whose centre lies
+     * inside the label's region. Exactly one distinct number, or "" (two different numbers: unclear which belongs to this label, so nothing is
+     * chosen). Used only when the label's own crop gave no IMEI 1, and then only with a review mark.
+     */
+    static String printedImei1In(List<Hit> hits, Box region) {
+        String found = "";
+        for (Hit hit : hits) {
+            if (hit.number.length() != 15 || !ImeiSource.luhn(hit.number)) continue;
+            int x = hit.box.centerX(), y = hit.box.centerY();
+            if (x < region.left || x > region.right || y < region.top || y > region.bottom) continue;
+            if (!found.isEmpty() && !found.equals(hit.number)) return "";
+            found = hit.number;
+        }
+        return found;
+    }
+
     /** The digits of a masked IMEI for logs: first 8 and last 4 digits, the rest hidden. Anything else is only counted. */
     static String mask(String digits) {
         if (digits == null || digits.isEmpty()) return "";

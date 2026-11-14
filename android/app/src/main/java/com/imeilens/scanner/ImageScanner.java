@@ -185,7 +185,7 @@ final class ImageScanner {
             } catch (Exception ignored) { /* diagnostics only */ }
             try { diag.put("serialLabels", serialLabels); } catch (Exception ignored) { /* diagnostics only */ }
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0, ""));
                 markOrphans(diag, codes, output);
                 diagFinish(diag, output, "single", "one label or fewer", 0);
                 return output;
@@ -201,7 +201,7 @@ final class ImageScanner {
             }
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null, Math.max(target, labels.size())));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null, Math.max(target, labels.size()), ""));
                 markOrphans(diag, codes, output);
                 diagFinish(diag, output, "whole-photo", why[0], 0);
                 return output;
@@ -209,9 +209,15 @@ final class ImageScanner {
             boolean perspectiveReview = short_ || retriedFirst || (target >= 2 && labels.size() < target);
             for (int index = 1; index < regions.size(); index++)
                 if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
-            for (Rect region : regions) {
+            // What the whole-photo read saw as each label's printed IMEI 1 (checksum-valid, inside the label). A number claimed by two labels is dropped.
+            List<String> printed = new ArrayList<>();
+            for (Rect region : regions) printed.add(LabelGeometry.printedImei1In(grouping.hits, new LabelGeometry.Box(region.left, region.top, region.right, region.bottom)));
+            for (int a = 0; a < printed.size(); a++) for (int b = a + 1; b < printed.size(); b++)
+                if (!printed.get(a).isEmpty() && printed.get(a).equals(printed.get(b))) { printed.set(a, ""); printed.set(b, ""); }
+            for (int index = 0; index < regions.size(); index++) {
+                Rect region = regions.get(index);
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0)); }
+                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0, printed.get(index))); }
                 finally { crop.recycle(); }
             }
             for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("siblings", output.length());
@@ -277,7 +283,7 @@ final class ImageScanner {
             for (LabelGeometry.Hit hit : grouping.hits)
                 hits.put(new JSONObject().put("b", new JSONArray().put(hit.box.left).put(hit.box.top).put(hit.box.right).put(hit.box.bottom))
                     .put("n", LabelGeometry.mask(hit.number)).put("g", hit.group).put("why", hit.note)
-                    .put("d", hit.digits).put("len", hit.length));
+                    .put("d", hit.digits).put("len", hit.length).put("luhn", ImeiSource.luhn(hit.number)));
             diag.put("imeiOneLines", hits);
         } catch (Exception ignored) { /* diagnostics must never break a scan */ }
         return diag;
@@ -352,7 +358,7 @@ final class ImageScanner {
 
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
                                          String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation,
-                                         List<Code> codes, Rect region, int deviceCount) throws Exception {
+                                         List<Code> codes, Rect region, int deviceCount, String printedImei1) throws Exception {
         // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
         long tm = Prof.now();
         Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
@@ -393,6 +399,12 @@ final class ImageScanner {
                 }
             }
         }
+        // The label's own crop gave no IMEI 1 (nothing, or only IMEI 2), but the whole-photo read had this label's printed IMEI 1 line with a
+        // valid checksum: that number is used, marked for review (it was not confirmed by the label's own read). Never when a barcode decided.
+        boolean imei1FromPhoto = false;
+        if (barcode1.isEmpty() && !printedImei1.isEmpty() && (imei.isEmpty() || ImeiSource.usesSecondImei(raw, imei)) && !printedImei1.equals(barcode2)) {
+            imei = printedImei1; imei1FromPhoto = true; raw += "\nIMEI 1 (photo): " + printedImei1;
+        }
         if (!barcode2.isEmpty() && barcode2.equals(barcode1)) barcode2 = "";
         if (!barcode1.isEmpty()) { imei = barcode1; raw += "\nIMEI 1 (barcode): " + barcode1; }
         if (!barcode2.isEmpty()) raw += "\nIMEI 2 (barcode): " + barcode2;
@@ -428,6 +440,7 @@ final class ImageScanner {
         if (!imei.isEmpty() && ImeiSource.usesSecondImei(raw, imei)) row.put("imeiFallback", true);
         // IMEI 1 found by a rule, not read from its own printed line: kept, but never accepted without a person's check.
         if (imei1ByRule && imei.equals(barcode1)) { row.put("imeiNeedsReview", true); row.put("imeiNote", SamsungImei.RULE_NOTE); }
+        else if (imei1FromPhoto) { row.put("imeiNeedsReview", true); row.put("imeiNote", ImeiSource.PHOTO_READ_NOTE); }
         row.put("status", imei.isEmpty() ? "Review" : "Valid");
         row.put("cropNeedsReview", cropReview);
         // The review screen asks "1 device or N?" for a photo that shows more labels than could be separated.
