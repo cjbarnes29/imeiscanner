@@ -684,3 +684,7 @@ body{touch-action:pan-y pinch-zoom}
 
 /* Phone camera options (own camera app) */
 .camera-options-native{display:flex;flex-direction:column;gap:6px;margin:8px 0}.camera-options-native label{font-size:13px;color:#c5d0de;display:flex;flex-direction:column;gap:6px}.camera-options-native select{min-height:44px;padding:8px 10px;border:1px solid #35506a;border-radius:8px;background:#0b1625;color:#e8edf5;font:inherit;font-size:15px;max-width:100%}.camera-options-native small{color:#8fa0b4;font-size:11px;line-height:1.5}.camera-waiting{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border:1px solid #cbd5e1;border-radius:10px}
+.review-fix{grid-column:1/-1}
+.review-fix>summary{min-height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid #30465d;border-radius:10px;background:#1b283a;color:#d8e4f0;font-size:12.5px;list-style:none}
+.review-fix>summary::-webkit-details-marker{display:none}
+.review-fix-buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}

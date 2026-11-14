@@ -3722,6 +3722,15 @@ export default function App() {
     else if (patch.status === 'Invalid') setWarning('Saved, but the IMEI checksum is not valid. Check the digits against the label.');
     else setToast('Saved.');
   }
+  /** The one Save button: saves this record, then moves to the next one, or closes after the last. It stays open when the saved IMEI needs a second look. */
+  function saveAndContinue() {
+    if (!selected || rotatingPhoto) return;
+    const built = buildReviewPatch(selected, currentFields());
+    if ('error' in built) { setWarning(built.error); return; }
+    const isLast = reviewIndex < 0 || reviewIndex >= reviewRecords.length - 1;
+    saveReviewFields(!isLast);
+    if (isLast && !built.patch.duplicate && built.patch.status !== 'Invalid') closePhotoReviewNow();
+  }
   function saveAllDrafts() {
     const patches: Record<string, Partial<RecordItem>> = {};
     for (const [id, fields] of Object.entries(draftsRef.current)) {
@@ -5191,7 +5200,6 @@ export default function App() {
               </div>
 
               <div className="review-header-actions">
-                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={rotatingPhoto} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
                 <button className="iconbtn" aria-label="Close photo review" onClick={closePhotoReview}><X /></button>
               </div>
             </div>
@@ -5246,14 +5254,20 @@ export default function App() {
 
             <div className="review-tools" role="group" aria-label="Photo actions">
               <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
-              <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Photo</button>
-              <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶ Left</button>
-              <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷ Right</button>
-              <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+              <details className="review-fix">
+                <summary>Fix photo</summary>
+                <div className="review-fix-buttons">
+                  <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶ Left</button>
+                  <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷ Right</button>
+                  <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+                </div>
+              </details>
             </div>
 
-            {<details className="review-details"><summary>More details: status, serial, catalog, share</summary>
+            {<details className="review-details"><summary>More</summary>
             <div className="modal-meta">
+              <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Download photo</button>
+              <button className="subtle-btn danger" disabled={rotatingPhoto} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={16} /> Delete this record</button>
               <span>Picture ID: {selected.pictureId}</span>
               <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button>
               <span>Catalog: {catalogModel(selected.raw) || 'No confirmed catalog match — verify the model manually'}</span>
@@ -5265,34 +5279,22 @@ export default function App() {
               <span>Validation: {selected.status}</span>
               <span>Duplicate: {selected.duplicate ? 'Yes' : 'No'}</span>
               {selected.cropNeedsReview && <span>Automatic cropping needs review; adjust the crop if needed.</span>}
+              {selected.cropDataUrl && selected.cropDataUrl !== (reviewSource || selected.dataUrl) && (
+                <img className="preview" src={reviewSource || selected.dataUrl} alt="Full original photo" />
+              )}
+              <pre>{selected.raw ? `Raw OCR text:\n${selected.raw}` : 'No text recognized.'}</pre>
             </div>
             </details>}
-
-            {selected.cropDataUrl && selected.cropDataUrl !== (reviewSource || selected.dataUrl) && (
-              <details>
-                <summary>View full original photo</summary>
-                <img className="preview" src={reviewSource || selected.dataUrl} alt="Full original photo" />
-              </details>
-            )}
-
-
-            <details>
-              <summary>Raw OCR text</summary>
-              <pre>{selected.raw || 'No text recognized.'}</pre>
-            </details>
             </div>
 
             <div className="review-foot">
               {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
                 <button className="subtle-btn" disabled={reviewIndex === 0 || rotatingPhoto} onClick={() => goReview(-1)}>← Previous</button>
                 <span>{reviewIndex + 1} of {reviewRecords.length}</span>
-                {reviewIndex === reviewRecords.length - 1
-                  ? <button className="primary" disabled={rotatingPhoto} onClick={finishReview}>Finish ✓</button>
-                  : <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => goReview(1)}>Next →</button>}
+                <button className="subtle-btn" disabled={rotatingPhoto || reviewIndex === reviewRecords.length - 1} onClick={() => goReview(1)}>Next →</button>
               </div>}
               <div className="review-save-bar" role="group" aria-label="Save this record">
-                <button className="primary" disabled={rotatingPhoto} onClick={() => saveReviewFields()}>Save</button>
-                {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
+                <button className="primary" disabled={rotatingPhoto} onClick={saveAndContinue}>Save</button>
                 <span className="review-save-state" role="status">{pendingChanges ? `${pendingChanges} unsaved` : 'All saved'}</span>
               </div>
             </div>
