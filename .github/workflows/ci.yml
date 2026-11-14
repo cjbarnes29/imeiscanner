@@ -71,3 +71,16 @@ jobs:
           name: android-test-builds
           path: out/*.apk
           retention-days: 7
+      # Installable build for this exact commit (isolated app id: installs NEXT TO the existing app, never replaces it).
+      # Not a release: nothing is published, the artifact just belongs to this workflow run.
+      - name: IMEI-Lens-Latest.apk (artifact for this commit)
+        run: |
+          mkdir -p latest
+          cp out/IMEI-Lens-Test-phonetest.apk latest/IMEI-Lens-Latest.apk
+          (cd latest && sha256sum IMEI-Lens-Latest.apk > IMEI-Lens-Latest.apk.sha256)
+          echo "commit ${GITHUB_SHA}" > latest/BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IMEI-Lens-Latest
+          path: latest/*
+          retention-days: 30
