@@ -707,3 +707,4 @@ body{touch-action:pan-y pinch-zoom}
 .bulk-fields input{background:#0b1220;color:#f1f6fb;border:1px solid #30465d;border-radius:10px;padding:0 10px}
 .bulk-fields input:focus{outline:2px solid #4fd1a5;outline-offset:1px}
 .bulk-row{align-items:center}
+.bulk-list{align-content:start}

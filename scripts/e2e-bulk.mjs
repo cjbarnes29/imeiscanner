@@ -78,6 +78,9 @@ try{
   await waitFor(`document.querySelectorAll('.bulk-row').length===2`,'ticked row leaves');
   ok('A half-typed IMEI cannot be ticked ("5 of 15 digits"); a full one ticks and leaves the list');
   await shot('2-after-tick');
+  const rowH=await run(`Math.round(document.querySelector('.bulk-row').getBoundingClientRect().height)`);
+  assert.ok(rowH<260,'a row keeps its natural height when few rows are left (is '+rowH+'px)');
+  ok('rows keep their natural height ('+rowH+'px) when only a few are left');
 
   // Row with a wrong checksum (now first or second): half-type, close, nothing is lost
   await typeInto('.bulk-row:last-child input[data-field="imei"]','3569380');
