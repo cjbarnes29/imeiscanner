@@ -1,0 +1,66 @@
+name: Beta APK pre-release
+
+# Publishes a BETA pre-release (never "Latest") with the isolated-id test APK, built from the tagged commit.
+# Trigger: push a tag named beta-v* (for example beta-v1.26.0-b1). The android-v* tags (production flow) are not touched.
+on:
+  push:
+    tags: ['beta-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  beta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: npm ci && npm run build
+      - run: mkdir -p android/app/src/main/assets && cp -R dist/. android/app/src/main/assets/
+      - name: Build the isolated-id APK (own app id, minified code, debug-signed)
+        run: |
+          gradle --project-dir android :app:assembleDebug -PphoneTest -PminifyDebug --stacktrace
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/IMEI-Lens-Beta-${GITHUB_REF_NAME}.apk"
+          (cd out && sha256sum "IMEI-Lens-Beta-${GITHUB_REF_NAME}.apk" > "IMEI-Lens-Beta-${GITHUB_REF_NAME}.apk.sha256")
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## BETA: IMEI Lens Test (phone camera update)
+          **This is a beta test build, not a production release.**
+
+          ### Install
+          1. On the phone, download the **.apk** file from the assets below and open it (allow installing from this source when asked).
+          2. It installs as **IMEI Lens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
+
+          ### What is new
+          - **Take photo / Scan with camera now use the phone's own camera app.** The small in-app camera preview is no longer used on the phone.
+          - Each photo is saved straight into a private folder inside the app (never your gallery) and scanned by the background scanner.
+          - **After taking a photo** (setting under the camera button): keep taking photos, scanning each one while you shoot (default; press Back in the camera to stop) / scan each photo right away / take several, then scan them together (Scan now, or Discard waiting photos).
+          - Clear messages for refused camera permission, cancelled camera, no camera app, or a photo that could not be saved.
+          - Earlier on this branch: fix for 0-byte CSV exports, safer folder export, duplicates are archived (with Undo), Samsung IMEI 1 detection, "Retake photo" prompt for labels cut off by the photo edge, manufacturer profiles (Samsung complete, Apple draft).
+
+          ### Known limits
+          - Debug-signed test build. Tested on the emulator; **not yet verified on a real phone camera (POCO / HyperOS)**.
+          - Photos physically cut off by the photo edge cannot be read: the app asks for a retake.
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" out/*.apk out/*.sha256 \
+            --title "IMEI Lens BETA ${GITHUB_REF_NAME#beta-v}" \
+            --prerelease --latest=false \
+            --notes-file notes.md
