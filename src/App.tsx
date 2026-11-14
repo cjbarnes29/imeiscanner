@@ -38,6 +38,7 @@ import { createStallGuard, QUEUE_ITEM_LIMIT_MS } from './stall-guard';
 import { readSummary, type ReportSummary } from './scan-report';
 import { exportModel, type CropRegion, type OcrLine } from './scan-layout';
 import { loadInventory, saveInventory, saveOriginalSource, setSourceGuard } from './record-store';
+import { BulkReview, type BulkRow } from './BulkReview';
 import { flushArchive, isProtectedSource, loadArchive, makeEntry, planRestore, queueArchive, type ArchiveEntry } from './archive-store';
 import { catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
@@ -72,6 +73,8 @@ type RecordItem = {
   /** IMEI 1 was found by a rule (Samsung: its own barcode, matched to IMEI 2), not read from its printed line; cleared when a person checks or types it. */
   imeiNeedsReview?: boolean;
   imeiNote?: string;
+  /** The person confirmed this record in the review list (or accepted it as looking right). Hides it from that list; the flags stay visible. */
+  checked?: boolean;
   /** Why a label of this photo could not be read (cut by an edge, partly read, unreadable); see label-issue.ts. Words only, never a number. */
   /** Which manufacturer's profile applies (decided from the label's own text); "generic" = no brand evidence. Old records have none. */
   brand?: string;
@@ -1903,6 +1906,11 @@ export default function App() {
   const [rotatingPhoto, setRotatingPhoto] = useState(false);
   const [bulkCropOpen, setBulkCropOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkIds, setBulkIds] = useState<string[]>([]);
+  const [bulkAccepted, setBulkAccepted] = useState<string[]>([]);
+  const recordsLive = useRef<RecordItem[]>([]);
+  const scanSeen = useRef<{ was: boolean; before: Set<string> }>({ was: false, before: new Set() });
   const [bulkEditModel, setBulkEditModel] = useState('');
   const [bulkEditPerson, setBulkEditPerson] = useState('');
   const [bulkEditChecked, setBulkEditChecked] = useState(false);
@@ -1939,7 +1947,6 @@ export default function App() {
   // Permanent delete waits for an in-app confirmation.
   const [welcome, setWelcome] = useState<'' | 'new' | 'tutorials'>(() => hasSeenWhatsNew() ? '' : 'new');
   const closeWelcome = () => { markWhatsNewSeen(); setWelcome(''); };
-  const [confirmDupes, setConfirmDupes] = useState<string[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; fromReview: boolean } | null>(null);
   const [personDraft, setPersonDraft] = useState('');
   // Samsung catalog (bundled, refreshed in the background): turns model codes into phone names.
@@ -2206,7 +2213,6 @@ export default function App() {
   useBackLayer(!!selected, closePhotoReview, 'review');
   useBackLayer(!!warning, () => setWarning(''), 'warning');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
-  useBackLayer(!!confirmDupes, () => setConfirmDupes(null), 'confirm-dupes');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
@@ -3726,8 +3732,8 @@ export default function App() {
       setSelected({ ...selected, ...patch });
       setManualModel(exportModel(patch.model || ''));
     }
-    if (patch.duplicate) setWarning('This IMEI is already in your records. It was saved and flagged as a duplicate; both pictures are kept. Use Archive duplicates to keep one in the list (the others are archived, not deleted).');
-    else if (patch.status === 'Invalid') setWarning('Saved, but the IMEI checksum is not valid. Check the digits against the label.');
+    if (patch.duplicate) setToast('Saved. This IMEI is already in your records, so it is flagged as a duplicate. Both pictures are kept.');
+    else if (patch.status === 'Invalid') setToast('Saved, but the IMEI checksum is not valid. Check the digits.');
     else setToast('Saved.');
   }
   /** The one Save button: saves this record, then moves to the next one, or closes after the last. It stays open when the saved IMEI needs a second look. */
@@ -4028,6 +4034,58 @@ export default function App() {
   const { review: queueReviewLog, completed: queueCompletedLog } = classifyLog(queueLog, flaggedIds);
   const queueFailedItems = cropQueue.filter(item => item.status === 'failed');
   const queueActive = queueCounts.pending > 0 || queueCounts.later > 0;
+  recordsLive.current = records;
+
+  // ---- Fast review list: every record that still needs a look, edited in place. ----
+  const needsLook = (r: RecordItem) => !r.checked && reviewStatus(r).includes('Needs review');
+  const looksRight = (r: RecordItem) => luhnValid(r.imei) && !r.duplicate && !r.imeiNeedsReview && !imeiIsFallback(r) && !r.cropNeedsReview && !activeIssue(r);
+  const bulkRecords = bulkIds.map(id => records.find(r => r.id === id)).filter((r): r is RecordItem => !!r && needsLook(r));
+  const bulkRows: BulkRow[] = bulkRecords.map(r => ({ id: r.id, name: r.name, photo: recordPhoto(r), imei: r.imei, serial: recordSerial(r), model: exportModel(r.model), note: reviewNote(r), status: reviewStatus(r), looksRight: looksRight(r) }));
+  const bulkGood = bulkRecords.filter(looksRight);
+  const scanningNow = busy || androidJob?.status === 'queued' || androidJob?.status === 'processing';
+  function openBulk(ids: string[]) { if (!ids.length) return; setBulkIds(ids); setBulkAccepted([]); setBulkOpen(true); }
+  function bulkFields(record: RecordItem, f: { imei: string; serial: string }): ReviewFields {
+    return { model: exportModel(record.model), imei: f.imei, imei2: recordImeiPair(record).imei2, serial: f.serial };
+  }
+  function bulkSave(id: string, f: { imei: string; serial: string }) {
+    const record = recordsLive.current.find(r => r.id === id);
+    if (record) updateRow(id, lenientReviewPatch(record, bulkFields(record, f)).patch);
+  }
+  function bulkDone(id: string, f: { imei: string; serial: string }): string | null {
+    const record = recordsLive.current.find(r => r.id === id);
+    if (!record) return null;
+    const built = buildReviewPatch(record, bulkFields(record, f));
+    if ('error' in built) return built.error;
+    updateRow(id, { ...built.patch, checked: true });
+    if (built.patch.duplicate) setToast('This IMEI is already in your records. It was saved and flagged as a duplicate.');
+    return null;
+  }
+  function bulkAccept() {
+    const ids = bulkGood.map(r => r.id); if (!ids.length) return;
+    const set = new Set(ids);
+    setRecords(old => old.map(r => set.has(r.id) ? { ...r, checked: true } : r));
+    setBulkAccepted(ids);
+  }
+  function bulkUndoAccept() {
+    const set = new Set(bulkAccepted);
+    setRecords(old => old.map(r => set.has(r.id) ? { ...r, checked: false } : r));
+    setBulkAccepted([]);
+  }
+  useBackLayer(bulkOpen, () => setBulkOpen(false), 'bulk-review');
+  // After a scan finishes: open the list once for the NEW records that need a look. Records from before this build's first launch are never offered automatically.
+  useEffect(() => {
+    const seen = scanSeen.current;
+    if (scanningNow) { if (!seen.was) { seen.was = true; seen.before = new Set(recordsLive.current.map(r => r.id)); } return; }
+    if (!seen.was || queueActive) return;
+    const timer = window.setTimeout(() => {
+      if (!scanSeen.current.was) return;
+      scanSeen.current.was = false;
+      const fresh = recordsLive.current.filter(r => !scanSeen.current.before.has(r.id) && r.createdAt >= protectBefore && needsLook(r)).map(r => r.id);
+      if (fresh.length) openBulk(fresh);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [scanningNow, queueActive]); // eslint-disable-line react-hooks/exhaustive-deps
+  const needLookCount = records.filter(needsLook).length;
   const queueNeedsReview = queueReviewLog.length + queueFailedItems.length;
   const queueFinished = !queueActive && queueStats.total > 0 && queueStats.done + queueStats.failed >= queueStats.total;
   function reviewRecordIds(ids: string[]) { const rows = ids.map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row); if (!rows.length) return; setReviewIds(rows.map(row => row.id)); setSelected(rows[0]); setQueuePanelOpen(false); }
@@ -4401,6 +4459,7 @@ export default function App() {
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}`}>
+        {!bulkOpen && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button></div>}
         {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
             ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : queueCounts.pending ? 'Cropping in the background.' : 'Photos set aside for later.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done · {queueCounts.pending} waiting{queueCounts.later ? ` · ${queueCounts.later} for later` : ''}{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}. Each original is archived (and can be restored) after its crops are read.</span>
@@ -4862,7 +4921,7 @@ export default function App() {
               <button className={filter === 'Review' ? 'active' : ''} onClick={() => setFilter('Review')}>Needs review</button>
               <button className={filter === 'Valid' ? 'active' : ''} onClick={() => setFilter('Valid')}>Valid IMEI <b>{validCount}</b></button>
               {records.some(r => r.duplicate) && <button className={filter === 'Duplicates' ? 'active' : ''} onClick={() => setFilter('Duplicates')}>Duplicates <b>{records.filter(r => r.duplicate).length}</b></button>}
-              {records.some(r => r.duplicate) && <button className="danger" onClick={() => setConfirmDupes(duplicateRemovalIds(records))}>Archive duplicates</button>}
+              {records.some(r => r.duplicate) && <button className="subtle-btn" onClick={() => removeDuplicates(duplicateRemovalIds(records))}>Archive duplicates</button>}
             </div>
           </div>}
 
@@ -5177,6 +5236,7 @@ export default function App() {
         </footer>
       </main>
 
+      {bulkOpen && <BulkReview rows={bulkRows} goodCount={bulkGood.length} acceptedCount={bulkAccepted.length} onSave={bulkSave} onDone={bulkDone} onFull={id => { const r = records.find(item => item.id === id); if (r) { setReviewIds(bulkRows.map(row => row.id)); setSelected(r); } }} onAccept={bulkAccept} onUndoAccept={bulkUndoAccept} onClose={() => setBulkOpen(false)} />}
       {selected && (
         <div
           className="modal-backdrop"
@@ -5331,11 +5391,6 @@ export default function App() {
       </section></div>}
       {welcome === 'new' && <WhatsNewDialog first onClose={closeWelcome} onTutorials={() => { markWhatsNewSeen(); setWelcome('tutorials'); }} />}
       {welcome === 'tutorials' && <TutorialsDialog onClose={closeWelcome} />}
-      {confirmDupes && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Archive duplicates">
-        <h2>Archive duplicates?</h2>
-        <p>{confirmDupes.length} extra cop{confirmDupes.length === 1 ? 'y' : 'ies'} of repeated IMEIs will be moved to the archive with {confirmDupes.length === 1 ? 'its' : 'their'} picture{confirmDupes.length === 1 ? '' : 's'}. Nothing is deleted. One copy of every IMEI stays in the list: the most complete one (with serial and a known model). Undo is offered right away, and you can restore any of them later from "View / restore".</p>
-        <div className="share-toolbar"><button className="subtle-btn danger" disabled={!confirmDupes.length} onClick={() => { removeDuplicates(confirmDupes); setConfirmDupes(null); }}>Archive {confirmDupes.length} duplicate{confirmDupes.length === 1 ? '' : 's'}</button><button className="subtle-btn" onClick={() => setConfirmDupes(null)}>Cancel</button></div>
-      </section></div>}
       {confirmDelete && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Confirm delete">
         <h2>Delete permanently?</h2>
         <p>{confirmDelete.ids.length} IMEI record{confirmDelete.ids.length === 1 ? '' : 's'} and {confirmDelete.ids.length === 1 ? 'its' : 'their'} saved picture{confirmDelete.ids.length === 1 ? '' : 's'} will be removed from this device. This cannot be undone.</p>
