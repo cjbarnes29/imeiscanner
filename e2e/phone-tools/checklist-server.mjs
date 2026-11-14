@@ -65,7 +65,7 @@ function writeReports() {
     if (!a) continue;
     const steps = c.steps.join(' > ');
     const describe = r => `${r.flags.fallback ? `IMEI 1 not read (the app shows IMEI 2 ${r.imeiShown})` : `IMEI 1 ${r.imei1 || '(none)'}${r.imei2 ? ' · IMEI 2 ' + r.imei2 : ''}`} · model ${r.model || '(none)'} · ${r.needsReview ? 'marked Needs review' : 'shown as fine'}${r.note ? ' · ' + r.note : ''}`;
-    const reference = r => r.source === 'camera' ? `${r.name} (in-app camera ${r.createdAt}; reference photo = your Camera-app photo taken just before)` : `${r.name}${r.fromCropOf ? ' (crop)' : ''}`;
+    const reference = r => r.source === 'camera' ? `${r.name} (phone camera ${r.createdAt}; reference photo = your Camera-app photo taken just before)` : `${r.name}${r.fromCropOf ? ' (crop)' : ''}`;
     for (const [id, verdict] of Object.entries(a.products || {})) {
       if (verdict !== 'wrong') continue;
       const r = (lc?.products || []).find(p => p.id === id); if (!r) continue;

@@ -96,6 +96,8 @@ foreach ($flow in $all) {
   if ($safe -and $sharedFileTests -contains $name) { $rows += [pscustomobject]@{ Flow = $name; Result = "SKIPPED (real phone: shared Download files)"; Seconds = 0; Crashes = 0; Notes = "manual checks E1/E2 cover it" }; continue }
   # Synthetic photos shared to the app (no picker, app's own cache only). Proven on the emulator first; a real phone needs the owner's go-ahead.
   if ($safe -and -not $isEmulator -and $name -eq "16-share-photos" -and $env:E2E_ALLOW_SYNTHETIC_SHARE -ne "1") { $rows += [pscustomobject]@{ Flow = $name; Result = "BLOCKED (real phone: awaiting owner approval)"; Seconds = 0; Crashes = 0; Notes = "set E2E_ALLOW_SYNTHETIC_SHARE=1 after approving PHONE-SHARE-TEST-PLAN.md" }; continue }
+  # Drives the emulator's own camera app (its screen layout is not the phone's): on a real phone the camera cases are checked by hand.
+  if ($safe -and -not $isEmulator -and $name -eq "18-camera-native") { $rows += [pscustomobject]@{ Flow = $name; Result = "SKIPPED (real phone: manual camera cases)"; Seconds = 0; Crashes = 0; Notes = "emulator camera app only; see the phone checklist" }; continue }
   # The emulator can disappear (seen: a crash of its desktop window). adb would then wait forever: stop with a clear result instead.
   $online = (adb devices) -join "`n"
   if ($online -notmatch [regex]::Escape($Device) + "\s+device") {

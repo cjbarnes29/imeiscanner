@@ -1,6 +1,6 @@
 // The phone test cases (same codes as PHONE-TEST-GUIDE.md). `kind` selects what the computer checks automatically (page-snapshot.mjs assess()).
 //   scan   = photos added with "Choose photos and scan" (you pick them yourself, in the system picker)
-//   camera = photos taken with the in-app "Take photo"
+//   camera = photos taken with "Take photo" (the phone's own camera app)
 //   crop / undo / review / check-all / export / manual
 // `products: true` = after "Check", each new product gets a "matches the label" tick (you compare the masked number with the real label).
 export const CASES = [
@@ -12,8 +12,8 @@ export const CASES = [
   { id: 'G5', group: 'Gallery', kind: 'scan', products: true, title: 'Three or four labels in one photo', steps: ['Start > scan your G5 photos > Check.'], expect: 'All labels found, or the missing ones are marked for review.' },
   { id: 'G6', group: 'Gallery', kind: 'scan', products: true, title: 'Shine from wrap, or slightly blurry', steps: ['Start > scan your G6 photos > Check.'], expect: 'Right values, or clearly marked Needs review. Never a wrong value shown as fine.' },
   { id: 'G7', group: 'Gallery', kind: 'scan', products: true, title: 'Your own problem photos', steps: ['Start > scan them > Check.'], expect: 'Same rule: right, or marked.' },
-  { id: 'C1', group: 'Camera', kind: 'camera', products: true, title: 'In-app camera, one label (do it 3 times)', steps: ['First take a reference photo of the label with the phone Camera app.', 'Press Start here.', 'IMEI Lens Test > Take photo > photograph ONE label > Scan all.', 'Press Check.'], expect: 'One product from the camera, IMEI 1 and model match the label.' },
-  { id: 'C2', group: 'Camera', kind: 'camera', products: true, title: 'In-app camera, two labels together (2 times)', steps: ['Reference photo with the Camera app first.', 'Start > Take photo > two labels together > Scan all > Check.'], expect: 'Two products, each right or marked.' },
+  { id: 'C1', group: 'Camera', kind: 'camera', products: true, title: 'Phone camera, one label (do it 3 times)', steps: ['First take a reference photo of the label with the phone Camera app.', 'Press Start here.', 'IMEI Lens Test > Take photo (the phone own camera opens) > photograph ONE label > confirm the photo. It scans by itself.', 'Press Check.'], expect: 'One product from the camera, IMEI 1 and model match the label.' },
+  { id: 'C2', group: 'Camera', kind: 'camera', products: true, title: 'Phone camera, two labels together (2 times)', steps: ['Reference photo with the Camera app first.', 'Start > Take photo > two labels together > confirm > Check.'], expect: 'Two products, each right or marked.' },
   { id: 'K1', group: 'Crop', kind: 'crop', products: true, title: 'Crop one label out of a two-label photo', steps: ['Start > open a product from a two-label photo > Crop / edit photo > move the frame to one label > save > Check.'], expect: 'The product shows that label only; IMEI 1 matches. The original is kept in the archive.' },
   { id: 'K2', group: 'Crop', kind: 'review', title: 'Answer "1 device or 2?" truthfully', steps: ['Start > open a product that asks "1 device or 2?" > answer it > Check.'], expect: '1: one product stays. 2: both kept and you are asked to check.' },
   { id: 'K3', group: 'Crop', kind: 'undo', title: 'Undo / Restore the original after K1', steps: ['Start > use Undo or Restore original > Check.'], expect: 'The original photo is back; nothing is lost.' },

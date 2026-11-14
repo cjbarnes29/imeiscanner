@@ -39,8 +39,19 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private android.webkit.PermissionRequest cameraRequest;
 
+    // Phone camera: the permission request that is waiting for the user's answer (person, mode), if any.
+    private String[] cameraAfterPermission;
+
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
+        if (code == 1011) {
+            String[] wanted = cameraAfterPermission;
+            cameraAfterPermission = null;
+            if (wanted == null) return;
+            if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) launchCamera(wanted[0], wanted[1]);
+            else notifyCamera("denied", CameraInbox.waiting(ScanStore.root(this)).size());
+            return;
+        }
         if (code == 1010 && cameraRequest != null) {
             if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED)
                 cameraRequest.grant(new String[]{android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE});
@@ -137,6 +148,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 1006) { handleCameraResult(resultCode); return; }
         if (requestCode == 1002) {
             if (webFileCallback != null) webFileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
             webFileCallback = null;
@@ -227,6 +239,82 @@ public final class MainActivity extends Activity {
             WorkManager.getInstance(this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE,
                 new OneTimeWorkRequest.Builder(ScanWorker.class).build());
         }
+        notifyWeb();
+    }
+
+    // ---- The phone's own camera app (the only camera this app uses) ----
+
+    private android.content.SharedPreferences cameraPrefs() { return getSharedPreferences("camera-capture", MODE_PRIVATE); }
+
+    private void notifyCamera(String state, int waiting) {
+        final String script = "window.dispatchEvent(new CustomEvent('android-camera',{detail:{state:'" + state + "',waiting:" + waiting + "}}))";
+        runOnUiThread(() -> webView.evaluateJavascript(script, null));
+    }
+
+    /**
+     * Opens the phone's camera app. It writes the full-size photo straight into this app's private camera-waiting folder; the target
+     * is journaled first, so the photo is still found when Android ended this app while the camera was open.
+     * mode: "now" (scan the photo right away), "series" (scan it, then open the camera again) or "collect" (keep it for a later "Scan now").
+     */
+    private void launchCamera(String person, String mode) {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            cameraAfterPermission = new String[]{person, mode};
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, 1011);
+            return;
+        }
+        File shot;
+        Uri target;
+        try {
+            shot = CameraInbox.newShot(ScanStore.root(this));
+            target = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".files", shot);
+        } catch (Exception error) {
+            android.util.Log.e("IMEI-Lens", "Camera: could not prepare the photo file", error);
+            notifyCamera("failed", CameraInbox.waiting(ScanStore.root(this)).size());
+            return;
+        }
+        cameraPrefs().edit().putString("shot", shot.getAbsolutePath()).putString("person", person).putString("mode", mode).commit();
+        Intent intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+        intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, target);
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setClipData(ClipData.newRawUri("", target)); // older Android versions grant access through the clip
+        try { startActivityForResult(intent, 1006); }
+        catch (Exception error) {
+            android.util.Log.e("IMEI-Lens", "Camera: no camera app could be opened", error);
+            cameraPrefs().edit().remove("shot").commit();
+            CameraInbox.settle(shot);
+            notifyCamera("unavailable", CameraInbox.waiting(ScanStore.root(this)).size());
+        }
+    }
+
+    private void handleCameraResult(int resultCode) {
+        android.content.SharedPreferences prefs = cameraPrefs();
+        String path = prefs.getString("shot", null), person = prefs.getString("person", selectedPerson), mode = prefs.getString("mode", "now");
+        prefs.edit().remove("shot").commit();
+        File root = ScanStore.root(this);
+        File shot = path == null ? null : new File(path);
+        boolean ours = shot != null && CameraInbox.waitingDir(root).equals(shot.getParentFile());
+        boolean real = ours && CameraInbox.settle(shot); // a cancelled camera leaves nothing; a real photo is never deleted here
+        android.util.Log.i("IMEI-Lens", "Camera result: code=" + resultCode + ", photo=" + real + ", mode=" + mode);
+        if (!real || resultCode != RESULT_OK) { notifyCamera(real ? "kept" : (resultCode == RESULT_CANCELED ? "cancelled" : "failed"), CameraInbox.waiting(root).size()); return; }
+        if ("collect".equals(mode)) { notifyCamera("waiting", CameraInbox.waiting(root).size()); return; }
+        File moved = CameraInbox.accept(root, shot);
+        if (moved == null) { notifyCamera("failed", CameraInbox.waiting(root).size()); return; }
+        queueCameraPhotos(java.util.Collections.singletonList(moved), person);
+        notifyCamera("queued", CameraInbox.waiting(root).size());
+        if ("series".equals(mode)) runOnUiThread(() -> launchCamera(person, mode));
+    }
+
+    /** Starts the same background scan as shared photos, or adds the photos to the one that is already running. */
+    private void queueCameraPhotos(java.util.List<File> files, String person) {
+        JSONArray queue = new JSONArray();
+        for (File file : files) {
+            try { queue.put(new JSONObject().put("uri", Uri.fromFile(file).toString()).put("name", file.getName())); }
+            catch (Exception ignored) { /* a name that cannot be written is skipped */ }
+        }
+        if (queue.length() == 0) return;
+        if (ScanStore.start(this, queue, person)) {
+            WorkManager.getInstance(this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+        } else ScanStore.addPending(this, queue, person);
         notifyWeb();
     }
 
@@ -571,6 +659,28 @@ public final class MainActivity extends Activity {
                 startActivityForResult(intent, 1001);
             });
         }
+
+        /** Opens the phone's camera app. mode: "now", "series" or "collect" (see launchCamera). */
+        @JavascriptInterface public void takePhoto(String personId, String mode) {
+            final String person = personId.length() > 80 ? personId.substring(0, 80) : personId;
+            final String clean = "series".equals(mode) || "collect".equals(mode) ? mode : "now";
+            selectedPerson = person;
+            runOnUiThread(() -> launchCamera(person, clean));
+        }
+
+        /** How many photos were taken with "collect first" and are not scanned yet. */
+        @JavascriptInterface public int cameraWaiting() { return CameraInbox.waiting(ScanStore.root(MainActivity.this)).size(); }
+
+        /** Scans every waiting camera photo. Returns how many were queued. */
+        @JavascriptInterface public int scanWaitingCamera(String personId) {
+            final String person = personId.length() > 80 ? personId.substring(0, 80) : personId;
+            java.util.List<File> moved = CameraInbox.acceptAllWaiting(ScanStore.root(MainActivity.this), ScanStore.MAX_PHOTOS);
+            queueCameraPhotos(moved, person);
+            return moved.size();
+        }
+
+        /** Deletes the camera photos that were never scanned (only this app's own copies; the gallery is never touched). */
+        @JavascriptInterface public int discardWaitingCamera() { return CameraInbox.discardWaiting(ScanStore.root(MainActivity.this)); }
 
         /** Scan speed ("fast", "standard", "detailed") and products per photo (0 = Auto) for the background scanner. */
         @JavascriptInterface public void setScanOptions(String speed, int expected) {

@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — the phone camera app is the only camera (Android)
+- **Take photo / Scan with camera now open the phone's own camera app.** The in-app live preview (small, wrong shape, often did not scan) is no longer used on the phone; the browser version keeps it.
+- The camera writes the full-size photo straight into a private folder inside the app (never the gallery) and it is scanned by the same background scanner as chosen photos. A photo survives the app being closed while the camera is open.
+- **After taking a photo** (setting under the camera button): scan each photo right away (default) / keep taking photos, scanning each one / take several, then scan them together (**Scan now**, or **Discard waiting photos**, which deletes only this app's own unscanned camera photos).
+- Clear messages for: camera permission refused, no camera app, cancelled camera, photo not saved. A photo with no IMEI is reported (to review / to retake), never hidden.
+- Tests: JVM `CameraInboxTest` (9), `scripts/test-camera-mode.mjs`, emulator `18-camera-native`. **Not verified:** the real phone camera (POCO/HyperOS) returning the full-size photo.
 ## 1.26.0 — crop queue with statuses (Pending, Processing, Process later, Needs review, Completed)
 **Root causes found in 1.24–1.25 (and fixed here):**
 - *Settings did not reach queued photos.* The queue called the label detector with "Products in each photo = Auto, Standard" hard-coded and always ran every extra reading pass. Fixed: Scan speed and Products in each photo are read when each photo starts. Evidence (browser test): on a blurry pair Standard read 2 of 2 IMEIs and Fast 0 of 2; with 5 expected on a 4-box photo every crop is flagged "Found 4 of 5 products". Fast was not measurably quicker in the test (about 13 s in both): most of that time is starting the reader and finding the labels, which both modes do.

@@ -41,6 +41,8 @@ import { loadInventory, saveInventory, saveOriginalSource, setSourceGuard } from
 import { flushArchive, isProtectedSource, loadArchive, makeEntry, planRestore, queueArchive, type ArchiveEntry } from './archive-store';
 import { catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
+import { CameraOptions } from './CameraOptions';
+import { CAMERA_MODE_KEY, cameraMessage, normalizeCameraMode, type CameraMode } from './camera-mode';
 import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
 import { embedPhotoLimit } from './capacity';
@@ -109,6 +111,11 @@ type AndroidBridge = {
   scanReport?(): string;
   rescanNeeded?(personId: string): number;
   choosePhotos(personId: string): void;
+  /** Opens the phone's own camera app; mode is "now", "series" or "collect". Photos stay inside this app until scanned. */
+  takePhoto?(personId: string, mode: string): void;
+  cameraWaiting?(): number;
+  scanWaitingCamera?(personId: string): number;
+  discardWaitingCamera?(): number;
   /** APK 1.22+: scan speed and products per photo for the background scanner. Optional so older APKs keep working. */
   setScanOptions?(speed: string, expected: number): void;
   /** APK 1.25+: progress of the crop queue; while active the app shows a notification and holds a wake lock so it keeps working minimized. */
@@ -3095,8 +3102,38 @@ export default function App() {
   /** Open the in-app camera (it also offers the phone's own camera app as "Phone camera"). */
   function openNativeCamera() {
     if (busy || !inventoryLoaded) return;
+    // On the phone only the phone's own camera app is used (the in-app camera preview stays hidden); the browser version keeps its camera.
+    if (androidBridge) { androidBridge.takePhoto?.(activePersonId, cameraMode); return; }
     setCameraOpen(true);
   }
+  const [cameraMode, setCameraModeState] = useState<CameraMode>(() => normalizeCameraMode(localStorage.getItem(CAMERA_MODE_KEY)));
+  const [cameraWaiting, setCameraWaiting] = useState(() => { try { return androidBridge?.cameraWaiting?.() ?? 0; } catch { return 0; } });
+  const cameraModeRef = useRef(cameraMode);
+  cameraModeRef.current = cameraMode;
+  function setCameraMode(mode: CameraMode) { setCameraModeState(mode); try { localStorage.setItem(CAMERA_MODE_KEY, mode); } catch { /* the choice just is not remembered */ } }
+  useEffect(() => {
+    const heard = (event: Event) => {
+      const detail = (event as CustomEvent<{ state?: string; waiting?: number }>).detail || {};
+      setCameraWaiting(Math.max(0, Math.floor(Number(detail.waiting) || 0)));
+      setToast(cameraMessage(detail, cameraModeRef.current));
+    };
+    window.addEventListener('android-camera', heard);
+    return () => window.removeEventListener('android-camera', heard);
+  }, []);
+  function scanWaitingCameraPhotos() {
+    const count = androidBridge?.scanWaitingCamera?.(activePersonId) ?? 0;
+    setCameraWaiting(androidBridge?.cameraWaiting?.() ?? 0);
+    setToast(count ? `Scanning ${count} photo${count === 1 ? '' : 's'} in the background.` : 'No photos are waiting.');
+  }
+  function discardWaitingCameraPhotos() {
+    if (!window.confirm('Delete the photos you took that have not been scanned? Only these unscanned camera photos inside this app are removed. Choose Cancel to keep them.')) return;
+    const count = androidBridge?.discardWaitingCamera?.() ?? 0;
+    setCameraWaiting(androidBridge?.cameraWaiting?.() ?? 0);
+    setToast(count ? `Deleted ${count} waiting photo${count === 1 ? '' : 's'}.` : 'No photos were waiting.');
+  }
+  const cameraOptions = androidBridge?.takePhoto
+    ? <CameraOptions mode={cameraMode} onMode={setCameraMode} waiting={cameraWaiting} onScanNow={scanWaitingCameraPhotos} onDiscard={discardWaitingCameraPhotos} />
+    : null;
 
   /** Select value "unassigned" means no person (an empty string cannot be a select option next to the placeholder). */
   function ownerOf(value: string) { return value === 'unassigned' ? UNASSIGNED : value; }
@@ -4459,6 +4496,7 @@ export default function App() {
 </>)}
 {!simpleView && (<>
             <button className="subtle-btn" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}>Scan with camera</button>
+            {cameraOptions}
 
             {!androidBridge && <>
             <div
@@ -4572,6 +4610,7 @@ export default function App() {
             {simpleView && <div className="simple-scan-buttons">
               <button type="button" className="primary big" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}><Camera size={22} /> Take photo</button>
               <button type="button" className="primary big alt" disabled={busy || !inventoryLoaded || androidJob?.status === 'queued' || androidJob?.status === 'processing'} onClick={() => androidBridge ? androidBridge.choosePhotos(activePersonId) : simpleChooseRef.current?.click()}><UploadCloud size={22} /> Choose photos</button>
+              {cameraOptions}
               {androidBridge && androidJob && androidJob.status !== 'idle' && <p className="android-progress" role="status">{androidJob.completed} of {androidJob.count} photos scanned · {androidJob.status}{androidJob.failed ? ` · ${androidJob.failed} failed` : ''}</p>}
               {androidBridge && androidJob && <ScanReport bridge={androidBridge} summary={androidJob.report} status={androidJob.status} personId={activePersonId} onMessage={setToast} />}
               <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const chosen = Array.from(event.target.files || []), picked = chosen.filter(isImageFile); event.target.value = ''; if (chosen.length && picked.length < chosen.length) setToast(picked.length ? `${chosen.length - picked.length} file(s) were not photos and were skipped.` : 'Those files are not photos. Choose JPG, PNG, WEBP or HEIC pictures.'); if (picked.length) void scan(picked); }} />

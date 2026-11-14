@@ -119,7 +119,7 @@ export function assess(kind, diff, ctx = {}) {
   if (kind === 'scan' || kind === 'camera') {
     if (!diff.added.length) flag('no new product was found since you pressed Start. Did the scan finish ("photos scanned · completed")?');
     else info(`${diff.added.length} new product(s): ${diff.added.filter(r => r.needsReview).length} marked Needs review, ${diff.added.filter(r => !r.needsReview).length} shown as fine.`);
-    if (kind === 'camera' && diff.added.some(r => r.source !== 'camera')) flag('some new products did not come from the in-app camera.');
+    if (kind === 'camera' && diff.added.some(r => r.source !== 'camera')) flag('some new products did not come from the phone camera.');
     for (const r of diff.added) if (r.duplicate) info(`${r.name}: marked as duplicate IMEI.`);
   } else if (kind === 'crop') {
     if (!diff.archiveAdded.length) flag('no original was archived. Did you save the crop?');
