@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "generic",
+  "name": "Unknown brand",
+  "status": "active",
+  "evidence": {
+    "note": "Used when no brand has clear evidence in the label's own text. Checksum validation and the shared layout logic only: no brand rules.",
+    "words": [],
+    "codeShapes": []
+  },
+  "model": {
+    "prefix": "",
+    "notes": {
+      "noCode": "No model code was read. Type the model from the label.",
+      "editShape": "Check the model against the label."
+    }
+  },
+  "imeiRules": []
+}

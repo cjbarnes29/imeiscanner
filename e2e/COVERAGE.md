@@ -1,0 +1,32 @@
+# Coverage: what is automated and what still needs the real phone
+
+Legend: **A** automated and verified on the emulator (synthetic photos), **P** partly automated, **M** manual / real phone only.
+Results of the last run are in `e2e/reports/<time>/REPORT.md` (git-ignored). Numbers below were taken on 2026-11-13 on the `imei-api35` emulator (Android 15, x86_64) with the isolated test app.
+
+| Area | Automated check | Level | What is NOT covered (needs the phone) |
+|---|---|---|---|
+| Launch, WebView content, tab navigation, screenshots | `00-smoke` | A | real device rendering, rotation, small screens |
+| Android file picker: open, cancel, search, multi-select, confirm | `00-smoke`, every flow that scans | A | other gallery apps and the Google Photos picker |
+| Gallery scan, accuracy of IMEI and model, multi-product split, duplicate photo, IMEI-2 fallback flag, scan report | `01-scan-gallery` + data check against `truth.json` | A | real photos, blur, glare, tilt, dark light |
+| Records: filters, search by model and IMEI, Needs review list | `02-records` | A | very large lists (hundreds of records) |
+| Crop Studio: draw boxes, save, archive of the original, linked crops, Undo | `03-crop-archive-undo` | A | touch precision of a human hand, pinch zoom, small boxes |
+| Restore from the archive list (answers the native OK / Cancel confirmation) | `04-restore-from-archive-list` | A | wording and look of the native dialog on real phones |
+| Duplicates: flagged, Archive duplicates, Undo | `05-duplicates-archive-undo` | A | Restore all duplicates (same confirmation as 04, not separately automated) |
+| CSV export: save (non-empty, right rows), cancel | `06-export-csv` + file check | A | XLSX with pictures (folder picker), Word, Google Sheets file |
+| CSV export while the app is ended during the Save dialog | `07-export-interrupted` | A (known failing) | the second, unexplained empty-file case |
+| Share dialog contents | `08-share` | P | system share sheet, WhatsApp, Bluetooth, receiving app |
+| Background scan (Home while scanning) | `09-background-scan` | A | screen off / doze, battery optimisation, long scans |
+| Background crop queue | `10-background-queue` | A | process killed by low memory, many queued photos |
+| Crash and ANR watch | logcat of every test | A | real-device vendor behaviour |
+| Photos shared to the app (no picker, no gallery, no shared storage): arrival, names, scan results, no storage access | `16-share-photos` (+ data check, same as 01) | A | real phone not run yet (needs the owner's opt-in, see `phase2-results/phase3-prep/PHONE-SHARE-TEST-PLAN.md`) |
+| Phone checklist, camera / crop / review / export result collection (masked) | `e2e/phone-tools` (11 unit tests; server exercised against the emulator) | P | camera results need a real label; review diffs checked with synthetic snapshots only |
+| Phone camera (the phone's own camera app): permission refused, photo taken and scanned, cancel, collect then Scan now, Discard | `18-camera-native` (emulator camera app, virtual scene) | A | the real phone camera app (full-size photo returned to the app), real labels, MIUI/HyperOS behaviour |
+| Real accuracy, speed and memory | none (emulator numbers only) | M | the 20 to 30 photo phone test |
+| Installing over the real app, signature, data compatibility | none | M | needs a release-signed build and a decision |
+
+## What was run and the result
+Latest run on 2026-11-15 (new review UX build, freshly booted emulator): **all 19 tests 00 to 18 pass**, 0 crashes (02 and 08 were rerun after a test fix; 07, 11, 12, 13 failed on a degraded emulator, with the same failure on the build before the changes, and passed after a fresh boot). The older run below is kept for the check counts.
+Full run on 2026-11-13 (emulator, isolated test app, Maestro 2.12.1): **10 passed, 1 known failing (expected), 0 crashes** (00-smoke, 01-scan-gallery 15/15 checks, 02-records 7/7, 03-crop-archive-undo 7/7, 04-restore-from-archive-list 6/6, 05-duplicates-archive-undo 10/10, 06-export-csv 13/13, 08-share 7/7, 09-background-scan 6/6, 10-background-queue 5/5; 07-export-interrupted fails as designed: a 0-byte file is left behind). Each full run takes about 15 minutes. Stability: one fully clean run so far; an earlier run had 3 failures that were test mistakes (wrong field lookup, a read before the app saved, text Maestro cannot see), all fixed. The live results are always in the newest `REPORT.md`.
+
+## Not in CI (on purpose)
+The emulator workflow is not added to GitHub Actions: the tooling (PowerShell runner, `adb.exe`, `cmd`) is Windows-specific, GitHub's Windows runners cannot run a hardware-accelerated emulator, and the system picker flows were tuned on one emulator image. Porting to Linux (bash runner, KVM emulator action) is possible and listed in `README.md`; it should wait until the suite has been stable for several consecutive runs.

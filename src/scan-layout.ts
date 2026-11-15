@@ -80,8 +80,12 @@ export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, 
     }
     return count ? { strength: strength / count, coverage: coverage / count } : { strength: 0, coverage: 0 };
   };
-  const findEdge = (from: number, to: number, mode: 'start' | 'end' | 'seam'): { position: number; tilt: number } | null => {
-    let best: { position: number; tilt: number } | null = null, score = 0;
+  // Text lines along the stacking direction: a cut that runs through a printed line (for example the Model line of the next label) loses part of a label.
+  const lineSpans = lines.filter(line => line.bbox && validBox(line.bbox)).map(line => vertical ? [line.bbox.y0, line.bbox.y1] : [line.bbox.x0, line.bbox.x1]);
+  const cutsText = (position: number, tilt: number) => lineSpans.some(([a, b]) => position + Math.abs(tilt) > a && position - Math.abs(tilt) < b);
+  const findEdge = (from: number, to: number, mode: 'start' | 'end' | 'seam', avoidText = false): { position: number; tilt: number; cutsText?: boolean } | null => {
+    let best: { position: number; tilt: number; cutsText?: boolean } | null = null, score = 0;
+    let free: { position: number; tilt: number; cutsText?: boolean } | null = null, freeScore = 0;
     // Most photos are straight. Try the cheap straight pass first; only search
     // sloped boundaries when it cannot find a reliable one.
     for (const slopes of [[0], [-0.12, -0.08, -0.04, 0.04, 0.08, 0.12].map(fraction => fraction * majorSteps)]) {
@@ -89,20 +93,25 @@ export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, 
         for (const slope of slopes) {
         const result = edge(step, mode, slope);
         if (result.coverage >= 0.65 && result.strength >= 22 && result.strength * result.coverage > score) {
-          best = { position: Math.round(step * majorScale), tilt: slope * majorScale * (minorMax - minorMin) / (2 * minorSteps) };
+          const candidate = { position: Math.round(step * majorScale), tilt: slope * majorScale * (minorMax - minorMin) / (2 * minorSteps) };
+          best = candidate;
           score = result.strength * result.coverage;
+          if (avoidText && !cutsText(candidate.position, candidate.tilt) && score > freeScore) { free = candidate; freeScore = score; }
         }
         }
       }
       if (best) break;
     }
+    // Prefer a cut between text lines; when only a cut through text exists, keep it but say so (the crop is then checked by a person).
+    const found = best as { position: number; tilt: number } | null;
+    if (avoidText && found) return (free as { position: number; tilt: number } | null) || { ...found, cutsText: cutsText(found.position, found.tilt) };
     return best;
   };
   const startOf = (item: typeof items[number]) => vertical ? context[items.indexOf(item)].y0 : context[items.indexOf(item)].x0;
   const endOf = (item: typeof items[number]) => vertical ? context[items.indexOf(item)].y1 : context[items.indexOf(item)].x1;
-  const seams: { position: number; tilt: number }[] = [];
+  const seams: { position: number; tilt: number; cutsText?: boolean }[] = [];
   for (let i = 1; i < ordered.length; i++) {
-    const seam = findEdge(endOf(ordered[i - 1]), startOf(ordered[i]), 'seam');
+    const seam = findEdge(endOf(ordered[i - 1]), startOf(ordered[i]), 'seam', true);
     if (!seam) return []; // May be a shared sticker; never cut blindly.
     seams.push(seam);
   }
@@ -158,7 +167,7 @@ export function planImeiCrops(imeis: string[], lines: OcrLine[], width: number, 
     const right = sideEdge(Math.min(minorExtent, labelEnd + sidePadding), Math.min(minorExtent, labelEnd + minorExtent * 0.42), from, to);
     const sideFrom = left < 0 ? 0 : Math.max(0, Math.floor(left - minorExtent * 0.025));
     const sideTo = right < 0 ? minorExtent : Math.min(minorExtent, Math.ceil(right + minorExtent * 0.025));
-    const needsReview = (i === 0 && !start) || (i === ordered.length - 1 && !end) || left < 0 || right < 0 || seams.some(seam => Math.abs(seam.tilt) > extent * 0.025);
+    const needsReview = (i === 0 && !start) || (i === ordered.length - 1 && !end) || left < 0 || right < 0 || seams.some(seam => Math.abs(seam.tilt) > extent * 0.025) || seams.some(seam => seam.cutsText);
     return vertical ? { imei: item.imei, x: sideFrom, y: from, width: sideTo - sideFrom, height: to - from, needsReview } : { imei: item.imei, x: from, y: sideFrom, width: to - from, height: sideTo - sideFrom, needsReview };
   });
   return regions.every((region, i) => region.width > 0 && region.height > 0 &&

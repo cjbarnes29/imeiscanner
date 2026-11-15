@@ -1,3 +1,5 @@
+import { activeIssue, issueTextFor } from './label-issue';
+import { typedModelNote, typedModelOk } from './brands';
 import { ORIENTATIONS, labelTextScore, barcodeImei, imeiReadingsDisagree, pickImei2, labelledBarcodeImeis, labelledBarcodeLines, resolveImeisFromBarcodes, resolveSerialFromBarcodes, type PositionedBarcode } from './barcode-imei';
 import { readDataUrlBarcodes, readImageBarcodes } from './barcode-reader';
 import { scoreConfidence } from './confidence';
@@ -30,16 +32,26 @@ import {
   CloudUpload, Camera, Pencil, Share2, Settings, ZoomIn
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
+import { startOcrWorker } from './ocr-config';
+import { ScanReport } from './ScanReport';
+import { createStallGuard, QUEUE_ITEM_LIMIT_MS } from './stall-guard';
+import { readSummary, type ReportSummary } from './scan-report';
 import { exportModel, type CropRegion, type OcrLine } from './scan-layout';
-import { loadInventory, saveInventory, saveOriginalSource } from './record-store';
+import { loadInventory, saveInventory, saveOriginalSource, setSourceGuard } from './record-store';
+import { BulkReview, type BulkRow } from './BulkReview';
+import { flushArchive, isProtectedSource, loadArchive, makeEntry, planRestore, queueArchive, type ArchiveEntry } from './archive-store';
 import { catalogModel } from './SamsungCatalog';
 import { CameraCapture } from './CameraCapture';
+import { CameraOptions } from './CameraOptions';
+import { CAMERA_MODE_KEY, cameraMessage, normalizeCameraMode, type CameraMode } from './camera-mode';
 import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
 import { embedPhotoLimit } from './capacity';
 import './text-size';
 import { hasSeenWhatsNew, markWhatsNewSeen, TutorialsDialog, WhatsNewDialog } from './Guide';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
+
+setSourceGuard(isProtectedSource);
 
 type RecordItem = {
   id: string;
@@ -53,6 +65,26 @@ type RecordItem = {
   originalDataUrl?: string;
   cropDataUrl?: string;
   cropNeedsReview?: boolean;
+  /** The person confirmed that the number in the IMEI column is right although IMEI 1 itself could not be read (only IMEI 2 was). */
+  imeiFallbackChecked?: boolean;
+  /** The model code was not clearly readable, was repaired, or two readings disagree (Android scanner); cleared when a person checks or types it. */
+  modelNeedsReview?: boolean;
+  modelNote?: string;
+  /** IMEI 1 was found by a rule (Samsung: its own barcode, matched to IMEI 2), not read from its printed line; cleared when a person checks or types it. */
+  imeiNeedsReview?: boolean;
+  imeiNote?: string;
+  /** The person confirmed this record in the review list (or accepted it as looking right). Hides it from that list; the flags stay visible. */
+  checked?: boolean;
+  /** Why a label of this photo could not be read (cut by an edge, partly read, unreadable); see label-issue.ts. Words only, never a number. */
+  /** Which manufacturer's profile applies (decided from the label's own text); "generic" = no brand evidence. Old records have none. */
+  brand?: string;
+  /** No brand evidence on the label: a person confirms the model and numbers; cleared when they check or type them. */
+  brandNeedsReview?: boolean;
+  labelIssue?: string; labelIssueSide?: string; labelsMissing?: number; labelIssueDigits?: number;
+  /** The person chose "Keep as is": no retake prompt, the record still needs review. */
+  labelIssueDismissed?: boolean;
+  /** Set on crops: the record of the original photo they were cut from (kept in the archive, can be restored). */
+  sourceRecordId?: string;
   /** Where the label text is in the photo (fractions of its size). The review screen opens zoomed on it. */
   focus?: { x: number; y: number; w: number; h: number };
   model: string;
@@ -78,7 +110,15 @@ const personName = (person: PersonGroup) => (person.name || '').trim() || 'Unnam
 type LaptopRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; photoIndex: number };
 type AndroidRecord = Omit<RecordItem, 'dataUrl'> & { imageName: string; siblings?: number };
 type AndroidBridge = {
+  // Scan report (APK 1.26.1+): what each selected photo gave, and scanning again the ones that failed or have no IMEI.
+  scanReport?(): string;
+  rescanNeeded?(personId: string): number;
   choosePhotos(personId: string): void;
+  /** Opens the phone's own camera app; mode is "now", "series" or "collect". Photos stay inside this app until scanned. */
+  takePhoto?(personId: string, mode: string): void;
+  cameraWaiting?(): number;
+  scanWaitingCamera?(personId: string): number;
+  discardWaitingCamera?(): number;
   /** APK 1.22+: scan speed and products per photo for the background scanner. Optional so older APKs keep working. */
   setScanOptions?(speed: string, expected: number): void;
   /** APK 1.25+: progress of the crop queue; while active the app shows a notification and holds a wake lock so it keeps working minimized. */
@@ -238,11 +278,25 @@ function recordConfidence(row: RecordItem) {
   });
 }
 
+/** The IMEI column holds the label's IMEI 2 because IMEI 1 could not be read. Never silent: it needs a person to confirm it. */
+function imeiIsFallback(row: RecordItem) {
+  return !!row.imei && !row.imeiFallbackChecked && recordImeiPair(row).imei1 === '';
+}
+function reviewNote(row: RecordItem) {
+  return imeiIsFallback(row) ? 'IMEI 1 could not be read; the number shown is IMEI 2. Check it or type IMEI 1.'
+    : row.imeiNeedsReview ? (row.imeiNote || 'Check IMEI 1 against the label.')
+    : row.modelNeedsReview ? (row.modelNote || 'Check the model code.')
+    : row.brandNeedsReview ? 'The brand could not be identified from the label. Check the model and the numbers.'
+    : issueTextFor(row)?.short || '';
+}
 function reviewStatus(row: RecordItem) {
-  const serialOnly = !row.imei && !!recordSerial(row);
-  const needsReview = row.cropNeedsReview || row.serialNeedsReview || (!serialOnly && row.status !== 'Valid');
+  const serialOnly = !row.imei && !!recordSerial(row) && !activeIssue(row); // a label with an unresolved cut-off explanation is not a deliberate serial-only record
+  const needsReview = row.cropNeedsReview || row.serialNeedsReview || row.modelNeedsReview || row.imeiNeedsReview || row.brandNeedsReview || imeiIsFallback(row) || (!serialOnly && row.status !== 'Valid');
   return row.duplicate ? needsReview ? 'Duplicate IMEI · Needs review' : 'Duplicate IMEI' : needsReview ? 'Needs review' : serialOnly ? 'Serial only' : 'Valid';
 }
+
+/** A Samsung model code as printed on the label: SM- + letter + 3 digits + letter or digit (SM-A165F, SM-S938B/DS). */
+// A typed model is checked with the record's brand profile (brands/profiles): Samsung records need the SM- code shape, unknown-brand records take free text.
 
 function luhnValid(value: string) {
   if (!/^\d{15}$/.test(value)) return false;
@@ -964,7 +1018,8 @@ type CropGroup = { id: string; name: string; source: string; crops: SplitCrop[] 
 const OCR_BASE = new URL('ocr', document.baseURI).href;
 /** Let the page repaint and answer taps between heavy steps (canvas work, barcode decoding and picture treatments run on the page's own thread). */
 const yieldToUi = () => new Promise<void>(resolve => { const done = () => resolve(); const timer = window.setTimeout(done, 60); requestAnimationFrame(() => { window.clearTimeout(timer); window.setTimeout(done, 0); }); });
-const newOcrWorker = () => createWorker('eng', 1, { workerPath: `${OCR_BASE}/worker.min.js`, corePath: OCR_BASE, langPath: OCR_BASE });
+// On Android the language data is packaged without ".gz" (see ocr-config.ts); a reader that cannot start rejects instead of hanging.
+const newOcrWorker = () => startOcrWorker(createWorker, OCR_BASE, !!androidBridge);
 
 /**
  * Auto option: find how many devices a photo holds and where their labels sit,
@@ -1095,7 +1150,7 @@ function splitRecords(original: RecordItem, crops: SplitCrop[], firstNumber: num
     const serial = !read.serial && inherit && original.serial ? { serial: original.serial, serialNeedsReview: original.serialNeedsReview } : read;
     return {
       ...original, id: newId(), pictureId: `PIC-${newId().slice(0, 8).toUpperCase()}`,
-      sourcePictureId, number: index === 0 ? original.number : firstNumber + index - 1,
+      sourcePictureId, sourceRecordId: original.id, number: index === 0 ? original.number : firstNumber + index - 1,
       dataUrl: crop.cropDataUrl, cropDataUrl: crop.cropDataUrl, originalDataUrl: undefined, focus: undefined,
       ...serial, imei, imei2: pairedImei2(imei, pair.imei2, crop.model) || (inherit ? original.imei2 : undefined),
       model: crop.model.trim() || 'Unknown unit — review', raw: crop.raw,
@@ -1133,7 +1188,7 @@ function CropResults({ groups, setGroups, busy, onBack, onApply }: { groups: Cro
     </div>
     {badFormat && <p role="status" className="studio-message">Enter all 15 IMEI digits, or empty the field to review it later.</p>}
     <footer className="studio-actions">
-      <button className="primary" disabled={busy || badFormat} onClick={onApply}>Replace original{groups.length === 1 ? '' : 's'} with {total} picture{total === 1 ? '' : 's'}</button>
+      <button className="primary" disabled={busy || badFormat} onClick={onApply}>Save {total} picture{total === 1 ? '' : 's'} and archive the original{groups.length === 1 ? '' : 's'}</button>
       <button className="subtle-btn" disabled={busy} onClick={onBack}>← Back to the boxes</button>
     </footer>
     <p className="studio-hint">The original photo is deleted for good. Each picture keeps its own IMEI, serial, model and person.</p>
@@ -1757,6 +1812,9 @@ export default function App() {
 
   const hostedScanner = import.meta.env.VITE_HOSTED_SCANNER === 'true' || window.location.hostname.endsWith('.onrender.com');
   const [records, setRecords] = useState<RecordItem[]>([]);
+  const [archive, setArchive] = useState<ArchiveEntry<RecordItem>[]>([]);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [splitUndo, setSplitUndo] = useState<{ ids: string[]; text: string } | null>(null);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   // Excel "Download picture" links open the app at #picture=<id>.
   const readLinkedPicture = () => new URLSearchParams(location.hash.slice(1)).get('picture');
@@ -1797,7 +1855,9 @@ export default function App() {
   const [laptopMessage, setLaptopMessage] = useState('');
   const [laptopJob, setLaptopJob] = useState<{ status: string; count: number; completed: number; resultCount: number; failed: number } | null>(null);
   const [phoneAddresses, setPhoneAddresses] = useState<string[]>([]);
-  const [androidJob, setAndroidJob] = useState<{ status: string; count: number; completed: number; failed: number; error?: string } | null>(null);
+  const [androidJob, setAndroidJob] = useState<{ status: string; count: number; completed: number; failed: number; error?: string; report?: ReportSummary } | null>(null);
+  // Pictures the app could not load when importing scan results: tried a few times, then reported (never dropped silently).
+  const androidImageTries = useRef(new Map<string, number>());
   const importedAndroidIds = useRef(readNativeImportedIds());
   /** How many of the Android app's saved records this page has already gone through. */
   const androidCursor = useRef(0);
@@ -1834,7 +1894,6 @@ export default function App() {
   /** What you typed for pictures you moved past without saving. Decided at the end: save all or discard. */
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
   const draftsRef = useRef<Record<string, { model: string; imei: string; imei2: string; serial: string }>>({});
-  const [finishOpen, setFinishOpen] = useState(false);
   /** A warning that must be seen: shown as a pop-up with OK instead of a small message. */
   const [warning, setWarning] = useState('');
   const [manualModel, setManualModelState] = useState('');
@@ -1847,6 +1906,11 @@ export default function App() {
   const [rotatingPhoto, setRotatingPhoto] = useState(false);
   const [bulkCropOpen, setBulkCropOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkIds, setBulkIds] = useState<string[]>([]);
+  const [bulkAccepted, setBulkAccepted] = useState<string[]>([]);
+  const recordsLive = useRef<RecordItem[]>([]);
+  const scanSeen = useRef<{ was: boolean; before: Set<string> }>({ was: false, before: new Set() });
   const [bulkEditModel, setBulkEditModel] = useState('');
   const [bulkEditPerson, setBulkEditPerson] = useState('');
   const [bulkEditChecked, setBulkEditChecked] = useState(false);
@@ -1883,7 +1947,6 @@ export default function App() {
   // Permanent delete waits for an in-app confirmation.
   const [welcome, setWelcome] = useState<'' | 'new' | 'tutorials'>(() => hasSeenWhatsNew() ? '' : 'new');
   const closeWelcome = () => { markWhatsNewSeen(); setWelcome(''); };
-  const [confirmDupes, setConfirmDupes] = useState<string[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; fromReview: boolean } | null>(null);
   const [personDraft, setPersonDraft] = useState('');
   // Samsung catalog (bundled, refreshed in the background): turns model codes into phone names.
@@ -1936,12 +1999,14 @@ export default function App() {
   useEffect(() => {
     if (!androidBridge) return;
     const report = (event: Event) => {
-      const { status, filename } = (event as CustomEvent<{ status: string; filename: string }>).detail;
-      const message = status === 'saved' ? `${filename} saved to your phone.`
+      const { status, filename, problem, resumed } = (event as CustomEvent<{ status: string; filename: string; problem?: string; resumed?: boolean }>).detail;
+      const message = status === 'saved' ? (resumed ? `An interrupted save was finished: ${filename} is complete on your phone.` : `${filename} saved to your phone.`)
         : status === 'cancelled' ? 'Save cancelled. No file was downloaded.'
-        : `Could not save ${filename}. Choose a different folder and try again.`;
+        : status === 'interrupted' ? `The export of ${filename} was interrupted. Nothing was saved. Please try again.`
+        : `Could not save ${filename}.${problem ? ` ${problem}` : ''} Choose a different folder and try again.`;
       setDownloadStatus(message);
       setToast(message);
+      if (resumed) window.setTimeout(() => setToast(message), 4000); // after the start-up status messages (see android-saved)
     };
     window.addEventListener('android-export-result', report);
     return () => window.removeEventListener('android-export-result', report);
@@ -1960,7 +2025,12 @@ export default function App() {
   useEffect(() => { androidBridge?.setActivePerson?.(activePersonId); }, [activePersonId]);
   useEffect(() => {
     if (!androidBridge) return;
-    const saved = (event: Event) => { const detail = (event as CustomEvent<{ ok: boolean; error?: string }>).detail; if (detail && !detail.ok) setToast(detail.error || 'Could not save.'); };
+    const saved = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; error?: string; count?: number; where?: string; resumed?: boolean }>).detail;
+      if (detail && !detail.ok) setToast(detail.error || 'Could not save.');
+      // Finished at start-up: shown after the start-up status messages, which would otherwise replace it at once.
+      else if (detail?.resumed) { const text = `An interrupted save was finished: ${detail.count ?? 0} files in ${detail.where || 'your folder'}.`; window.setTimeout(() => setToast(text), 4000); }
+    };
     window.addEventListener('android-saved', saved);
     return () => window.removeEventListener('android-saved', saved);
   }, []);
@@ -1980,6 +2050,7 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
+    loadArchive<RecordItem>().then(rows => { if (mounted) setArchive(rows); }).catch(error => console.error('Unable to read the photo archive', error));
     loadInventory<RecordItem>()
       .then(saved => {
         if (mounted) {
@@ -2008,9 +2079,9 @@ export default function App() {
       let more = false;
       try {
         const sliced = !!androidBridge.statusFrom;
-        const job = JSON.parse(sliced ? androidBridge.statusFrom!(androidCursor.current) : androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[]; recordsFrom?: number; recordsTotal?: number };
+        const job = JSON.parse(sliced ? androidBridge.statusFrom!(androidCursor.current) : androidBridge.status()) as { id: string; status: string; count: number; completed: number; failed: number; error?: string; records?: AndroidRecord[]; recordsFrom?: number; recordsTotal?: number; report?: unknown };
         if (cancelled) return;
-        setAndroidJob({ status: job.status, count: job.count, completed: job.completed, failed: job.failed, error: job.error });
+        setAndroidJob({ status: job.status, count: job.count, completed: job.completed, failed: job.failed, error: job.error, report: job.report ? readSummary(job.report) : undefined });
         // The app's list was cleared (reset): start reading from the beginning again.
         if (sliced && (job.recordsTotal ?? 0) < androidCursor.current) { androidCursor.current = 0; more = true; return; }
         const scanned = job.records || [];
@@ -2019,12 +2090,23 @@ export default function App() {
         const wanted = scanned.filter(item => !importedAndroidIds.current.has(item.id));
         const pending = wanted.slice(0, 12);
         const added: RecordItem[] = [];
+        const skippedPictures: string[] = [];
         for (const item of pending) {
-          importedAndroidIds.current.add(item.id);
           const dataUrl = androidBridge.image(item.id);
-          if (!dataUrl) continue;
+          if (!dataUrl) {
+            // The picture file is missing or unreadable. Not marked as imported, so it is tried again; after 3 tries it is reported.
+            const tries = (androidImageTries.current.get(item.id) || 0) + 1;
+            androidImageTries.current.set(item.id, tries);
+            if (tries >= 3) { importedAndroidIds.current.add(item.id); skippedPictures.push(item.name || item.id); }
+            continue;
+          }
+          importedAndroidIds.current.add(item.id);
           const { imageName, siblings, ...row } = item;
           added.push({ ...row, uploadBatchId: row.uploadBatchId || job.id, dataUrl, cropDataUrl: (siblings || counts.get(item.sourcePictureId || '') || 0) > 1 ? dataUrl : undefined });
+        }
+        if (skippedPictures.length) {
+          console.warn('Pictures that could not be loaded from the scan storage', skippedPictures);
+          setToast(`${skippedPictures.length} picture${skippedPictures.length === 1 ? '' : 's'} could not be loaded and ${skippedPictures.length === 1 ? 'was' : 'were'} not added to Records: ${skippedPictures.slice(0, 3).join(', ')}${skippedPictures.length > 3 ? '…' : ''}. The photo${skippedPictures.length === 1 ? '' : 's'} can be scanned again.`);
         }
         if (sliced) {
           let advance = 0;
@@ -2129,10 +2211,8 @@ export default function App() {
 
   // Back button / swipe-back closes the top popup instead of leaving the app.
   useBackLayer(!!selected, closePhotoReview, 'review');
-  useBackLayer(finishOpen, () => setFinishOpen(false), 'finish-review');
   useBackLayer(!!warning, () => setWarning(''), 'warning');
   useBackLayer(bulkEditOpen, () => setBulkEditOpen(false), 'bulk-edit');
-  useBackLayer(!!confirmDupes, () => setConfirmDupes(null), 'confirm-dupes');
   useBackLayer(!!confirmDelete, () => setConfirmDelete(null), 'confirm-delete');
   useBackLayer(!!deletePersonId, () => setDeletePersonId(''), 'confirm-delete-person');
   useBackLayer(shareIds.length > 0, () => { if (!sharing) setShareIds([]); }, 'share');
@@ -2148,6 +2228,7 @@ export default function App() {
     const timer = window.setTimeout(() => {
       saveChain.current = saveChain.current.catch(() => {}).then(async () => {
         try {
+          await flushArchive();
           await saveInventory(records);
           // A queued photo is taken off the saved queue only now that its crops are stored (see the queue runner).
           if (queueSaveNeeded.current) { queueSaveNeeded.current = false; writeQueue(localStorage, cropQueueRef.current); }
@@ -2801,7 +2882,7 @@ export default function App() {
         <div className="share-toolbar">
           <button className="primary whatsapp-btn" onClick={() => openWhatsApp(formatPersonShare(shareSections.map(sharePayload)))}>WhatsApp text — everyone</button>
           <button className="subtle-btn" onClick={() => void copyText(formatPersonShare(shareSections.map(sharePayload))).then(ok => setToast(ok ? 'List copied.' : 'Copy failed.'))}>Copy all</button>
-          <button className="subtle-btn" onClick={() => setOverviewOpen(true)}>Review by model</button>
+          <button className="subtle-btn" onClick={() => setOverviewOpen(true)}>Who gets how many</button>
           <label className="settings-check"><input type="checkbox" checked={shareSerial} onChange={event => setShareSerial(event.target.checked)} /> Include serial numbers</label>
         </div>
         <ul className="overview-list">
@@ -2812,7 +2893,7 @@ export default function App() {
               <button className="primary whatsapp-btn" aria-label={`WhatsApp ${section.name}: pictures and IMEI`} onClick={() => startWhatsApp(section)}>WhatsApp · pictures + IMEI</button>
               <button className="subtle-btn" aria-label={`Text only for ${section.name}`} onClick={() => openWhatsApp(formatPersonShare([sharePayload(section)]))}>Text only</button>
               <button className="subtle-btn" aria-label={`Bluetooth or nearby share for ${section.name}`} onClick={() => startWhatsApp(section, true)}>Bluetooth / nearby</button>
-              <button className="subtle-btn" aria-label={`One by one for ${section.name}`} onClick={() => startOneByOne(section)}>One by one</button>
+              <button className="subtle-btn" aria-label={`Send one at a time for ${section.name}`} onClick={() => startOneByOne(section)}>Send one at a time</button>
               <button className="subtle-btn" aria-label={`Save ${section.name} to my phone`} onClick={() => void saveToMyself(section.name, rowsOfSection(section.id))}>Save to my phone</button>
               <button className="subtle-btn" aria-label={`Copy ${section.name}`} onClick={() => void copyText(formatPersonShare([sharePayload(section)])).then(ok => setToast(ok ? `${section.name}'s list copied.` : 'Copy failed.'))}>Copy</button>
             </div>
@@ -2885,10 +2966,17 @@ export default function App() {
     setReviewIds(visible.map(item => item.id));
     setSelected(record);
   }
-  /** Delete the extra copies of repeated IMEIs. One copy of each stays; Undo brings the rest back for a few seconds. */
+  /**
+   * Archive the extra copies of repeated IMEIs (nothing is deleted). One copy of each stays in the list; the rest go to the archive with their
+   * picture, with Undo right away and "View / restore" for as long as you like.
+   */
   function removeDuplicates(ids: string[]) {
     const set = new Set(ids);
-    setPersonUndo({ people: personGroups, records, text: `${ids.length} duplicate${ids.length === 1 ? '' : 's'} deleted. One copy of each IMEI was kept.`, activePersonId });
+    const removed = records.filter(item => set.has(item.id));
+    const entries = removed.map(item => ({ ...makeEntry(item, [], 'duplicate-removal'), duplicateOf: records.find(other => !set.has(other.id) && other.imei === item.imei)?.id }));
+    for (const entry of entries) queueArchive(entry);
+    setArchive(old => [...old.filter(item => !entries.some(entry => entry.id === item.id)), ...entries]);
+    setSplitUndo({ ids: entries.map(entry => entry.id), text: `${ids.length} duplicate${ids.length === 1 ? '' : 's'} archived, not deleted. One copy of each IMEI was kept.` });
     setRecords(old => markDuplicateRecords(old.filter(item => !set.has(item.id))));
     setSelectedIds(old => old.filter(id => !set.has(id)));
     setReviewIds(old => old.filter(id => !set.has(id)));
@@ -3007,7 +3095,7 @@ export default function App() {
     const edited = records.map(record => !set.has(record.id) ? record : {
       ...record,
       ...(model ? { model } : {}),
-      ...(bulkEditChecked ? { cropNeedsReview: false, serialNeedsReview: false, deviceCount: undefined, deviceImeis: undefined } : {})
+      ...(bulkEditChecked ? { imeiFallbackChecked: true, cropNeedsReview: false, serialNeedsReview: false, modelNeedsReview: false, imeiNeedsReview: false, brandNeedsReview: false, deviceCount: undefined, deviceImeis: undefined } : {})
     });
     if (bulkEditPerson) moveRecords(ids, ownerOf(bulkEditPerson), edited);
     else { setRecords(markDuplicateRecords(edited)); setToast(`Updated ${ids.length} phone${ids.length === 1 ? '' : 's'}.`); }
@@ -3018,8 +3106,38 @@ export default function App() {
   /** Open the in-app camera (it also offers the phone's own camera app as "Phone camera"). */
   function openNativeCamera() {
     if (busy || !inventoryLoaded) return;
+    // On the phone only the phone's own camera app is used (the in-app camera preview stays hidden); the browser version keeps its camera.
+    if (androidBridge) { androidBridge.takePhoto?.(activePersonId, cameraMode); return; }
     setCameraOpen(true);
   }
+  const [cameraMode, setCameraModeState] = useState<CameraMode>(() => normalizeCameraMode(localStorage.getItem(CAMERA_MODE_KEY)));
+  const [cameraWaiting, setCameraWaiting] = useState(() => { try { return androidBridge?.cameraWaiting?.() ?? 0; } catch { return 0; } });
+  const cameraModeRef = useRef(cameraMode);
+  cameraModeRef.current = cameraMode;
+  function setCameraMode(mode: CameraMode) { setCameraModeState(mode); try { localStorage.setItem(CAMERA_MODE_KEY, mode); } catch { /* the choice just is not remembered */ } }
+  useEffect(() => {
+    const heard = (event: Event) => {
+      const detail = (event as CustomEvent<{ state?: string; waiting?: number }>).detail || {};
+      setCameraWaiting(Math.max(0, Math.floor(Number(detail.waiting) || 0)));
+      setToast(cameraMessage(detail, cameraModeRef.current));
+    };
+    window.addEventListener('android-camera', heard);
+    return () => window.removeEventListener('android-camera', heard);
+  }, []);
+  function scanWaitingCameraPhotos() {
+    const count = androidBridge?.scanWaitingCamera?.(activePersonId) ?? 0;
+    setCameraWaiting(androidBridge?.cameraWaiting?.() ?? 0);
+    setToast(count ? `Scanning ${count} photo${count === 1 ? '' : 's'} in the background.` : 'No photos are waiting.');
+  }
+  function discardWaitingCameraPhotos() {
+    if (!window.confirm('Delete the photos you took that have not been scanned? Only these unscanned camera photos inside this app are removed. Choose Cancel to keep them.')) return;
+    const count = androidBridge?.discardWaitingCamera?.() ?? 0;
+    setCameraWaiting(androidBridge?.cameraWaiting?.() ?? 0);
+    setToast(count ? `Deleted ${count} waiting photo${count === 1 ? '' : 's'}.` : 'No photos were waiting.');
+  }
+  const cameraOptions = androidBridge?.takePhoto
+    ? <CameraOptions mode={cameraMode} onMode={setCameraMode} waiting={cameraWaiting} onScanNow={scanWaitingCameraPhotos} onDiscard={discardWaitingCameraPhotos} />
+    : null;
 
   /** Select value "unassigned" means no person (an empty string cannot be a select option next to the placeholder). */
   function ownerOf(value: string) { return value === 'unassigned' ? UNASSIGNED : value; }
@@ -3576,17 +3694,27 @@ export default function App() {
     const next = reviewRecords[reviewIndex + direction];
     if (next) setSelected(next);
   }
-  /** After the last picture, or when closing: ask what to do with unsaved changes. */
+  /** When closing: save everything that was typed (nothing is ever thrown away) and close. */
   function finishReview() {
     if (rotatingPhoto) return;
-    if (Object.keys(stashDraft()).length) setFinishOpen(true); else closePhotoReviewNow();
+    if (Object.keys(stashDraft()).length) saveAllDrafts(); else closePhotoReviewNow();
+  }
+  /** Like buildReviewPatch, but never refuses: an unfinished IMEI is kept in the record's note and the record is flagged for review. */
+  function lenientReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem>; unfinished: boolean } {
+    const bad1 = !!fields.imei && !/^\d{15}$/.test(fields.imei);
+    const bad2 = !!fields.imei2 && !/^\d{15}$/.test(fields.imei2);
+    const built = buildReviewPatch(record, { ...fields, imei: bad1 ? record.imei : fields.imei, imei2: bad2 ? recordImeiPair(record).imei2 : fields.imei2 });
+    if ('error' in built) return { patch: {}, unfinished: false }; // cannot happen: the bad values were replaced
+    if (!bad1 && !bad2) return { patch: built.patch, unfinished: false };
+    const typed = [bad1 ? `IMEI 1 "${fields.imei}"` : '', bad2 ? `IMEI 2 "${fields.imei2}"` : ''].filter(Boolean).join(' and ');
+    return { patch: { ...built.patch, imeiNeedsReview: true, imeiNote: `Unfinished ${typed} was typed (not 15 digits). Check it against the label.` }, unfinished: true };
   }
   function buildReviewPatch(record: RecordItem, fields: ReviewFields): { patch: Partial<RecordItem> } | { error: string } {
     if (fields.imei && !/^\d{15}$/.test(fields.imei)) return { error: 'Enter all 15 IMEI digits or leave it empty.' };
     if (fields.imei2 && !/^\d{15}$/.test(fields.imei2)) return { error: 'Enter all 15 IMEI 2 digits or leave it empty.' };
     const imeiChanged = fields.imei !== record.imei;
     const duplicate = imeiTakenElsewhere(fields.imei, record.id, records);
-    return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
+    return { patch: { imei2: fields.imei2, serial: fields.serial.trim(), serialNeedsReview: false, imeiFallbackChecked: true, modelNeedsReview: false, modelNote: '', imeiNeedsReview: false, brandNeedsReview: false, imeiNote: '', model: fields.model.trim() || 'Unknown unit — review', imei: fields.imei, duplicate, status: fields.imei ? (luhnValid(fields.imei) ? 'Valid' : 'Invalid') : 'Review', ...(imeiChanged && fields.imei ? { cropNeedsReview: false } : {}) } };
   }
   function saveReviewFields(advance = false) {
     if (!selected || rotatingPhoto) return;
@@ -3604,27 +3732,33 @@ export default function App() {
       setSelected({ ...selected, ...patch });
       setManualModel(exportModel(patch.model || ''));
     }
-    if (patch.duplicate) setWarning('This IMEI is already in your records. It was saved and flagged as a duplicate; both pictures are kept. Use Remove duplicates to keep one.');
-    else if (patch.status === 'Invalid') setWarning('Saved, but the IMEI checksum is not valid. Check the digits against the label.');
+    if (patch.duplicate) setToast('Saved. This IMEI is already in your records, so it is flagged as a duplicate. Both pictures are kept.');
+    else if (patch.status === 'Invalid') setToast('Saved, but the IMEI checksum is not valid. Check the digits.');
     else setToast('Saved.');
+  }
+  /** The one Save button: saves this record, then moves to the next one, or closes after the last. It stays open when the saved IMEI needs a second look. */
+  function saveAndContinue() {
+    if (!selected || rotatingPhoto) return;
+    const built = buildReviewPatch(selected, currentFields());
+    if ('error' in built) { setWarning(built.error); return; }
+    const isLast = reviewIndex < 0 || reviewIndex >= reviewRecords.length - 1;
+    saveReviewFields(!isLast);
+    if (isLast && !built.patch.duplicate && built.patch.status !== 'Invalid') closePhotoReviewNow();
   }
   function saveAllDrafts() {
     const patches: Record<string, Partial<RecordItem>> = {};
+    let unfinished = 0;
     for (const [id, fields] of Object.entries(draftsRef.current)) {
       const record = records.find(row => row.id === id);
       if (!record) continue;
-      const built = buildReviewPatch(record, fields);
-      if ('error' in built) { setFinishOpen(false); setSelected(record); setWarning(`${record.name}: ${built.error}`); return; }
+      const built = lenientReviewPatch(record, fields);
+      if (built.unfinished) unfinished++;
       patches[id] = built.patch;
     }
     setRecords(old => markDuplicateRecords(old.map(row => patches[row.id] ? { ...row, ...patches[row.id] } : row)));
-    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
+    setDrafts({}); closePhotoReviewNow();
     const count = Object.keys(patches).length;
-    setToast(`Saved ${count} picture${count === 1 ? '' : 's'}.`);
-  }
-  function discardAllDrafts() {
-    setDrafts({}); setFinishOpen(false); closePhotoReviewNow();
-    setToast('Changes discarded.');
+    setToast(`Saved ${count} picture${count === 1 ? '' : 's'}.${unfinished ? ` ${unfinished} ha${unfinished === 1 ? 's' : 've'} an unfinished IMEI and need${unfinished === 1 ? 's' : ''} review.` : ''}`);
   }
   const pendingChanges = Object.keys(reviewDrafts).filter(id => id !== selected?.id).length + (selected && fieldsDiffer(selected, currentFields()) ? 1 : 0);
 
@@ -3671,7 +3805,7 @@ export default function App() {
   function confirmSingleDevice() {
     if (!selected) return;
     const imei = selected.imei || selected.deviceImeis?.[0] || '';
-    updateRow(selected.id, { cropNeedsReview: false, deviceCount: undefined, deviceImeis: undefined, imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' });
+    updateRow(selected.id, { cropNeedsReview: false, imeiFallbackChecked: true, imeiNeedsReview: false, brandNeedsReview: false, deviceCount: undefined, deviceImeis: undefined, imei, status: imei ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' });
     setManualImei(imei);
     setToast(imei ? 'Kept as one device.' : 'Kept as one device. Enter the IMEI or serial.');
   }
@@ -3701,16 +3835,29 @@ export default function App() {
           if (crops.length >= 2) groups.push({ id: record.id, name: record.name, source, crops });
         } catch (error) { console.error(`Could not split ${record.name}`, error); }
       }
-      if (groups.length) applyCropGroups(groups, false);
-      else if (announce) setToast('Could not separate the products automatically. Open the photo and crop each one.');
-      return groups.length;
+      // Only confidently read results are accepted automatically (every crop has a checksum-valid IMEI and nothing flagged);
+      // anything else stays as it is and is offered for review. The originals of accepted splits are archived and can be restored.
+      const confident = groups.filter(group => group.crops.every(crop => !crop.review && luhnValid(crop.imei) && !!exportModel(crop.model)));
+      setSplitSuggestions(old => [...new Set([...old, ...groups.filter(group => !confident.includes(group)).map(group => group.id), ...targets.filter(t => !groups.some(g => g.id === t.id)).map(t => t.id)])]);
+      if (confident.length) applyCropGroups(confident, false, false, 'auto-split');
+      else if (announce) setToast('Could not separate the products with confidence. They are listed for review; nothing was changed.');
+      return confident.length;
     } finally { autoSplitBusy.current = false; if (w) await w.terminate(); }
   }
   const autoSplitTried = useRef<Set<string>>(new Set());
+  const [splitSuggestions, setSplitSuggestions] = useState<string[]>([]);
+  // Records created before this version first ran are protected from automatic replacement.
+  const [protectBefore] = useState(() => {
+    try { const saved = localStorage.getItem('imei-lens-protect-before'); if (saved) return saved; const now = new Date().toISOString(); localStorage.setItem('imei-lens-protect-before', now); return now; } catch { return '9999'; }
+  });
   // Background (phone) scans: photos it flagged as several products in one record get the web pipeline once, automatically.
   useEffect(() => {
     if (!androidBridge || androidJob?.status !== 'completed' || busy) return;
-    const targets = records.filter(r => r.cropNeedsReview && (r.deviceCount || 0) > 1 && !autoSplitTried.current.has(r.id));
+    const flagged = records.filter(r => r.cropNeedsReview && (r.deviceCount || 0) > 1 && !autoSplitTried.current.has(r.id));
+    // Records that existed before this version are never changed automatically; they are only listed for review.
+    const targets = flagged.filter(r => r.createdAt >= protectBefore);
+    const kept = flagged.filter(r => r.createdAt < protectBefore).map(r => r.id);
+    if (kept.length) { for (const id of kept) autoSplitTried.current.add(id); setSplitSuggestions(old => [...new Set([...old, ...kept])]); }
     if (!targets.length) return;
     for (const r of targets) autoSplitTried.current.add(r.id);
     void autoSplitRecords(targets.slice(0, 20));
@@ -3719,16 +3866,21 @@ export default function App() {
    * Replace the cropped photos' records with one record per crop. The original photo is released
    * (its stored copy goes when nothing refers to it any more) and the crops keep the person of the original.
    */
-  function applyCropGroups(groups: CropGroup[], fromReview: boolean, quiet = false) {
+  function applyCropGroups(groups: CropGroup[], fromReview: boolean, quiet = false, reason = 'crop-studio') {
     let top = Math.max(2, ...records.map(r => r.number));
     const made = new Map<string, RecordItem[]>();
+    const archived: ArchiveEntry<RecordItem>[] = [];
     const next = records.flatMap(r => {
       const done = groups.find(group => group.id === r.id);
       if (!done) return [r];
       const rows = splitRecords(r, done.crops, top + 1);
       top += rows.length - 1; made.set(r.id, rows);
+      // The original is archived (never deleted) and every crop keeps the link to it; Undo / Restore brings it back.
+      const entry = { ...makeEntry(r, rows.map(row => row.id), reason), removedCrops: archive.find(item => item.id === r.id)?.removedCrops };
+      queueArchive(entry); archived.push(entry);
       return rows;
     });
+    setArchive(old => [...old.filter(item => !archived.some(entry => entry.id === item.id)), ...archived]);
     const marked = markDuplicateRecords(next);
     setRecords(marked);
     setSelectedIds(old => old.filter(id => !made.has(id)));
@@ -3739,10 +3891,26 @@ export default function App() {
       const firstId = [...made.values()][0]?.[0]?.id;
       setSelected(marked.find(row => row.id === firstId) || null);
     }
+    if (!quiet) setSplitUndo({ ids: [...made.keys()], text: `${count} picture${count === 1 ? '' : 's'} saved; the original${made.size === 1 ? '' : 's'} archived.` });
     if (quiet) refreshDraft(marked); else { setCropEditorOpen(false); setBulkCropOpen(false); setBulkDraft(null); refreshDraft(marked); }
-    if (!quiet) setToast(`${count} picture${count === 1 ? '' : 's'} saved from ${made.size} photo${made.size === 1 ? '' : 's'}; the original${made.size === 1 ? '' : 's'} replaced.${unsure ? ` ${unsure} need${unsure === 1 ? 's' : ''} a look.` : ''}`);
+    if (!quiet) setToast(`${count} picture${count === 1 ? '' : 's'} saved from ${made.size} photo${made.size === 1 ? '' : 's'}; the original${made.size === 1 ? ' is' : 's are'} archived (Undo is available).${unsure ? ` ${unsure} need${unsure === 1 ? 's' : ''} a look.` : ''}`);
     // Which records each original became (the queue logs them as Completed / Needs Review).
     return new Map([...made].map(([id, rows]) => [id, rows.map(row => row.id)] as [string, string[]]));
+  }
+  /** Undo / Restore: the archived original returns to its place; its crops leave the list but stay in the archive entry. */
+  function restoreOriginals(ids: string[]) {
+    const entries = archive.filter(item => ids.includes(item.id) && !item.restoredAt);
+    if (!entries.length) return;
+    let next = records; const updated: ArchiveEntry<RecordItem>[] = [];
+    for (const entry of entries) {
+      const plan = planRestore(entry, next);
+      next = plan.records; updated.push(plan.entry); queueArchive(plan.entry);
+    }
+    setRecords(markDuplicateRecords(next));
+    setArchive(old => old.map(item => updated.find(entry => entry.id === item.id) || item));
+    setSelectedIds(old => old.filter(id => next.some(row => row.id === id)));
+    setSplitUndo(null);
+    setToast(`Restored ${entries.length} original photo${entries.length === 1 ? '' : 's'}. The crops were taken out of the list but are kept in the archive.`);
   }
   function finishCropFlow() { setCropEditorOpen(false); setBulkCropOpen(false); setBulkDraft(null); bulkRowsRef.current = null; refreshDraft(); }
 
@@ -3796,7 +3964,11 @@ export default function App() {
     setProcessingId(item.recordId);
     void (async () => {
       let error = '', replaced = false;
+      // A photo that never finishes (a reading step that stops answering) is set aside as failed after a long limit instead of
+      // holding the queue and the phone's wake lock forever. It stays in the queue and can be retried; a late result is ignored.
+      const guard = createStallGuard(QUEUE_ITEM_LIMIT_MS, `This photo took longer than ${Math.round(QUEUE_ITEM_LIMIT_MS / 60000)} minutes, so it was set aside. Use Retry in the queue to try it again.`);
       try {
+        await guard.race((async () => {
         const record = records.find(row => row.id === item.recordId);
         if (!record) throw new Error('The photo is no longer in your records.');
         const settings = settingsRef.current, fast = settings.scanMode === 'fast', expected = settings.expectedProducts;
@@ -3807,6 +3979,7 @@ export default function App() {
         if (!boxes.length) {
           // One product and nothing to cut: that is a finished photo when it already has numbers; otherwise it needs a look.
           if (record.imei || recordSerial(record)) {
+            guard.check();
             changeLog(old => addLog(old, { originalId: record.id, name: record.name, recordIds: [record.id], at: new Date().toISOString(), note: 'One product: kept as it is.' }));
             return;
           }
@@ -3814,11 +3987,20 @@ export default function App() {
         }
         const entry: BulkItem = { id: record.id, name: record.name, source, deviceCount: record.deviceCount, model: record.model, single: boxes.length === 1 };
         const crops = await readBoxCrops(w, source, boxes, (raw, count) => modelForCrop(entry, raw, count), undefined, knownTacs, { fast, expected });
-        const made = applyRef.current([{ id: record.id, name: record.name, source, crops }], false, true);
+        guard.check(); // too late: the photo was already set aside, so its original must not be replaced now
+        const made = applyRef.current([{ id: record.id, name: record.name, source, crops }], false, true, 'queue');
         replaced = true;
         changeLog(old => addLog(old, { originalId: record.id, name: record.name, recordIds: made?.get(record.id) || [], at: new Date().toISOString(), note: expected > 1 && boxes.length < expected ? `Found ${boxes.length} of ${expected} products.` : undefined }));
+        })());
       } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); console.warn('Queued photo could not be cut', caught); }
       finally {
+        guard.cancel();
+        if (guard.stalled()) {
+          // Drop the reader that stopped answering; the next photo starts a fresh one.
+          const stuck = queueWorker.current; queueWorker.current = null;
+          void stuck?.then(w => w.terminate()).catch(() => undefined);
+          setToast(error);
+        }
         queueBusy.current = false;
         setProcessingId('');
         setQueueStats(old => ({ ...old, done: old.done + (error ? 0 : 1), failed: old.failed + (error ? 1 : 0) }));
@@ -3852,11 +4034,77 @@ export default function App() {
   const { review: queueReviewLog, completed: queueCompletedLog } = classifyLog(queueLog, flaggedIds);
   const queueFailedItems = cropQueue.filter(item => item.status === 'failed');
   const queueActive = queueCounts.pending > 0 || queueCounts.later > 0;
+  recordsLive.current = records;
+
+  // ---- Fast review list: every record that still needs a look, edited in place. ----
+  const needsLook = (r: RecordItem) => !r.checked && reviewStatus(r).includes('Needs review');
+  const looksRight = (r: RecordItem) => luhnValid(r.imei) && !r.duplicate && !r.imeiNeedsReview && !imeiIsFallback(r) && !r.cropNeedsReview && !activeIssue(r);
+  /** Archived records (not restored) by IMEI 1 and IMEI 2. Split originals and their crops are left out: they share an IMEI by design. */
+  const archivedByImei = useMemo(() => {
+    const map = new Map<string, ArchiveEntry<RecordItem>[]>();
+    for (const entry of archive) {
+      if (entry.restoredAt) continue;
+      const pair = recordImeiPair(entry.record);
+      for (const value of new Set([entry.record.imei, pair.imei1, pair.imei2])) if (/^\d{15}$/.test(value)) map.set(value, [...(map.get(value) || []), entry]);
+    }
+    return map;
+  }, [archive]);
+  const inArchive = (r: RecordItem) => {
+    const pair = recordImeiPair(r);
+    return [r.imei, pair.imei1, pair.imei2].some(value => (archivedByImei.get(value) || []).some(entry => entry.id !== r.sourceRecordId && !entry.cropIds.includes(r.id)));
+  };
+  const bulkRecords = bulkIds.map(id => records.find(r => r.id === id)).filter((r): r is RecordItem => !!r && needsLook(r));
+  const bulkRows: BulkRow[] = bulkRecords.map(r => ({ id: r.id, name: r.name, photo: recordPhoto(r), imei: r.imei, serial: recordSerial(r), model: exportModel(r.model), note: [reviewNote(r), inArchive(r) ? 'Also in archive' : ''].filter(Boolean).join(' · '), status: reviewStatus(r), looksRight: looksRight(r) }));
+  const bulkGood = bulkRecords.filter(looksRight);
+  const scanningNow = busy || androidJob?.status === 'queued' || androidJob?.status === 'processing';
+  function openBulk(ids: string[]) { if (!ids.length) return; setBulkIds(ids); setBulkAccepted([]); setBulkOpen(true); }
+  function bulkFields(record: RecordItem, f: { imei: string; serial: string }): ReviewFields {
+    return { model: exportModel(record.model), imei: f.imei, imei2: recordImeiPair(record).imei2, serial: f.serial };
+  }
+  function bulkSave(id: string, f: { imei: string; serial: string }) {
+    const record = recordsLive.current.find(r => r.id === id);
+    if (record) updateRow(id, lenientReviewPatch(record, bulkFields(record, f)).patch);
+  }
+  function bulkDone(id: string, f: { imei: string; serial: string }): string | null {
+    const record = recordsLive.current.find(r => r.id === id);
+    if (!record) return null;
+    const built = buildReviewPatch(record, bulkFields(record, f));
+    if ('error' in built) return built.error;
+    updateRow(id, { ...built.patch, checked: true });
+    if (built.patch.duplicate) setToast('This IMEI is already in your records. It was saved and flagged as a duplicate.');
+    return null;
+  }
+  function bulkAccept() {
+    const ids = bulkGood.map(r => r.id); if (!ids.length) return;
+    const set = new Set(ids);
+    setRecords(old => old.map(r => set.has(r.id) ? { ...r, checked: true } : r));
+    setBulkAccepted(ids);
+  }
+  function bulkUndoAccept() {
+    const set = new Set(bulkAccepted);
+    setRecords(old => old.map(r => set.has(r.id) ? { ...r, checked: false } : r));
+    setBulkAccepted([]);
+  }
+  useBackLayer(bulkOpen, () => setBulkOpen(false), 'bulk-review');
+  // After a scan finishes: open the list once for the NEW records that need a look. Records from before this build's first launch are never offered automatically.
+  useEffect(() => {
+    const seen = scanSeen.current;
+    if (scanningNow) { if (!seen.was) { seen.was = true; seen.before = new Set(recordsLive.current.map(r => r.id)); } return; }
+    if (!seen.was || queueActive) return;
+    const timer = window.setTimeout(() => {
+      if (!scanSeen.current.was) return;
+      scanSeen.current.was = false;
+      const fresh = recordsLive.current.filter(r => !scanSeen.current.before.has(r.id) && r.createdAt >= protectBefore && needsLook(r)).map(r => r.id);
+      if (fresh.length) openBulk(fresh);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [scanningNow, queueActive]); // eslint-disable-line react-hooks/exhaustive-deps
+  const needLookCount = records.filter(needsLook).length;
   const queueNeedsReview = queueReviewLog.length + queueFailedItems.length;
   const queueFinished = !queueActive && queueStats.total > 0 && queueStats.done + queueStats.failed >= queueStats.total;
   function reviewRecordIds(ids: string[]) { const rows = ids.map(id => records.find(row => row.id === id)).filter((row): row is RecordItem => !!row); if (!rows.length) return; setReviewIds(rows.map(row => row.id)); setSelected(rows[0]); setQueuePanelOpen(false); }
   function approveQueueEntry(entry: QueueLogEntry) {
-    setRecords(old => old.map(row => entry.recordIds.includes(row.id) ? { ...row, cropNeedsReview: false } : row));
+    setRecords(old => old.map(row => entry.recordIds.includes(row.id) ? { ...row, cropNeedsReview: false, imeiFallbackChecked: true } : row));
     changeLog(old => old.map(item => item.originalId === entry.originalId ? { ...item, approved: true } : item));
   }
   function exportCompleted() {
@@ -4210,15 +4458,6 @@ export default function App() {
       </header>
 
       {settingsOpen && <SettingsPanel onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
-      {finishOpen && <div className="modal-backdrop finish-backdrop"><section className="modal finish-modal" role="alertdialog" aria-modal="true" aria-label="Save or discard changes">
-        <h2>Save your changes?</h2>
-        <p>You changed {Object.keys(reviewDrafts).length} picture{Object.keys(reviewDrafts).length === 1 ? '' : 's'} and did not save {Object.keys(reviewDrafts).length === 1 ? 'it' : 'them'} yet. Save everything, discard it, or go back and keep editing.</p>
-        <div className="finish-actions">
-          <button type="button" className="primary" onClick={saveAllDrafts}>Save all ({Object.keys(reviewDrafts).length})</button>
-          <button type="button" className="subtle-btn danger" onClick={discardAllDrafts}>Discard changes</button>
-          <button type="button" className="subtle-btn" autoFocus onClick={() => setFinishOpen(false)}>Keep editing</button>
-        </div>
-      </section></div>}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
         <h2>Check this</h2>
         <p>{warning}</p>
@@ -4234,9 +4473,10 @@ export default function App() {
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}`}>
+        {!bulkOpen && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button></div>}
         {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
-            ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : queueCounts.pending ? 'Cropping in the background.' : 'Photos set aside for later.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done · {queueCounts.pending} waiting{queueCounts.later ? ` · ${queueCounts.later} for later` : ''}{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}. Each original is replaced after its crops are read.</span>
+            ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : queueCounts.pending ? 'Cropping in the background.' : 'Photos set aside for later.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done · {queueCounts.pending} waiting{queueCounts.later ? ` · ${queueCounts.later} for later` : ''}{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}. Each original is archived (and can be restored) after its crops are read.</span>
             : queueFinished
               ? <span><strong>Background cropping finished.</strong> {queueStats.done} photo{queueStats.done === 1 ? '' : 's'} done{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}.</span>
               : <span><strong>{queueNeedsReview} photo{queueNeedsReview === 1 ? '' : 's'} need review</strong> from the crop queue.</span>}
@@ -4254,6 +4494,8 @@ export default function App() {
           <div><button className="primary" onClick={() => setBulkDraft(pendingDraft)}>Resume</button><button className="subtle-btn" onClick={() => { clearDraft(localStorage); setPendingDraft(null); setToast('Saved crop boxes discarded.'); }}>Discard</button></div>
         </div>; })()}
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
+        {splitSuggestions.some(id => records.some(r => r.id === id)) && <div className="archive-banner" role="status"><span>{splitSuggestions.filter(id => records.some(r => r.id === id)).length} photo(s) may hold several products. Nothing was changed automatically.</span> <button type="button" className="subtle-btn" onClick={() => { setSelectedIds(splitSuggestions.filter(id => records.some(r => r.id === id))); setBulkCropOpen(true); }}>Review and split</button></div>}
+        {archive.some(item => !item.restoredAt) && <div className="archive-banner" role="status"><span>{archive.filter(item => !item.restoredAt).length} record{archive.filter(item => !item.restoredAt).length === 1 ? ' is' : 's are'} archived (split originals and duplicates; nothing deleted).</span> <button type="button" className="subtle-btn" onClick={() => setArchiveOpen(true)}>View / restore</button></div>}
 {!simpleView && mainView === 'scan' && (<>
         <section className="hero">
           <div>
@@ -4324,6 +4566,7 @@ export default function App() {
               {androidJob && androidJob.status !== 'idle' && <div className="android-progress" role="status">
                 {androidJob.completed} of {androidJob.count} photos scanned · {androidJob.status}{androidJob.failed ? ` · ${androidJob.failed} failed` : ''}
               </div>}
+              {androidJob && <ScanReport bridge={androidBridge} summary={androidJob.report} status={androidJob.status} personId={activePersonId} onMessage={setToast} />}
               {androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing') && <button type="button" className="subtle-btn laptop-stop" onClick={() => androidBridge.stop()}>Stop scan</button>}
               {androidJob?.error && <p>{androidJob.error}</p>}
             </div>}
@@ -4331,6 +4574,7 @@ export default function App() {
 </>)}
 {!simpleView && (<>
             <button className="subtle-btn" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}>Scan with camera</button>
+            {cameraOptions}
 
             {!androidBridge && <>
             <div
@@ -4444,7 +4688,9 @@ export default function App() {
             {simpleView && <div className="simple-scan-buttons">
               <button type="button" className="primary big" disabled={busy || !inventoryLoaded} onClick={openNativeCamera}><Camera size={22} /> Take photo</button>
               <button type="button" className="primary big alt" disabled={busy || !inventoryLoaded || androidJob?.status === 'queued' || androidJob?.status === 'processing'} onClick={() => androidBridge ? androidBridge.choosePhotos(activePersonId) : simpleChooseRef.current?.click()}><UploadCloud size={22} /> Choose photos</button>
+              {cameraOptions}
               {androidBridge && androidJob && androidJob.status !== 'idle' && <p className="android-progress" role="status">{androidJob.completed} of {androidJob.count} photos scanned · {androidJob.status}{androidJob.failed ? ` · ${androidJob.failed} failed` : ''}</p>}
+              {androidBridge && androidJob && <ScanReport bridge={androidBridge} summary={androidJob.report} status={androidJob.status} personId={activePersonId} onMessage={setToast} />}
               <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const chosen = Array.from(event.target.files || []), picked = chosen.filter(isImageFile); event.target.value = ''; if (chosen.length && picked.length < chosen.length) setToast(picked.length ? `${chosen.length - picked.length} file(s) were not photos and were skipped.` : 'Those files are not photos. Choose JPG, PNG, WEBP or HEIC pictures.'); if (picked.length) void scan(picked); }} />
             </div>}
             <button type="button" className="subtle-btn reset-entries" disabled={busy || laptopUploading} onClick={resetForNewEntries} title="Clears the upload queue, search, filters and selection so you can start new entries. Saved records are not deleted.">↺ Reset for new entries</button>
@@ -4689,7 +4935,7 @@ export default function App() {
               <button className={filter === 'Review' ? 'active' : ''} onClick={() => setFilter('Review')}>Needs review</button>
               <button className={filter === 'Valid' ? 'active' : ''} onClick={() => setFilter('Valid')}>Valid IMEI <b>{validCount}</b></button>
               {records.some(r => r.duplicate) && <button className={filter === 'Duplicates' ? 'active' : ''} onClick={() => setFilter('Duplicates')}>Duplicates <b>{records.filter(r => r.duplicate).length}</b></button>}
-              {records.some(r => r.duplicate) && <button className="danger" onClick={() => setConfirmDupes(duplicateRemovalIds(records))}>Remove duplicates</button>}
+              {records.some(r => r.duplicate) && <button className="subtle-btn" onClick={() => removeDuplicates(duplicateRemovalIds(records))}>Archive duplicates</button>}
             </div>
           </div>}
 
@@ -4794,7 +5040,7 @@ export default function App() {
                     <div className="value-row"><span>IMEI</span><b>{pair.imei1 || '—'}</b><button className="subtle-btn" disabled={!pair.imei1} onClick={() => void copyText(pair.imei1).then(ok => setToast(ok ? 'IMEI copied.' : 'Copy failed.'))}>Copy</button></div>
                     {pair.imei2 && <div className="value-row"><span>IMEI 2</span><b>{pair.imei2}</b><button className="subtle-btn" onClick={() => void copyText(pair.imei2).then(ok => setToast(ok ? 'IMEI 2 copied.' : 'Copy failed.'))}>Copy</button></div>}
                     <div className="value-row"><span>Serial</span><b>{serial || '—'}</b><button className="subtle-btn" disabled={!serial} onClick={() => void copyText(serial).then(ok => setToast(ok ? 'Serial copied.' : 'Copy failed.'))}>Copy</button></div>
-                    {reviewStatus(record) !== 'Valid' && reviewStatus(record) !== 'Serial only' && <button className="check-flag" onClick={() => openReview(record)}>{reviewStatus(record)} — tap to check</button>}
+                    {reviewStatus(record) !== 'Valid' && reviewStatus(record) !== 'Serial only' && <button className="check-flag" onClick={() => openReview(record)}>{reviewStatus(record)}{imeiIsFallback(record) ? ' (IMEI 2 shown, IMEI 1 not read)' : ''} — tap to check</button>}
                   </div>
                   <div className="simple-record-actions">
                     <select aria-label={`Move ${info.name} to`} value={record.personId || 'unassigned'} onChange={event => assignPerson(record.id, event.target.value)}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
@@ -4802,9 +5048,9 @@ export default function App() {
                     <button className="subtle-btn danger" aria-label={`Delete ${info.name}`} onClick={() => deleteRecord(record)}><Trash2 size={16} /></button>
                   </div>
                   <details className="row-more"><summary>More for this phone</summary><div className="row-more-grid">
-                    <label>IMEI <input aria-label={`IMEI for ${info.name}`} inputMode="numeric" value={record.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); updateRow(record.id, { imei, status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
+                    <label>IMEI <input aria-label={`IMEI for ${info.name}`} inputMode="numeric" value={record.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); updateRow(record.id, { imei, ...(imei.length === 15 ? { imeiNeedsReview: false, brandNeedsReview: false } : {}), status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
                     <label>Serial <input aria-label={`Serial for ${info.name}`} value={serial} onChange={event => updateRow(record.id, { serial: event.target.value, serialNeedsReview: false })} /></label>
-                    <label>Model code <input aria-label={`Model code for ${info.name}`} value={exportModel(record.model)} onChange={event => updateRow(record.id, { model: event.target.value })} /></label>
+                    <label>Model code <input aria-label={`Model code for ${info.name}`} value={exportModel(record.model)} onChange={event => { const model = event.target.value; updateRow(record.id, { model, modelNeedsReview: !typedModelOk(record, model.trim()), modelNote: typedModelNote(record, model.trim()) }); }} /></label>{record.modelNeedsReview && <small className="field-hint">{record.modelNote || typedModelNote(record, record.model)}</small>}
                     <button className="subtle-btn" disabled={!exportModel(record.model)} onClick={() => void copyText(exportModel(record.model)).then(ok => setToast(ok ? 'Model code copied.' : 'Copy failed.'))}>Copy model code</button>
                     <button className="subtle-btn" onClick={() => void copyText(`Model: ${exportModel(record.model)}\nIMEI: ${record.imei}\nSerial number: ${serial}`).then(ok => setToast(ok ? 'Record copied.' : 'Copy failed.'))}>Copy whole record</button>
                     <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), orderedPhotoName(record))}>Download photo</button>
@@ -4863,7 +5109,6 @@ export default function App() {
                           <img src={recordPhoto(r)} />
                           <span>{r.name}</span>
                         </button>
-                        <button className="subtle-btn edit-photo-action" title="Edit or crop this photo" onClick={() => openCropReview(r)}>Edit photo</button>
                         </div>
                       </td>
 
@@ -4889,9 +5134,11 @@ export default function App() {
                           aria-label={`Model for record ${r.number}`}
                           value={r.model}
                           onFocus={e => { e.currentTarget.dataset.before = r.model; }}
-                          onChange={e =>
-                            updateRow(r.id, { model: e.target.value })
-                          }
+                          onChange={e => {
+                            // Typed by hand: a Samsung code shape (SM-A165F) is accepted; anything else stays marked for review with a hint.
+                            const model = e.target.value, ok = typedModelOk(r, model.trim());
+                            updateRow(r.id, { model, modelNeedsReview: !ok, modelNote: typedModelNote(r, model.trim()) });
+                          }}
                           onBlur={e => {
                             // Learn the correction once the edit is finished (never from half-typed codes).
                             const before = e.currentTarget.dataset.before, after = e.currentTarget.value.trim();
@@ -4899,6 +5146,7 @@ export default function App() {
                             delete e.currentTarget.dataset.before;
                           }}
                         />
+                        {r.modelNeedsReview && <small className="model-cell-name unknown" role="note">{r.modelNote || typedModelNote(r, r.model)}</small>}
                         {(() => { const info = infoOf(r); return info.series !== 'Unknown phones' && !isGenericName(info.name) ? <small className="model-cell-name"><strong>{info.name}</strong> · {info.series}</small> : <small className="model-cell-name unknown">{modelCode4(r.model) ? `SM-${modelCode4(r.model)} is not recognised. Add its name in Settings.` : 'Model not recognised. Type the code, or add it in Settings.'}</small>; })()}
                       </td>
 
@@ -4916,7 +5164,7 @@ export default function App() {
 
                             updateRow(r.id, {
                               imei,
-                              ...(imei.length === 15 ? { cropNeedsReview: false } : {}),
+                              ...(imei.length === 15 ? { cropNeedsReview: false, imeiNeedsReview: false, brandNeedsReview: false } : {}),
                               status: imei.length === 15
                                 ? (luhnValid(imei) ? 'Valid' : 'Invalid')
                                 : 'Review'
@@ -4935,12 +5183,13 @@ export default function App() {
 
                       <td data-label="Serial number"><input aria-label={`Serial number for record ${r.number}`} value={recordSerial(r)} onChange={e => updateRow(r.id, {serial:e.target.value,serialNeedsReview:false})} /></td>
                       <td data-label="Validation">
-                        <span className={`status ${(r.cropNeedsReview ? 'Review' : r.status).toLowerCase()}`}>
-                          {r.status === 'Valid' && !r.cropNeedsReview
+                        <span className={`status ${(r.cropNeedsReview || imeiIsFallback(r) ? 'Review' : r.status).toLowerCase()}`}>
+                          {r.status === 'Valid' && !r.cropNeedsReview && !imeiIsFallback(r)
                             ? <CheckCircle2 size={13} />
                             : <AlertTriangle size={13} />}
                           {' '}{reviewStatus(r)}
                         </span>
+                        {reviewNote(r) && <small className="fallback-note">{reviewNote(r)}</small>}
                       </td>
 
                       <td data-label="Duplicate">
@@ -5000,6 +5249,7 @@ export default function App() {
         </footer>
       </main>
 
+      {bulkOpen && <BulkReview rows={bulkRows} goodCount={bulkGood.length} acceptedCount={bulkAccepted.length} onSave={bulkSave} onDone={bulkDone} onFull={id => { const r = records.find(item => item.id === id); if (r) { setReviewIds(bulkRows.map(row => row.id)); setSelected(r); } }} onAccept={bulkAccept} onUndoAccept={bulkUndoAccept} onClose={() => setBulkOpen(false)} />}
       {selected && (
         <div
           className="modal-backdrop"
@@ -5019,7 +5269,6 @@ export default function App() {
               </div>
 
               <div className="review-header-actions">
-                <button className="iconbtn danger" aria-label="Delete this record" title="Delete this record" disabled={rotatingPhoto} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={18} /></button>
                 <button className="iconbtn" aria-label="Close photo review" onClick={closePhotoReview}><X /></button>
               </div>
             </div>
@@ -5044,6 +5293,8 @@ export default function App() {
               </div>
             </div>
 
+            {inArchive(selected) && <div className="review-question" role="note"><div><strong>Also in your archive</strong><span>An archived record has this IMEI too. Nothing was changed.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={() => setArchiveOpen(true)}>View archive</button></div></div>}
+            {(() => { const issue = issueTextFor(selected); return issue && <div className="review-question retake-prompt" role="alert" aria-label="Retake this photo"><div><strong>{issue.title}</strong><span>{issue.text}</span><small>Nothing is filled in for you, and your original photo is kept.</small></div><div className="review-question-buttons"><button className="primary" onClick={() => { setSelected(null); openNativeCamera(); }}>Retake photo</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop manually</button><button className="subtle-btn" onClick={() => { updateRow(selected.id, { labelIssueDismissed: true }); setSelected(current => current && { ...current, labelIssueDismissed: true }); }}>Keep as is</button></div></div>; })()}
             {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={autoSplitBusy.current} onClick={() => void autoSplitRecords([selected]).then(n => { if (n) setSelected(null); })}>Split automatically</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop each myself</button></div></div>}
             {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}
 
@@ -5073,18 +5324,24 @@ export default function App() {
 
             <div className="review-tools" role="group" aria-label="Photo actions">
               <button className="subtle-btn" disabled={!selected.imei} onClick={() => void copyText(selected.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}><Copy size={16} /> Copy IMEI</button>
-              <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Photo</button>
-              <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶ Left</button>
-              <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷ Right</button>
-              <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+              <details className="review-fix">
+                <summary>Fix photo</summary>
+                <div className="review-fix-buttons">
+                  <button className="subtle-btn" aria-label="Rotate left" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('left')}>↶ Left</button>
+                  <button className="subtle-btn" aria-label="Rotate right" disabled={rotatingPhoto} onClick={() => void rotateSelectedPhoto('right')}>↷ Right</button>
+                  <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => void straightenSelectedPhoto()}>Straighten</button>
+                </div>
+              </details>
             </div>
 
-            {<details className="review-details"><summary>More details: status, serial, catalog, share</summary>
+            {<details className="review-details"><summary>More</summary>
             <div className="modal-meta">
+              <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(selected)), orderedPhotoName(selected))}><Download size={16} /> Download photo</button>
+              <button className="subtle-btn danger" disabled={rotatingPhoto} onClick={() => isPersonView(personFilter) ? deleteRecord(selected, true) : setDeleteReviewConfirm(true)}><Trash2 size={16} /> Delete this record</button>
               <span>Picture ID: {selected.pictureId}</span>
               <button className="subtle-btn" onClick={() => shareRecord(selected)}>Share photo + number</button>
               <span>Catalog: {catalogModel(selected.raw) || 'No confirmed catalog match — verify the model manually'}</span>
-              <span>Serial: {recordSerial(selected) || 'Not detected'}</span><span>Status: {reviewStatus(selected)}</span>
+              <span>Serial: {recordSerial(selected) || 'Not detected'}</span><span>Status: {reviewStatus(selected)}</span>{reviewNote(selected) && <span className="fallback-note">{reviewNote(selected)}</span>}
               <span>IMEI: {selected.imei || 'Not detected'}</span>
               {selected.sourcePictureId && records.filter(r => r.sourcePictureId === selected.sourcePictureId).length > 1 && (
                 <span>Same source photo: {records.filter(r => r.sourcePictureId === selected.sourcePictureId).map(r => `#${r.number} ${r.imei}`).join(' · ')}</span>
@@ -5092,34 +5349,22 @@ export default function App() {
               <span>Validation: {selected.status}</span>
               <span>Duplicate: {selected.duplicate ? 'Yes' : 'No'}</span>
               {selected.cropNeedsReview && <span>Automatic cropping needs review; adjust the crop if needed.</span>}
+              {selected.cropDataUrl && selected.cropDataUrl !== (reviewSource || selected.dataUrl) && (
+                <img className="preview" src={reviewSource || selected.dataUrl} alt="Full original photo" />
+              )}
+              <pre>{selected.raw ? `Raw OCR text:\n${selected.raw}` : 'No text recognized.'}</pre>
             </div>
             </details>}
-
-            {selected.cropDataUrl && selected.cropDataUrl !== (reviewSource || selected.dataUrl) && (
-              <details>
-                <summary>View full original photo</summary>
-                <img className="preview" src={reviewSource || selected.dataUrl} alt="Full original photo" />
-              </details>
-            )}
-
-
-            <details>
-              <summary>Raw OCR text</summary>
-              <pre>{selected.raw || 'No text recognized.'}</pre>
-            </details>
             </div>
 
             <div className="review-foot">
               {reviewIndex >= 0 && <div className="review-navigation" aria-label="Navigate scanned records">
                 <button className="subtle-btn" disabled={reviewIndex === 0 || rotatingPhoto} onClick={() => goReview(-1)}>← Previous</button>
                 <span>{reviewIndex + 1} of {reviewRecords.length}</span>
-                {reviewIndex === reviewRecords.length - 1
-                  ? <button className="primary" disabled={rotatingPhoto} onClick={finishReview}>Finish ✓</button>
-                  : <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => goReview(1)}>Next →</button>}
+                <button className="subtle-btn" disabled={rotatingPhoto || reviewIndex === reviewRecords.length - 1} onClick={() => goReview(1)}>Next →</button>
               </div>}
               <div className="review-save-bar" role="group" aria-label="Save this record">
-                <button className="primary" disabled={rotatingPhoto} onClick={() => saveReviewFields()}>Save</button>
-                {reviewIndex >= 0 && reviewIndex < reviewRecords.length - 1 && <button className="subtle-btn" disabled={rotatingPhoto} onClick={() => saveReviewFields(true)}>Save &amp; next →</button>}
+                <button className="primary" disabled={rotatingPhoto} onClick={saveAndContinue}>Save</button>
                 <span className="review-save-state" role="status">{pendingChanges ? `${pendingChanges} unsaved` : 'All saved'}</span>
               </div>
             </div>
@@ -5137,13 +5382,14 @@ export default function App() {
        <label>Include <select aria-label="Sharing option" disabled={sharing} value={shareMode} onChange={e=>{setShareMode(e.target.value as ShareMode);setShareStep('picture');setShareIndex(0);setShareStatus('');}}><option value="imei">Picture + IMEI (or serial if no IMEI)</option><option value="imei_serial">Picture + IMEI + Serial Number</option></select></label>
        {bulkShare?<div className="share-bulk">
         <p><strong>{shareRows.length} records.</strong> Step 1: share all the pictures to the same chat.{shareRows.length>30&&' WhatsApp may take only about 30 at once. If some are missing, use Download all pictures and attach the rest.'} Step 2: share the numbers as one separate message. Numbers are listed in the same order as the pictures.</p>
-        <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
         <strong>Step 1 · Pictures</strong>
         <div className="share-toolbar">{shareBatches.map((batch,index)=><button key={index} className="primary" disabled={sharing} onClick={()=>nativeShareBulk('pictures',index)}>Share pictures {index*SHARE_BATCH+1}–{index*SHARE_BATCH+batch.length}</button>)}</div>
         <button className="subtle-btn" onClick={()=>void downloadBulkPictures(shareRows)}>Download all {shareRows.length} pictures instead</button>
         <strong>Step 2 · Numbers (one message)</strong>
         <textarea aria-label="All numbers to share" readOnly value={bulkShareText}/>
         <div className="share-toolbar"><button className="primary" disabled={sharing||!bulkShareText} onClick={()=>nativeShareBulk('text')}>Share all numbers</button><button className="subtle-btn" onClick={()=>void copyText(bulkShareText).then(ok=>setShareStatus(ok?'Numbers copied. Paste them as a new message.':'Copy failed. Select and copy the text above.'))}>Copy numbers</button></div>
+        <details className="review-details"><summary>More ways to send</summary>
+        <div className="share-thumbs" aria-label="Pictures to share">{shareRows.slice(0,30).map((row,index)=><img key={row.id} src={recordPhoto(row)} alt={`Picture ${index+1}`}/>)}{shareRows.length>30&&<span>+{shareRows.length-30}</span>}</div>
         <strong>Or copy one by one</strong>
         <p className="copy-hint">Tap a number to copy it. It gets a tick so you know where you are. Picture files are named with the same number: 1.jpg, 2.jpg, 3.jpg…</p>
         <ol className="copy-list">{shareRows.map((row,index)=>{const pair=recordImeiPair(row),serial=recordSerial(row);return <li key={row.id}><img src={recordPhoto(row)} alt={`Picture ${index+1}`}/><span className="copy-num">{index+1}</span><div className="copy-values">
@@ -5153,6 +5399,7 @@ export default function App() {
           {!pair.imei1&&!pair.imei2&&!serial&&<em>No number detected</em>}</div>
           <button type="button" className="subtle-btn copy-save" aria-label={`Download picture ${index+1}`} onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(row)),`${index+1}.jpg`)}>↓ Picture</button></li>;})}</ol>
         <button className="textbtn" disabled={sharing} onClick={()=>{setShareOneByOne(true);setShareStep('picture');setShareIndex(0);setShareStatus('');}}>Share one record at a time instead</button>
+        </details>
        </div>:<p>Share each picture first, then its number text. Choose the same conversation in WhatsApp, Messenger or another compatible app for both steps. Browsers cannot force separate chat messages in one share operation.</p>}
        {!bulkShare&&currentShareRow&&<><p>{shareIndex+1} of {shareRows.length} selected</p><img className="share-preview" src={recordPhoto(currentShareRow)} alt="Selected picture"/>
        {shareStep==='picture'?<div className="share-toolbar"><strong>Step 1 · Picture only</strong><button className="primary" disabled={sharing} onClick={()=>nativeShareStep('picture')}>Share picture</button><button className="subtle-btn" onClick={()=>saveDirectFile(dataUrlBlob(recordPhoto(currentShareRow)),'image.jpg')}>Download picture</button><button className="subtle-btn" disabled={sharing} onClick={()=>{setShareStep('text');setShareStatus('');}}>I attached the picture — continue</button></div>:<div className="share-toolbar"><strong>Step 2 · Separate plain-text message</strong><textarea aria-label="Number text to share" readOnly value={currentShareText}/><button className="primary" disabled={sharing||!currentShareText} onClick={()=>nativeShareStep('text')}>Share text</button><button className="subtle-btn" disabled={!currentShareText} onClick={()=>void copyText(currentShareText).then(ok=>setShareStatus(ok?'Text copied. Paste it as a new message after the picture.':'Copy failed. Select and copy the text above.'))}>Copy text</button>{!currentShareText&&<p>No readable number is available. Edit this record or continue without text.</p>}<button className="subtle-btn" disabled={sharing} onClick={()=>{if(shareIndex+1<shareRows.length){setShareIndex(i=>i+1);setShareStep('picture');setShareStatus('');}else{setShareIds([]);}}}>{shareIndex+1<shareRows.length?'Next selected record':'Finish'}</button><button className="subtle-btn" disabled={sharing} onClick={()=>setShareStep('picture')}>Back to picture</button></div>}</>}
@@ -5160,11 +5407,6 @@ export default function App() {
       </section></div>}
       {welcome === 'new' && <WhatsNewDialog first onClose={closeWelcome} onTutorials={() => { markWhatsNewSeen(); setWelcome('tutorials'); }} />}
       {welcome === 'tutorials' && <TutorialsDialog onClose={closeWelcome} />}
-      {confirmDupes && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Remove duplicates">
-        <h2>Remove duplicates?</h2>
-        <p>{confirmDupes.length} extra cop{confirmDupes.length === 1 ? 'y' : 'ies'} of repeated IMEIs will be deleted with {confirmDupes.length === 1 ? 'its' : 'their'} picture{confirmDupes.length === 1 ? '' : 's'}. One copy of every IMEI stays: the most complete one (with serial and a known model). You can undo for a few seconds afterwards.</p>
-        <div className="share-toolbar"><button className="subtle-btn danger" disabled={!confirmDupes.length} onClick={() => { removeDuplicates(confirmDupes); setConfirmDupes(null); }}>Remove {confirmDupes.length} duplicate{confirmDupes.length === 1 ? '' : 's'}</button><button className="subtle-btn" onClick={() => setConfirmDupes(null)}>Cancel</button></div>
-      </section></div>}
       {confirmDelete && <div className="modal-backdrop"><section className="modal confirm-delete" role="alertdialog" aria-modal="true" aria-label="Confirm delete">
         <h2>Delete permanently?</h2>
         <p>{confirmDelete.ids.length} IMEI record{confirmDelete.ids.length === 1 ? '' : 's'} and {confirmDelete.ids.length === 1 ? 'its' : 'their'} saved picture{confirmDelete.ids.length === 1 ? '' : 's'} will be removed from this device. This cannot be undone.</p>
@@ -5179,8 +5421,8 @@ export default function App() {
           <button className="subtle-btn" onClick={() => setDeletePersonId('')}>Cancel</button>
         </div>
       </section></div>; })()}
-      {overviewOpen && <div className="modal-backdrop"><section className="modal overview-modal" role="dialog" aria-modal="true" aria-label="Final review">
-        <div className="modal-head"><h2>Final review</h2><button className="subtle-btn" onClick={() => setOverviewOpen(false)}>Close</button></div>
+      {overviewOpen && <div className="modal-backdrop"><section className="modal overview-modal" role="dialog" aria-modal="true" aria-label="Who gets how many">
+        <div className="modal-head"><h2>Who gets how many</h2><button className="subtle-btn" onClick={() => setOverviewOpen(false)}>Close</button></div>
         {review.length === 0 ? <p>No phones yet.</p> : <>
           <p className="settings-help">Model by model: who gets how many.</p>
           <div className="review-filters">
@@ -5265,8 +5507,8 @@ export default function App() {
         const doneCount = rows.filter(item => obState.done.includes(item.id)).length;
         const remaining = rows.length - doneCount;
         const last = obState.index === rows.length - 1;
-        return <div className="modal-backdrop"><section className="modal onebyone-modal" role="dialog" aria-modal="true" aria-label={`One by one: ${oneByOne.name}`}>
-          <div className="modal-head"><h2>One by one · {oneByOne.name}</h2><button className="subtle-btn" onClick={() => setOneByOne(null)}>Close</button></div>
+        return <div className="modal-backdrop"><section className="modal onebyone-modal" role="dialog" aria-modal="true" aria-label={`Send one at a time: ${oneByOne.name}`}>
+          <div className="modal-head"><h2>Send one at a time · {oneByOne.name}</h2><button className="subtle-btn" onClick={() => setOneByOne(null)}>Close</button></div>
           <div className="wa-progress" role="status">
             <strong>Phone {obState.index + 1} of {rows.length}</strong>
             <div className="wa-bar" aria-hidden="true"><span style={{ width: `${Math.round(doneCount / rows.length * 100)}%` }} /></div>
@@ -5293,9 +5535,24 @@ export default function App() {
           </div>
         </section></div>;
       })()}
+      {splitUndo && !personUndo && <div className="undo-bar" role="status"><span>{splitUndo.text}</span><button className="subtle-btn" onClick={() => restoreOriginals(splitUndo.ids)}>Undo</button><button className="subtle-btn" onClick={() => setSplitUndo(null)}>Dismiss</button></div>}
+      {archiveOpen && <div className="modal-backdrop"><section className="modal archive-modal" role="dialog" aria-modal="true" aria-label="Archived original photos">
+        <div className="modal-head"><h2>Archived original photos</h2><button className="subtle-btn" onClick={() => setArchiveOpen(false)}>Close</button></div>
+        <p className="copy-hint">Split originals were replaced by their crops; duplicates were taken out of the list. Restoring brings the record back (and takes a split original's crops out of the list; they stay in the archive). Nothing here is deleted.</p>
+        {archive.filter(item => !item.restoredAt && item.reason === 'duplicate-removal').length > 1 && <button type="button" className="subtle-btn" onClick={() => { const ids = archive.filter(item => !item.restoredAt && item.reason === 'duplicate-removal').map(item => item.id); if (window.confirm(`Restore all ${ids.length} archived duplicates into the list?`)) restoreOriginals(ids); }}>Restore all duplicates ({archive.filter(item => !item.restoredAt && item.reason === 'duplicate-removal').length})</button>}
+        <div className="archive-list">
+          {archive.filter(item => !item.restoredAt).map(item => {
+            const crops = records.filter(row => row.sourceRecordId === item.id || item.cropIds.includes(row.id));
+            return <div key={item.id} className="archive-row"><strong>{item.record.name}</strong>
+              <small>#{item.record.number} · archived {new Date(item.archivedAt).toLocaleString()} · {item.reason === 'duplicate-removal' ? `duplicate of ${item.duplicateOf ? '…' + (records.find(row => row.id === item.duplicateOf)?.imei || '').slice(-4) : 'another record'}` : `${item.reason} · ${crops.length} crop${crops.length === 1 ? '' : 's'}: ${crops.map(row => row.imei ? '…' + row.imei.slice(-4) : 'no IMEI').join(', ') || 'none left'}`}</small>
+              <button type="button" className="subtle-btn" onClick={() => { if (item.reason === 'duplicate-removal' ? window.confirm('Restore this duplicate into the list?') : window.confirm(`Restore the original photo and take its ${crops.length} crop(s) out of the list? The crops stay in the archive.`)) restoreOriginals([item.id]); }}>Restore original</button></div>;
+          })}
+          {!archive.some(item => !item.restoredAt) && <p>Nothing is archived.</p>}
+        </div>
+      </section></div>}
       {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
-        <div className="modal-head"><h2>Bulk edit</h2><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Close</button></div>
+        <div className="modal-head"><h2>Bulk edit</h2></div>
         <p className="copy-hint">Changes {selectedRows.length ? `${selectedRows.length} ticked phone${selectedRows.length === 1 ? '' : 's'}` : `all ${visible.length} phones shown`}. Leave a field empty to keep it as it is.</p>
         <label>Phone model code<input value={bulkEditModel} placeholder="for example SM-S938B" onChange={event => setBulkEditModel(event.target.value)} /></label>
         <label>Move to person<select value={bulkEditPerson} onChange={event => setBulkEditPerson(event.target.value)}><option value="">Keep as it is</option>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select></label>
@@ -5330,9 +5587,7 @@ export default function App() {
           <img className="share-preview" src={recordPhoto(linkedPicture)} alt={`Picture for ${linkedPicture.imei || recordSerial(linkedPicture) || linkedPicture.pictureId}`} />
           <p>{[recordImeiPair(linkedPicture).imei1 && `IMEI 1: ${recordImeiPair(linkedPicture).imei1}`, recordImeiPair(linkedPicture).imei2 && `IMEI 2: ${recordImeiPair(linkedPicture).imei2}`, recordSerial(linkedPicture) && `Serial: ${recordSerial(linkedPicture)}`].filter(Boolean).join(' · ') || linkedPicture.pictureId}</p>
           <div className="share-toolbar">
-            {recordImeiPair(linkedPicture).imei1 && <button className="subtle-btn" onClick={() => void copyText(recordImeiPair(linkedPicture).imei1).then(ok => setToast(ok ? 'IMEI 1 copied.' : 'Copy failed.'))}>Copy IMEI 1</button>}
-            {recordImeiPair(linkedPicture).imei2 && <button className="subtle-btn" onClick={() => void copyText(recordImeiPair(linkedPicture).imei2).then(ok => setToast(ok ? 'IMEI 2 copied.' : 'Copy failed.'))}>Copy IMEI 2</button>}
-            {recordSerial(linkedPicture) && <button className="subtle-btn" onClick={() => void copyText(recordSerial(linkedPicture)).then(ok => setToast(ok ? 'Serial copied.' : 'Copy failed.'))}>Copy serial</button>}
+            {(recordImeiPair(linkedPicture).imei1 || recordImeiPair(linkedPicture).imei2 || recordSerial(linkedPicture)) && <button className="subtle-btn" onClick={() => void copyText([recordImeiPair(linkedPicture).imei1 && `IMEI 1: ${recordImeiPair(linkedPicture).imei1}`, recordImeiPair(linkedPicture).imei2 && `IMEI 2: ${recordImeiPair(linkedPicture).imei2}`, recordSerial(linkedPicture) && `Serial: ${recordSerial(linkedPicture)}`].filter(Boolean).join('\n')).then(ok => setToast(ok ? 'Numbers copied.' : 'Copy failed.'))}>Copy numbers</button>}
             <button className="primary" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(linkedPicture)), `${linkedPicture.number}.jpg`)}><Download size={16} /> Download picture</button>
             {typeof navigator.share === 'function' && <button className="subtle-btn" onClick={() => { const file = new File([dataUrlBlob(recordPhoto(linkedPicture))], 'picture.jpg', { type: 'image/jpeg' }); const data = { files: [file] }; if (navigator.canShare?.(data)) void navigator.share(data).catch(() => {}); else setToast('Sharing pictures is not available in this browser. Use Download picture.'); }}>Share picture</button>}
           </div>

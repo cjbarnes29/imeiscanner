@@ -1,0 +1,3 @@
+# Tests that currently FAIL because of confirmed product defects. They are skipped by default (run with -IncludeKnownFailing) and reported as XFAIL.
+# A test that starts passing is reported as XPASS: remove it from this list then.
+# (empty: 07-export-interrupted was fixed by the ExportCommit journal)

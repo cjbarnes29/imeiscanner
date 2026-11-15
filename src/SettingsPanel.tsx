@@ -237,7 +237,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
 
     {saveInfo && <>
       <h3>Where files are saved</h3>
-      <p className="settings-help">One by one and Save to my phone save into this folder without asking each time. Saving again replaces the earlier pictures and numbers file.</p>
+      <p className="settings-help">Send one at a time and Save to my phone save into this folder without asking each time. Saving again replaces the earlier pictures and numbers file.</p>
       <div className="speed-device">
         <strong>{saveInfo.set ? saveInfo.name || 'A folder is chosen' : 'No folder chosen yet'}</strong>
         <span>{saveInfo.set ? 'Chosen once. The phone remembers it.' : 'You will be asked once, the first time you save.'}</span>

@@ -2,7 +2,7 @@
 //   node scripts/e2e-review.mjs [screenshot-folder]
 // Checks: the sheet fits the screen; header, body and footer never overlap; every field is fully visible and
 // not clipped; the photo preview is compact and opens full size on tap; typing is instant and kept; Save works;
-// Previous / Next / Finish behave; leaving with unsaved changes asks first.
+// One Save button (saves, then moves on); Previous / Next behave; closing with unsaved changes saves them (nothing is discarded).
 import assert from 'node:assert/strict';
 import {readFile,readdir,mkdtemp,mkdir,writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -102,27 +102,35 @@ try{
 
   // Save writes the typed values
   await run(`document.querySelector('#manual-serial').blur()`);
+  // The footer has exactly one Save button and no Finish / Save & next
+  const footerButtons=await run(`[...document.querySelectorAll('.review-foot button')].map(b=>b.textContent.trim())`);
+  assert.ok(!footerButtons.some(t=>/Finish|Save &/.test(t)),'no Finish or Save & next: '+footerButtons);
+  assert.equal(footerButtons.filter(t=>/^Save$/.test(t)).length,1,'one Save button: '+footerButtons);
+  // Save stores the values and moves to the next record (record 1 of 2)
   await clickText('.review-foot button','Save');
-  await waitFor(`/All saved/.test(document.querySelector('.review-save-state').textContent)`,'saved state');
-  ok('Save stores the typed values ("All saved")');
-
-  // Next shows the second record; Previous returns; typed text is not leaked between records
-  await clickText('.review-foot button','Next');
-  await waitFor(`/2 of 2/.test(document.querySelector('.review-navigation span').textContent)`,'second record');
+  await waitFor(`/2 of 2/.test(document.querySelector('.review-navigation span').textContent)`,'Save moves to record 2');
   assert.equal(await run(`document.querySelector('#manual-imei').value`),'350950575907532','second record shows its own IMEI');
-  assert.ok(await run(`[...document.querySelectorAll('.review-foot button')].some(b=>/Finish/.test(b.textContent))`),'last record offers Finish');
+  ok('Save stores the typed values and opens record 2 with its own IMEI');
+
+  // Previous returns to record 1 with the saved values; Next is disabled on the last record
+  await clickText('.review-foot button','← Previous');
+  await waitFor(`/1 of 2/.test(document.querySelector('.review-navigation span').textContent)`,'record 1');
+  assert.equal(await run(`document.querySelector('#manual-serial').value`),'R5GL80LDKFM','record 1 kept its saved serial');
+  await waitFor(`/All saved/.test(document.querySelector('.review-save-state').textContent)`,'saved state');
+  await clickText('.review-foot button','Next');
+  await waitFor(`/2 of 2/.test(document.querySelector('.review-navigation span').textContent)`,'record 2 again');
+  assert.ok(await run(`[...document.querySelectorAll('.review-foot button')].find(b=>/Next/.test(b.textContent)).disabled`),'Next is disabled on the last record');
   await shot('4-last');
-  ok('Next opens record 2 with its own IMEI; the last record offers Finish');
+  ok('Previous / Next move between records; Next is off on the last one');
   await typeInto('#manual-serial','CHANGEDX1');
+  await typeInto('#manual-imei','3509505');
   await run(`document.querySelector('#manual-serial').blur()`);
-  await clickText('.review-foot button','Finish');
-  await waitFor(`!!document.querySelector('.finish-modal, [role="alertdialog"]')||!document.querySelector('.review-modal')`,'finish prompt');
-  assert.ok(await run(`!!document.querySelector('.review-modal')`),'sheet is still open: unsaved work asks first');
-  const finishOptions=await run(`[...document.querySelectorAll('.finish-modal button')].map(b=>b.textContent.trim())`);
-  assert.ok(finishOptions.length>=2,'finish prompt has choices: '+finishOptions);
-  await shot('5-finish-prompt');
-  ok('Finish with unsaved changes asks first: '+finishOptions.join(' | '));
-  await run(`[...document.querySelectorAll('.finish-modal button')].find(b=>/Keep editing/.test(b.textContent)).click()`);
+  await run(`document.querySelector('[aria-label="Close photo review"]').click()`);
+  await waitFor(`!document.querySelector('.review-modal')`,'review closes without a popup');
+  assert.ok(await run(`!document.querySelector('.finish-modal, [role="alertdialog"]')`),'no Save/Discard popup');
+  await waitFor(`/Saved 1 picture/.test(document.body.innerText)&&/unfinished IMEI/.test(document.body.innerText)`,'saved note');
+  await shot('5-closed-saved');
+  ok('Closing with unsaved changes saves them (no popup); the half-typed IMEI is kept and flagged for review');
   console.log(`\nAll ${results.length} review checks passed.`);
 }catch(error){console.error('FAIL:',error.message);await shot('failure');process.exitCode=1;}
 finally{try{ws.close();}catch{}proc.kill();server.close();}

@@ -1,0 +1,25 @@
+appId: com.imeilens.scanner.phonetest
+---
+# Fresh start of IMEI Lens Test ONLY (appId comes from the calling flow; the runner refuses any other id).
+- launchApp:
+    clearState: true
+    stopApp: true
+    permissions:
+      all: allow
+# After clearState the Welcome dialog always appears, but on a slow emulator the page takes ~20 s to become interactive and a tap on Close
+# before that is lost. So: wait until the dialog is there, then keep tapping Close (a few tries) until it is gone.
+- extendedWaitUntil:
+    visible: "Welcome to IMEI Lens"
+    timeout: 60000
+- repeat:
+    while:
+      visible: "Welcome to IMEI Lens"
+    times: 8
+    commands:
+      - tapOn: "Close"
+      - waitForAnimationToEnd:
+          timeout: 2500
+- extendedWaitUntil:
+    notVisible: "Welcome to IMEI Lens"
+    timeout: 10000
+- assertVisible: "Choose photos and scan"

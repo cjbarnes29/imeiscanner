@@ -23,3 +23,11 @@ for (const [from, to] of files) {
   await copyFile(source, join(out, to));
 }
 console.log(`OCR engine copied to public/ocr (language model ${MODEL}).`);
+
+// Brand profiles (brands/profiles/*.json) are the single source for the Android scanner and the web page. They are copied to public/brands so they
+// reach dist/ and the Android assets (brands/*.json). The copies are generated and git-ignored.
+import { readdir } from 'node:fs/promises';
+const profilesDir = join(root, 'brands', 'profiles'), brandsOut = join(root, 'public', 'brands');
+await mkdir(brandsOut, { recursive: true });
+for (const file of (await readdir(profilesDir)).filter(name => name.endsWith('.json'))) await copyFile(join(profilesDir, file), join(brandsOut, file));
+console.log('Brand profiles copied to public/brands.');

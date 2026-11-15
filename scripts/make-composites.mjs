@@ -4,24 +4,16 @@
 // Composites are made by cutting and stacking REAL label photos, so they test counting, splitting and field mixing at
 // 1/2/4/5/10 products and under blur, glare, overlap and cut-off labels. They are not physical multi-product photos.
 import sharp from 'sharp';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 const dir = 'test-photos', out = 'test-photos/composite';
 await mkdir(out, { recursive: true });
 const W = 1200;
 
 // ---- ground truth read from the labels (top to bottom) ----
-const P = {
-  verTop: { imei: '351973130210365', imei2: '353749140210365', serial: 'RFGL20HB02P', model: 'SM-A376B' },
-  verBot: { imei: '351973130219432', imei2: '353749140219432', serial: 'RFGL20HBTJA', model: 'SM-A376B' },
-  a1: { imei: '351973130856613', imei2: '353749140856613', serial: 'RFGL610K18F' },
-  a2: { imei: '351973130869491', imei2: '353749140869491', serial: 'RFGL61786HL' },
-  s1: { imei: '356049669060748', imei2: '357018389060741', serial: 'R3GL20BQRMD' },
-  s2: { imei: '356049669064393', imei2: '357018389064396', serial: 'R3GL20BR3PX' },
-  f1: { imei: '357126893713943', imei2: '357937313713945', model: 'SM-A075F' },
-  f2: { imei: '351124071926755', imei2: '351570781926750', serial: 'R83L80ZJYCP', model: 'SM-A077F' },
-  f3: { imei: '351124072221537', imei2: '351570782221532', serial: 'R83L810D0MW', model: 'SM-A077F' },
-  f4: { imei: '351980971560931', imei2: '355962431560939', serial: 'R7AL80AH3SB', model: 'SM-A085F' },
-};
+// Ground truth of the real labels lives in test-photos/label-truth.json (git-ignored: real IMEIs), never in this file.
+let P;
+try { P = JSON.parse(await readFile('test-photos/label-truth.json', 'utf8')); }
+catch { console.error('Missing test-photos/label-truth.json (private). It holds {verTop, verBot, a1, a2, s1, s2, f1, f2, f3, f4}: {imei, imei2?, serial?, model?} read from the labels.'); process.exit(1); }
 const file = n => `${dir}/${n}`;
 const jpeg = async (input, name) => { await sharp(input).jpeg({ quality: 88 }).toFile(`${out}/${name}.jpg`); };
 const resized = async (path, width = W) => sharp(path).rotate().resize({ width }).toBuffer();

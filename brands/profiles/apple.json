@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "apple",
+  "name": "Apple",
+  "status": "draft",
+  "evidence": {
+    "note": "DRAFT: nothing here is verified. Apple stays inactive until at least 20 varied real labels were collected and checked (see brands/SAMPLES.md). The empty lists are placeholders for what the labels show.",
+    "words": [],
+    "codeShapes": []
+  },
+  "model": {
+    "prefix": "",
+    "notes": {
+      "noCode": "No model code was read. Type the model from the label.",
+      "editShape": "Check the model against the label."
+    }
+  },
+  "imeiRules": []
+}

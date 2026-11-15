@@ -32,8 +32,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class ImageScanner {
-    private static final Pattern LABEL_ONE = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*[1I]\\b");
-    private static final Pattern NUMBER = Pattern.compile("(?<!\\d)(?:\\d[\\s-]*){15}(?!\\d)");
+    private static final Pattern LABEL_ONE = LabelGeometry.LABEL_ONE;
+    private static final Pattern NUMBER = LabelGeometry.NUMBER;
     private static final Pattern FIRST = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*[1I]\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
     private static final Pattern SECOND = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\s*[:#-]?\\s*((?:\\d[\\s-]*){15})(?!\\d)");
 
@@ -55,18 +55,44 @@ final class ImageScanner {
      */
     static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge,
                           String speed, int expected) throws Exception {
+        return scan(context, uri, filename, personId, recognizer, maxEdge, speed, expected, "detailed".equals(speed));
+    }
+
+    /** Extra reads (enlarged re-read of a label without IMEI 1, contrast-boosted tile pass) only run on a second pass: Detailed speed, or a photo that was scanned before and still needs a look. */
+    private static final ThreadLocal<Boolean> SECOND_PASS = new ThreadLocal<>();
+    private static boolean secondPass() { return Boolean.TRUE.equals(SECOND_PASS.get()); }
+
+    /**
+     * @param secondPass true to allow the slower rescue reads for labels that stay unreadable. First scans of a photo in Standard or Fast never pay for them.
+     */
+    static JSONArray scan(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge,
+                          String speed, int expected, boolean secondPass) throws Exception {
+        SECOND_PASS.set(secondPass);
+        try { return scanOnce(context, uri, filename, personId, recognizer, maxEdge, speed, expected); }
+        finally { SECOND_PASS.remove(); }
+    }
+
+    private static JSONArray scanOnce(Context context, Uri uri, String filename, String personId, TextRecognizer recognizer, int maxEdge,
+                          String speed, int expected) throws Exception {
         final boolean fast = "fast".equals(speed), detailed = "detailed".equals(speed);
         expected = Math.max(0, Math.min(MAX_PRODUCTS, expected));
+        Prof.begin();
+        final long scanStart = Prof.now();
+        long t0 = Prof.now();
         Bitmap bitmap = decode(context, uri, maxEdge);
+        Prof.add("decode", t0);
         try {
+            t0 = Prof.now();
             Text full = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)));
+            Prof.add("ocrFull", t0);
             // No valid IMEI read: the photo may be sideways or upside down. Try the other turns and keep the best.
             int rotation = 0, best = score(full);
             if (best < 100) {
                 for (int turn : new int[]{90, 270, 180}) {
                     Bitmap turned = rotate(bitmap, turn);
                     Text candidate;
-                    try { candidate = Tasks.await(recognizer.process(InputImage.fromBitmap(turned, 0))); }
+                    long tr = Prof.now();
+                    try { candidate = Tasks.await(recognizer.process(InputImage.fromBitmap(turned, 0))); Prof.add("ocrRotate", tr); }
                     catch (Exception error) { turned.recycle(); throw error; }
                     int value = score(candidate);
                     if (value > best + 10) { bitmap.recycle(); bitmap = turned; full = candidate; best = value; rotation = turn; }
@@ -77,16 +103,20 @@ final class ImageScanner {
             // A tilted photo: level it so the products can be separated with straight cuts.
             float tilt = medianAngle(full);
             if (!fast && Math.abs(tilt) >= (detailed ? 1.2f : 2f) && Math.abs(tilt) <= 20f) {
+                long tl = Prof.now();
                 Bitmap levelled = level(bitmap, -tilt);
                 Text again;
-                try { again = Tasks.await(recognizer.process(InputImage.fromBitmap(levelled, 0))); }
+                try { again = Tasks.await(recognizer.process(InputImage.fromBitmap(levelled, 0))); Prof.add("ocrLevel", tl); }
                 catch (Exception error) { levelled.recycle(); throw error; }
                 // Keep it only if the text really became straighter and nothing was lost.
                 if (Math.abs(medianAngle(again)) < Math.abs(tilt) && score(again) >= score(full)) { bitmap.recycle(); bitmap = levelled; full = again; }
                 else levelled.recycle();
             }
+            t0 = Prof.now();
             List<Code> codes = barcodes(bitmap);
-            List<Rect> labels = labels(full, bitmap.getWidth(), bitmap.getHeight());
+            Prof.add("barcodesFull", t0);
+            LabelGeometry.Grouping grouping = grouping(linesOf(full), bitmap.getWidth(), bitmap.getHeight());
+            List<Rect> labels = rects(grouping);
             // More "Model : SM-…" labels are visible than products were found: read the photo again in
             // overlapping pieces (each piece is read at a higher effective resolution) and look again.
             int counted = modelLabels(full);
@@ -94,55 +124,332 @@ final class ImageScanner {
             int target = expected > 0 ? expected : counted;
             int barcodeLabels = (distinctImeiBarcodes(codes) + 1) / 2;
             if (expected == 0 && barcodeLabels > target) target = Math.min(MAX_PRODUCTS, barcodeLabels);
+            // Labels whose "Model" line the frame cut off still show their "S/N" line: a second opinion for Auto. It only starts the
+            // re-read and, if a label is still missing, marks the photo for review ("1 device or N?"); it never creates a record.
+            int serialLabels = LabelGeometry.landmarkLabels(items(linesOf(full)));
+            if (expected == 0 && serialLabels > target) target = Math.min(MAX_PRODUCTS, serialLabels);
             List<Line> lines = null;
+            final List<Line> firstLines = linesOf(full); // the first read: used when no re-read in tiles happened
+            final int firstGroups = labels.size();
+            final List<Rect> firstLabels = labels;
+            final LabelGeometry.Grouping firstGrouping = grouping;
+            int tilePasses = 0;
             if (target > labels.size() && target <= MAX_PRODUCTS && (!fast || expected > 1)) {
                 lines = linesOf(full);
+                t0 = Prof.now();
                 lines = readInTiles(recognizer, bitmap, lines, target);
-                List<Rect> more = labels(lines, bitmap.getWidth(), bitmap.getHeight());
-                if (more.size() > labels.size()) labels = more;
+                Prof.add("tilesPass1", t0);
+                tilePasses++;
+                LabelGeometry.Grouping moreGrouping = grouping(lines, bitmap.getWidth(), bitmap.getHeight());
+                List<Rect> more = rects(moreGrouping);
+                if (more.size() > labels.size()) { labels = more; grouping = moreGrouping; }
                 // Detailed: still short of the count, so look once more with finer pieces.
                 if (detailed && target > labels.size() && target < MAX_PRODUCTS) {
+                    t0 = Prof.now();
                     lines = readInTiles(recognizer, bitmap, lines, Math.min(MAX_PRODUCTS, target + 2));
-                    more = labels(lines, bitmap.getWidth(), bitmap.getHeight());
-                    if (more.size() > labels.size()) labels = more;
+                    Prof.add("tilesFine", t0);
+                    tilePasses++;
+                    moreGrouping = grouping(lines, bitmap.getWidth(), bitmap.getHeight());
+                    more = rects(moreGrouping);
+                    if (more.size() > labels.size()) { labels = more; grouping = moreGrouping; }
+                }
+                // Auto count (the number comes from the labels themselves: Model lines or barcodes) and a label is still missing:
+                // blurred or washed-out text is read again in tiles on a contrast-stretched copy. Not used for a number the user typed in,
+                // so a too-high setting cannot invent products.
+                if (expected == 0 && !fast && secondPass() && target > labels.size()) {
+                    Bitmap boosted = null;
+                    t0 = Prof.now();
+                    try {
+                        boosted = enhance(bitmap, 1f, 1.8f);
+                        List<Line> boostedLines = readInTiles(recognizer, boosted, lines, target);
+                        Prof.add("tilesBoosted", t0);
+                        tilePasses++;
+                        LabelGeometry.Grouping boostedGrouping = grouping(boostedLines, bitmap.getWidth(), bitmap.getHeight());
+                        List<Rect> boostedRects = rects(boostedGrouping);
+                        if (boostedRects.size() > labels.size() && boostedRects.size() <= target) { labels = boostedRects; grouping = boostedGrouping; lines = boostedLines; }
+                    } catch (Exception error) { /* an extra read never breaks a scan */ }
+                    finally { if (boosted != null) boosted.recycle(); }
                 }
             }
             // Fewer products found than expected: never save them quietly as if all were found.
             final boolean short_ = target >= 2 && labels.size() < target;
+            // Why a label is missing (cut by an edge, partly read, unreadable): explained to the person, never guessed; set on every record of the photo.
+            final LabelIssue.Result issue = short_ ? LabelIssue.classify(items(lines != null ? lines : firstLines), grouping.hits, bitmap.getWidth(), bitmap.getHeight()) : null;
+            final int missingLabels = short_ ? target - labels.size() : 0;
             String sourceId = pictureId();
             JSONArray output = new JSONArray();
+            final JSONObject diag = diagStart(filename, bitmap, rotation, tilt, speed, expected, counted, barcodeLabels, target, grouping, firstGroups, tilePasses);
+            diagAnchors(diag, linesOf(full));
+            try {
+                // Diagnostics only: every decoded barcode, masked, with its place and whether its checksum is valid.
+                JSONArray barcodes = new JSONArray();
+                for (Code code : codes) barcodes.put(new JSONArray().put(LabelGeometry.mask(code.value.replaceAll("\\D", "").length() == 15 ? code.value.replaceAll("\\D", "") : ""))
+                    .put(code.box.left).put(code.box.top).put(code.box.right).put(code.box.bottom).put(luhn(code.value)).put(code.value.length()));
+                diag.put("barcodes", barcodes);
+            } catch (Exception ignored) { /* diagnostics only */ }
+            try { diag.put("serialLabels", serialLabels); } catch (Exception ignored) { /* diagnostics only */ }
             if (labels.size() <= 1) {
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, short_, recognizer, full, rotation, codes, null, short_ ? target : 0, ""));
+                if (issue == null && output.length() == 1) markRecordIssue(output.getJSONObject(0), items(lines != null ? lines : firstLines), grouping.hits, bitmap.getWidth(), bitmap.getHeight());
+                markIssue(output, issue, missingLabels, diag);
+                markOrphans(diag, codes, output);
+                diagFinish(diag, output, "single", "one label or fewer", 0);
                 return output;
             }
-            List<Rect> regions = boxRegions(bitmap, labels);
+            String[] why = new String[1];
+            List<Rect> regions = boxRegions(bitmap, labels, why);
+            // The finer read found more groups than could be cut apart (a too-high "Products in each photo" makes a fragment look like a label):
+            // the first, cleaner grouping is used instead of giving up on the split. The crops are then flagged for review.
+            boolean retriedFirst = false;
+            if (regions.isEmpty() && firstLabels.size() >= 2 && firstLabels.size() < labels.size()) {
+                List<Rect> retry = boxRegions(bitmap, firstLabels, new String[1]);
+                if (!retry.isEmpty()) { regions = retry; labels = firstLabels; grouping = firstGrouping; retriedFirst = true; try { diag.put("retriedFirstGrouping", true); } catch (Exception ignored) { /* diagnostics only */ } }
+            }
             if (regions.isEmpty()) {
                 // Keep the full photo available for guided manual cropping rather than saving cut-off labels.
-                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null, Math.max(target, labels.size())));
+                output.put(makeRecord(context, bitmap, filename, personId, sourceId, uri, true, recognizer, full, rotation, codes, null, Math.max(target, labels.size()), ""));
+                markIssue(output, issue, missingLabels, diag);
+                markOrphans(diag, codes, output);
+                diagFinish(diag, output, "whole-photo", why[0], 0);
                 return output;
             }
-            boolean perspectiveReview = short_;
+            boolean perspectiveReview = short_ || retriedFirst || (target >= 2 && labels.size() < target);
             for (int index = 1; index < regions.size(); index++)
                 if (Rect.intersects(regions.get(index - 1), regions.get(index))) perspectiveReview = true;
-            for (Rect region : regions) {
+            // What the whole-photo read saw as each label's printed IMEI 1 (checksum-valid, inside the label). A number claimed by two labels is dropped.
+            List<String> printed = new ArrayList<>();
+            for (Rect region : regions) printed.add(LabelGeometry.printedImei1In(grouping.hits, new LabelGeometry.Box(region.left, region.top, region.right, region.bottom)));
+            for (int a = 0; a < printed.size(); a++) for (int b = a + 1; b < printed.size(); b++)
+                if (!printed.get(a).isEmpty() && printed.get(a).equals(printed.get(b))) { printed.set(a, ""); printed.set(b, ""); }
+            for (int index = 0; index < regions.size(); index++) {
+                Rect region = regions.get(index);
                 Bitmap crop = Bitmap.createBitmap(bitmap, region.left, region.top, region.width(), region.height());
-                try { output.put(makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0)); }
-                finally { crop.recycle(); }
+                try {
+                    JSONObject made = makeRecord(context, crop, filename, personId, sourceId, uri, perspectiveReview, recognizer, null, rotation, codes, region, 0, printed.get(index));
+                    {
+                        LabelGeometry.Box area = new LabelGeometry.Box(region.left, region.top, region.right, region.bottom);
+                        markRecordIssue(made, LabelIssue.itemsIn(items(lines != null ? lines : firstLines), area), LabelIssue.hitsIn(grouping.hits, area), bitmap.getWidth(), bitmap.getHeight());
+                    }
+                    output.put(made);
+                } finally { crop.recycle(); }
             }
             for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("siblings", output.length());
+            markIssue(output, issue, missingLabels, diag);
+            markOrphans(diag, codes, output);
+            diagFinish(diag, output, "split", "ok", regions.size());
             return output;
         } finally { bitmap.recycle(); }
     }
 
+    // ---- Diagnostics: why a photo was split, kept whole or counted the way it was. IMEIs are always masked (first 8 + last 4 digits). ----
+
+    private static final String TAG = "IMEI-Lens/diag";
+
+    /** The "possible missed label" hint (barcode numbers that match no label). Disabled until it is proven on real photos; the code stays. */
+    static final boolean ORPHAN_HINT_ENABLED = false;
+
+    /** Per-scan stage timings (milliseconds and call counts), printed with the diagnostics line so slow stages can be found before optimizing. */
+    static final class Prof {
+        private static final ThreadLocal<java.util.LinkedHashMap<String, long[]>> STAGES = new ThreadLocal<>();
+        static void begin() { STAGES.set(new java.util.LinkedHashMap<>()); }
+        static long now() { return android.os.SystemClock.elapsedRealtime(); }
+        static void add(String stage, long since) {
+            java.util.LinkedHashMap<String, long[]> map = STAGES.get();
+            if (map == null) return;
+            long[] slot = map.get(stage);
+            if (slot == null) { slot = new long[2]; map.put(stage, slot); }
+            slot[0] += now() - since; slot[1]++;
+        }
+        static JSONObject end() {
+            JSONObject out = new JSONObject();
+            java.util.LinkedHashMap<String, long[]> map = STAGES.get();
+            STAGES.remove();
+            if (map == null) return out;
+            try { for (java.util.Map.Entry<String, long[]> entry : map.entrySet()) out.put(entry.getKey(), entry.getValue()[0] + "ms x" + entry.getValue()[1]); } catch (Exception ignored) { /* diagnostics only */ }
+            return out;
+        }
+    }
+
+    /** A record without any IMEI: say why, from the lines of its own label area only (the photo's edges decide "cut off"). Never adds a number. */
+    private static void markRecordIssue(JSONObject row, List<LabelGeometry.Item> lines, List<LabelGeometry.Hit> hits, int width, int height) {
+        if (!row.optString("imei").isEmpty() || row.optBoolean("imeiFallback")) return;
+        try {
+            LabelIssue.Result issue = LabelIssue.classify(lines, hits, width, height);
+            row.put("labelIssue", issue.kind).put("labelsMissing", 1);
+            if (!issue.side.isEmpty()) row.put("labelIssueSide", issue.side);
+            if (issue.digits > 0) row.put("labelIssueDigits", issue.digits);
+        } catch (Exception ignored) { /* the explanation is optional */ }
+    }
+
+    /** Adds the explanation (never a number) to every record of a photo that is missing a label. */
+    private static void markIssue(JSONArray output, LabelIssue.Result issue, int missing, JSONObject diag) {
+        if (issue == null) return;
+        try {
+            for (int index = 0; index < output.length(); index++) {
+                JSONObject row = output.getJSONObject(index);
+                if (row.has("labelIssue")) continue; // a more specific reason for this very record is already there
+                row.put("labelIssue", issue.kind).put("labelsMissing", Math.max(1, missing));
+                if (!issue.side.isEmpty()) row.put("labelIssueSide", issue.side);
+                if (issue.digits > 0) row.put("labelIssueDigits", issue.digits);
+            }
+            diag.put("labelIssue", issue.kind + (issue.side.isEmpty() ? "" : ":" + issue.side));
+        } catch (Exception ignored) { /* the explanation is optional: never breaks a scan */ }
+    }
+
+    private static List<LabelGeometry.Item> items(List<Line> lines) {
+        List<LabelGeometry.Item> out = new ArrayList<>(lines.size());
+        for (Line line : lines) out.add(new LabelGeometry.Item(line.text, new LabelGeometry.Box(line.box.left, line.box.top, line.box.right, line.box.bottom)));
+        return out;
+    }
+
+    private static LabelGeometry.Grouping grouping(List<Line> lines, int width, int height) { return LabelGeometry.group(items(lines), width, height); }
+
+    private static List<Rect> rects(LabelGeometry.Grouping grouping) {
+        List<Rect> out = new ArrayList<>(grouping.groups.size());
+        for (LabelGeometry.Box box : grouping.groups) out.add(new Rect(box.left, box.top, box.right, box.bottom));
+        return out;
+    }
+
+    private static JSONObject diagStart(String filename, Bitmap bitmap, int rotation, float tilt, String speed, int expected, int counted,
+                                        int barcodeLabels, int target, LabelGeometry.Grouping grouping, int firstGroups, int tilePasses) {
+        JSONObject diag = new JSONObject();
+        try {
+            diag.put("v", 1).put("photo", filename).put("w", bitmap.getWidth()).put("h", bitmap.getHeight()).put("rot", rotation)
+                .put("tilt", Math.round(tilt * 10) / 10.0).put("speed", speed).put("expected", expected)
+                .put("modelLines", counted).put("barcodeLabels", barcodeLabels).put("target", target)
+                .put("groupsFirstRead", firstGroups).put("tilePasses", tilePasses).put("groups", grouping.groups.size()).put("vertical", grouping.vertical)
+                .put("edgeFragments", grouping.fragments);
+            JSONArray hits = new JSONArray();
+            for (LabelGeometry.Hit hit : grouping.hits)
+                hits.put(new JSONObject().put("b", new JSONArray().put(hit.box.left).put(hit.box.top).put(hit.box.right).put(hit.box.bottom))
+                    .put("n", LabelGeometry.mask(hit.number)).put("g", hit.group).put("why", hit.note)
+                    .put("d", hit.digits).put("len", hit.length).put("luhn", ImeiSource.luhn(hit.number)));
+            diag.put("imeiOneLines", hits);
+        } catch (Exception ignored) { /* diagnostics must never break a scan */ }
+        return diag;
+    }
+
+    /**
+     * Valid IMEI barcodes on the photo whose number appears in none of the records: a label may have been missed (blurred text, no
+     * group found). Every record of the photo carries the count, the report flags the photo and the scan can be repeated.
+     */
+    private static void markOrphans(JSONObject diag, List<Code> codes, JSONArray output) {
+        try {
+            if (!ORPHAN_HINT_ENABLED || codes == null || codes.isEmpty()) return;
+            StringBuilder known = new StringBuilder();
+            for (int index = 0; index < output.length(); index++) known.append(output.getJSONObject(index).optString("raw").replaceAll("[^0-9]", " ")).append(' ');
+            String digits = known.toString().replaceAll("\\s+", "");
+            Set<String> orphans = new HashSet<>();
+            for (Code code : codes) if (luhn(code.value) && !digits.contains(code.value)) orphans.add(code.value);
+            if (orphans.isEmpty()) return;
+            JSONArray masked = new JSONArray();
+            for (String value : orphans) masked.put(LabelGeometry.mask(value));
+            diag.put("orphanBarcodes", masked);
+            for (int index = 0; index < output.length(); index++) output.getJSONObject(index).put("orphanBarcodes", orphans.size());
+        } catch (Exception ignored) { /* a hint only */ }
+    }
+
+    private static final Pattern DIAG_IMEI_TWO = Pattern.compile("(?i)\\bI\\s*M\\s*[E3]\\s*[I1!|l]\\s*[:#-]?\\s*2\\b");
+    private static final Pattern DIAG_SERIAL = Pattern.compile("(?i)\\bS\\s*/\\s*N\\b");
+    private static final Pattern DIAG_STORAGE = Pattern.compile("(?i)\\b\\d{1,4}\\s*[GT]B\\b");
+
+    /** Diagnostics only: where the first read saw label landmarks (Model, IMEI 2, S/N lines). Positions and text length, never digits. */
+    private static void diagAnchors(JSONObject diag, List<Line> lines) {
+        try {
+            JSONArray model = new JSONArray(), imeiTwo = new JSONArray(), serial = new JSONArray(), storage = new JSONArray(), other = new JSONArray();
+            for (Line line : lines) {
+                JSONArray where = new JSONArray().put(line.box.left).put(line.box.top).put(line.box.right).put(line.box.bottom).put(line.text.length());
+                if (MODEL_LINE.matcher(line.text).find()) model.put(where);
+                else if (DIAG_IMEI_TWO.matcher(line.text).find()) imeiTwo.put(where);
+                else if (DIAG_SERIAL.matcher(line.text).find()) serial.put(where);
+                else if (DIAG_STORAGE.matcher(line.text).find()) storage.put(where.put(line.text.replaceAll("[0-9]", "#")).put(LabelGeometry.STORAGE.matcher(line.text).find()));
+                else {
+                    // Other text as a shape only: every digit becomes '#', so no number can appear in the log.
+                    String shape = line.text.replaceAll("[0-9]", "#").replaceAll("[^#A-Za-z/|:. -]", "");
+                    other.put(where.put(shape.substring(0, Math.min(14, shape.length()))));
+                }
+            }
+            diag.put("anchors", new JSONObject().put("model", model).put("imei2", imeiTwo).put("sn", serial).put("storage", storage).put("other", other));
+        } catch (Exception ignored) { /* diagnostics must never break a scan */ }
+    }
+
+    private static void diagFinish(JSONObject diag, JSONArray output, String path, String why, int regions) {
+        try {
+            diag.put("path", path).put("why", why == null ? "" : why).put("regions", regions);
+            JSONArray found = new JSONArray();
+            for (int index = 0; index < output.length(); index++) {
+                String imei = output.getJSONObject(index).optString("imei");
+                found.put(imei.isEmpty() ? "" : LabelGeometry.mask(imei));
+            }
+            diag.put("recordImeis", found);
+            diag.put("ms", Prof.end());
+            int fallbacks = 0;
+            for (int index = 0; index < output.length(); index++) if (output.getJSONObject(index).optBoolean("imeiFallback")) fallbacks++;
+            if (fallbacks > 0) diag.put("imei2Fallback", fallbacks);
+            String text = diag.toString();
+            android.util.Log.d(TAG, text);
+            // Kept on the records that need a look (no IMEI, or flagged), so the cause can be traced later without a computer.
+            for (int index = 0; index < output.length(); index++) {
+                JSONObject row = output.getJSONObject(index);
+                if (row.optString("imei").isEmpty() || row.optBoolean("cropNeedsReview")) row.put("diag", text.length() > 2400 ? text.substring(0, 2400) : text);
+            }
+        } catch (Exception ignored) { /* diagnostics must never break a scan */ }
+    }
+
     private static JSONObject makeRecord(Context context, Bitmap photo, String filename, String personId,
                                          String sourceId, Uri sourceUri, boolean cropReview, TextRecognizer recognizer, Text known, int rotation,
-                                         List<Code> codes, Rect region, int deviceCount) throws Exception {
+                                         List<Code> codes, Rect region, int deviceCount, String printedImei1) throws Exception {
+        BrandRegistry.init(context); // brand profiles (assets/brands/*.json), loaded once
         // Whole-photo records reuse the first OCR pass instead of reading the same bitmap twice.
+        long tm = Prof.now();
         Text ocr = known != null ? known : Tasks.await(recognizer.process(InputImage.fromBitmap(photo, 0)));
+        if (known == null) Prof.add("ocrCrop", tm);
         String raw = ocr.getText();
         String imei = preferredImei(ocr);
+        // Blurred or washed-out label: one more read, enlarged and with stronger contrast, before giving up on IMEI 1.
+        if (secondPass() && firstImeiIn(raw).isEmpty()) {
+            tm = Prof.now();
+            String extra = rescueText(recognizer, photo);
+            Prof.add(extra.isEmpty() ? "rescueMiss" : "rescueHit", tm);
+            if (!extra.isEmpty()) { raw += "\n" + extra; imei = firstImeiIn(extra); }
+        }
         // Barcodes are exact: pair each with the "IMEI 1" / "IMEI 2" text printed under it.
         String barcode1 = labelledBarcode(ocr, codes, region, LABEL_ONE), barcode2 = labelledBarcode(ocr, codes, region, LABEL_TWO);
+        // The brand is decided from THIS label's own text only (brand profiles, brands/profiles/*.json). A brand-only IMEI rule can run only for the
+        // brand that was decided; no evidence (or evidence of several brands) = the generic profile, which has no rules, and a "brand unclear" mark.
+        final BrandRegistry.Decision brand = BrandRegistry.detect(raw);
+        final BrandProfile.Rule sharedRule = brand.brand.rule("shared-digits");
+        // IMEI 1's own text line was not read: find IMEI 1's barcode by the brand's same-device rule (Samsung: same serial part as this label's IMEI 2).
+        // The number is the barcode's own, never computed from IMEI 2; and unless the printed IMEI 1 confirms it, the record is marked for review.
+        boolean imei1ByRule = false;
+        if (barcode1.isEmpty() && sharedRule != null) {
+            String anchor = ImeiSource.secondImeiInText(raw);
+            if (anchor.isEmpty()) anchor = barcode2;
+            if (!anchor.isEmpty()) {
+                List<String> values = new ArrayList<>();
+                if (codes != null) for (Code code : codes) values.add(code.value);
+                String found = BrandProfile.sharedDigitsCounterpart(sharedRule, anchor, values);
+                // Not among the photo's barcodes: read the barcodes of this label again, enlarged (only for a record that would show IMEI 2 only).
+                if (found.isEmpty() && (imei.isEmpty() || ImeiSource.usesSecondImei(raw, imei))) {
+                    long tb = Prof.now();
+                    for (Code code : barcodesEnlarged(photo)) values.add(code.value);
+                    found = BrandProfile.sharedDigitsCounterpart(sharedRule, anchor, values);
+                    Prof.add(found.isEmpty() ? "barcodeRetryMiss" : "barcodeRetryHit", tb);
+                }
+                if (!found.isEmpty()) {
+                    barcode1 = found;
+                    imei1ByRule = !found.equals(firstImeiIn(raw)); // the printed IMEI 1, when read, confirms it
+                    if (barcode2.equals(found)) barcode2 = ""; // that barcode was IMEI 1, wrongly taken as IMEI 2 (a wide barcode box over both lines)
+                }
+            }
+        }
+        // The label's own crop gave no IMEI 1 (nothing, or only IMEI 2), but the whole-photo read had this label's printed IMEI 1 line with a
+        // valid checksum: that number is used, marked for review (it was not confirmed by the label's own read). Never when a barcode decided.
+        boolean imei1FromPhoto = false;
+        if (barcode1.isEmpty() && !printedImei1.isEmpty() && (imei.isEmpty() || ImeiSource.usesSecondImei(raw, imei)) && !printedImei1.equals(barcode2)) {
+            imei = printedImei1; imei1FromPhoto = true; raw += "\nIMEI 1 (photo): " + printedImei1;
+        }
+        if (!barcode2.isEmpty() && barcode2.equals(barcode1)) barcode2 = "";
         if (!barcode1.isEmpty()) { imei = barcode1; raw += "\nIMEI 1 (barcode): " + barcode1; }
         if (!barcode2.isEmpty()) raw += "\nIMEI 2 (barcode): " + barcode2;
         String id = UUID.randomUUID().toString();
@@ -153,9 +460,10 @@ final class ImageScanner {
             float factor = RECORD_EDGE / (float) longest;
             saved = Bitmap.createScaledBitmap(photo, Math.max(1, Math.round(photo.getWidth() * factor)), Math.max(1, Math.round(photo.getHeight() * factor)), true);
         }
+        tm = Prof.now();
         try (FileOutputStream stream = new FileOutputStream(ScanStore.image(context, id))) {
             if (!saved.compress(Bitmap.CompressFormat.JPEG, 80, stream)) throw new IllegalStateException("Could not save crop");
-        } finally { if (saved != photo) saved.recycle(); }
+        } finally { if (saved != photo) saved.recycle(); Prof.add("saveJpeg", tm); }
         JSONObject row = new JSONObject();
         row.put("id", id);
         row.put("pictureId", pictureId());
@@ -164,8 +472,21 @@ final class ImageScanner {
         row.put("personId", personId);
         row.put("name", filename);
         row.put("imageName", id + ".jpg");
-        row.put("model", model(raw + " " + filename));
+        String modelText = raw + " " + filename;
+        row.put("model", model(modelText));
+        // Never silent about an unclear model code: the record asks for a check (the IMEI status is not affected).
+        SamsungModel.Reading modelReading = SamsungModel.read(modelText);
+        if (modelReading.uncertain && !modelReading.note.isEmpty()) { row.put("modelNeedsReview", true); row.put("modelNote", modelReading.note); }
+        // No model code read at all (only a series name, or nothing): never presented as a checked model.
+        else if (modelReading.model.isEmpty()) { row.put("modelNeedsReview", true); row.put("modelNote", brand.brand.note("noCode")); }
         row.put("imei", imei);
+        row.put("brand", brand.brand.id);
+        if (brand.unclear) row.put("brandNeedsReview", true); // no brand evidence on the label: a person confirms the model and numbers
+        // Never silent: when only the label's IMEI 2 could be read, the number is kept but marked so the app asks for a review.
+        if (!imei.isEmpty() && ImeiSource.usesSecondImei(raw, imei)) row.put("imeiFallback", true);
+        // IMEI 1 found by a rule, not read from its own printed line: kept, but never accepted without a person's check.
+        if (imei1ByRule && imei.equals(barcode1)) { row.put("imeiNeedsReview", true); row.put("imeiNote", sharedRule.note); }
+        else if (imei1FromPhoto) { row.put("imeiNeedsReview", true); row.put("imeiNote", ImeiSource.PHOTO_READ_NOTE); }
         row.put("status", imei.isEmpty() ? "Review" : "Valid");
         row.put("cropNeedsReview", cropReview);
         // The review screen asks "1 device or N?" for a photo that shows more labels than could be separated.
@@ -388,53 +709,8 @@ final class ImageScanner {
         return out;
     }
 
-    private static List<Rect> labels(Text text, int width, int height) { return labels(linesOf(text), width, height); }
-
-    private static List<Rect> labels(List<Line> lines, int width, int height) {
-        List<Rect> hits = new ArrayList<>();
-        List<String> numbers = new ArrayList<>();
-        for (Line line : lines) {
-            if (!LABEL_ONE.matcher(line.text).find()) continue;
-            Rect box = line.box;
-            Matcher number = NUMBER.matcher(line.text);
-            String imei = number.find() ? number.group().replaceAll("\\D", "") : "";
-            boolean duplicate = false;
-            for (Rect previous : hits) {
-                if (Math.abs(previous.centerX() - box.centerX()) < Math.max(24, box.width() / 3)
-                    && Math.abs(previous.centerY() - box.centerY()) < Math.max(24, box.height() * 2)) duplicate = true;
-            }
-            if (!duplicate) { hits.add(new Rect(box)); numbers.add(imei); }
-        }
-        if (hits.size() < 2) return hits;
-        int xSpread = hits.stream().mapToInt(Rect::centerX).max().orElse(0) - hits.stream().mapToInt(Rect::centerX).min().orElse(0);
-        int ySpread = hits.stream().mapToInt(Rect::centerY).max().orElse(0) - hits.stream().mapToInt(Rect::centerY).min().orElse(0);
-        boolean vertical = (double) ySpread / height >= (double) xSpread / width;
-        int major = vertical ? height : width, minor = vertical ? width : height;
-        List<Integer> order = new ArrayList<>();
-        for (int index = 0; index < hits.size(); index++) order.add(index);
-        order.sort(Comparator.comparingInt(index -> vertical ? hits.get(index).centerY() : hits.get(index).centerX()));
-        List<Rect> groups = new ArrayList<>();
-        List<String> groupNumbers = new ArrayList<>();
-        for (int index : order) {
-            Rect hit = hits.get(index);
-            String imei = numbers.get(index);
-            int match = -1;
-            for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
-                Rect group = groups.get(groupIndex);
-                if (imei.isEmpty() || !imei.equals(groupNumbers.get(groupIndex))) continue;
-                int gap = vertical ? hit.centerY() - group.bottom : hit.centerX() - group.right;
-                int cross = vertical ? Math.abs(hit.centerX() - group.centerX()) : Math.abs(hit.centerY() - group.centerY());
-                int span = vertical ? Math.max(hit.bottom, group.bottom) - Math.min(hit.top, group.top)
-                    : Math.max(hit.right, group.right) - Math.min(hit.left, group.left);
-                if (gap < major * 0.18 && cross < minor * 0.65 && span < major * 0.27) { match = groupIndex; break; }
-            }
-            if (match >= 0) groups.get(match).union(hit);
-            else { groups.add(new Rect(hit)); groupNumbers.add(imei); }
-        }
-        return groups;
-    }
-
-    private static List<Rect> boxRegions(Bitmap image, List<Rect> labels) {
+    /** @param why receives, in why[0], the reason when no regions could be made (diagnostics only). */
+    private static List<Rect> boxRegions(Bitmap image, List<Rect> labels, String[] why) {
         int width = image.getWidth(), height = image.getHeight();
         int xSpread = labels.stream().mapToInt(Rect::centerX).max().orElse(0) - labels.stream().mapToInt(Rect::centerX).min().orElse(0);
         int ySpread = labels.stream().mapToInt(Rect::centerY).max().orElse(0) - labels.stream().mapToInt(Rect::centerY).min().orElse(0);
@@ -447,9 +723,9 @@ final class ImageScanner {
             Rect before = ordered.get(index - 1), after = ordered.get(index);
             int from = vertical ? before.bottom : before.right;
             int to = vertical ? after.top : after.left;
-            if (to - from < Math.max(18, extent / 70)) return new ArrayList<>();
+            if (to - from < Math.max(18, extent / 70)) { why[0] = "gap " + (to - from) + "px between labels " + (index - 1) + "/" + index + " < " + Math.max(18, extent / 70); return new ArrayList<>(); }
             int[] seam = visibleSeam(image, vertical, from, to);
-            if (seam == null) return new ArrayList<>();
+            if (seam == null) { why[0] = "no visible seam between labels " + (index - 1) + "/" + index + " (gap " + (to - from) + "px)"; return new ArrayList<>(); }
             seams.add(seam);
         }
         List<Rect> regions = new ArrayList<>();
@@ -458,9 +734,9 @@ final class ImageScanner {
             int end = index < seams.size() ? seams.get(index)[1] : extent;
             Rect region = vertical ? new Rect(0, start, width, end) : new Rect(start, 0, end, height);
             if (!region.contains(ordered.get(index).centerX(), ordered.get(index).centerY())
-                || region.width() < width / 8 || region.height() < height / 8) return new ArrayList<>();
+                || region.width() < width / 8 || region.height() < height / 8) { why[0] = "region " + index + " does not hold its label or is too small"; return new ArrayList<>(); }
             for (int other = 0; other < ordered.size(); other++)
-                if (other != index && Rect.intersects(region, ordered.get(other))) return new ArrayList<>();
+                if (other != index && Rect.intersects(region, ordered.get(other))) { why[0] = "region " + index + " overlaps label " + other; return new ArrayList<>(); }
             regions.add(region);
         }
         return regions;
@@ -509,6 +785,49 @@ final class ImageScanner {
         return ((color >> 16 & 255) * 3 + (color >> 8 & 255) * 6 + (color & 255)) / 10;
     }
 
+    /**
+     * Last chance for a label whose IMEI 1 could not be read (blurred, glare): read it again enlarged and with stronger contrast.
+     * Returns the text of the first enlarged read that gives a checksum-valid IMEI 1 line, or "" when nothing helped.
+     * Costs extra reads only for labels that would otherwise be left without an IMEI.
+     */
+    private static String rescueText(TextRecognizer recognizer, Bitmap photo) {
+        if (recognizer == null || photo == null) return "";
+        float[][] tries = {{2f, 1.7f}, {1.5f, 2.4f}};
+        for (float[] attempt : tries) {
+            Bitmap big = null;
+            try {
+                big = enhance(photo, attempt[0], attempt[1]);
+                String text = Tasks.await(recognizer.process(InputImage.fromBitmap(big, 0))).getText();
+                if (!firstImeiIn(text).isEmpty()) return text;
+            } catch (Exception error) { /* a rescue never breaks a scan */ }
+            finally { if (big != null) big.recycle(); }
+        }
+        return "";
+    }
+
+    /** Enlarged grey copy with stretched contrast (text on a blurred, glare-washed label becomes easier to read). */
+    static Bitmap enhance(Bitmap source, float scale, float contrast) {
+        float fit = Math.min(scale, 3600f / Math.max(source.getWidth(), source.getHeight()));
+        int width = Math.max(1, Math.round(source.getWidth() * fit)), height = Math.max(1, Math.round(source.getHeight() * fit));
+        Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        android.graphics.ColorMatrix grey = new android.graphics.ColorMatrix();
+        grey.setSaturation(0f);
+        float shift = (-0.5f * contrast + 0.5f) * 255f;
+        grey.postConcat(new android.graphics.ColorMatrix(new float[]{contrast, 0, 0, 0, shift, 0, contrast, 0, 0, shift, 0, 0, contrast, 0, shift, 0, 0, 0, 1, 0}));
+        paint.setColorFilter(new android.graphics.ColorMatrixColorFilter(grey));
+        new Canvas(out).drawBitmap(source, null, new Rect(0, 0, width, height), paint);
+        return out;
+    }
+
+    /** A valid IMEI taken from "IMEI 1" text only (never the IMEI 2 fallback). */
+    private static String firstImeiIn(String text) {
+        String raw = text.replace('\n', ' ');
+        Set<String> values = new HashSet<>(); Matcher found = FIRST.matcher(raw);
+        while (found.find()) { String value = found.group(1).replaceAll("\\D", ""); if (luhn(value)) values.add(value); }
+        return values.size() == 1 ? values.iterator().next() : "";
+    }
+
     private static String preferredImei(Text text) {
         String raw = text.getText().replace('\n', ' ');
         for (Pattern pattern : new Pattern[]{FIRST, SECOND}) {
@@ -528,6 +847,19 @@ final class ImageScanner {
     static final class Code { final String value; final Rect box; Code(String value, Rect box) { this.value = value; this.box = box; } }
 
     /** Every Code 128 / EAN-13 barcode in the photo. A failure only means no barcode help for this photo. */
+    /** Barcodes of a label read again at up to twice the size (long edge at most 2400 px, so memory stays bounded). Empty when it cannot help. */
+    private static List<Code> barcodesEnlarged(Bitmap photo) {
+        int longest = Math.max(photo.getWidth(), photo.getHeight());
+        float factor = Math.min(2f, 2400f / longest);
+        if (factor < 1.25f) return new ArrayList<>();
+        Bitmap big = null;
+        try {
+            big = Bitmap.createScaledBitmap(photo, Math.round(photo.getWidth() * factor), Math.round(photo.getHeight() * factor), true);
+            return barcodes(big);
+        } catch (Throwable error) { return new ArrayList<>(); } // never break a scan (out of memory included)
+        finally { if (big != null && big != photo) big.recycle(); }
+    }
+
     private static List<Code> barcodes(Bitmap bitmap) {
         List<Code> found = new ArrayList<>();
         BarcodeScanner scanner = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder()
@@ -604,21 +936,13 @@ final class ImageScanner {
         return total % 10 == 0;
     }
 
+    /** The model as stored (see SamsungModel for the rules); modelReading() says whether it needs a review. */
     private static String model(String text) {
-        java.util.regex.Matcher labelled = java.util.regex.Pattern.compile("\\bmodel\\s*[:：-]?\\s*S\\s*M\\s*[-–—]?\\s*([A-Z0-9]{5})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+        SamsungModel.Reading reading = SamsungModel.read(text);
+        if (!reading.model.isEmpty()) return reading.model;
+        // No usable code shape at all: an unreadable code is kept as read (as before), then the series names.
         java.util.regex.Matcher visible = java.util.regex.Pattern.compile("\\bS\\s*M\\s*[-–—]\\s*([A-Z0-9]{5})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
-        String labelledCode = labelled.find() ? labelled.group(1).toUpperCase(java.util.Locale.US) : "";
-        java.util.HashSet<String> exactCodes = new java.util.HashSet<>();
-        String firstCode = "";
-        while (visible.find()) {
-            String code = visible.group(1).toUpperCase(java.util.Locale.US);
-            if (firstCode.isEmpty()) firstCode = code;
-            if (code.matches("[A-Z][0-9]{3}[A-Z0-9]")) exactCodes.add(code);
-        }
-        if (!labelledCode.isEmpty() && exactCodes.contains(labelledCode)) return "SM-" + labelledCode;
-        if (exactCodes.size() == 1) return "SM-" + exactCodes.iterator().next();
-        if (!labelledCode.isEmpty()) return "SM-" + labelledCode;
-        if (!firstCode.isEmpty()) return "SM-" + firstCode;
+        if (visible.find()) return "SM-" + visible.group(1).toUpperCase(java.util.Locale.US);
         String value = text.toLowerCase(java.util.Locale.ROOT);
         if (value.matches("(?s).*samsung.*s26.*|.*sm[- ]?s94.*")) return "Samsung Galaxy S26 series";
         if (value.matches("(?s).*samsung.*s25.*|.*sm[- ]?s93.*")) return "Samsung Galaxy S25 series";

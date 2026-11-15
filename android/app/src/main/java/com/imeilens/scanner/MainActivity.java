@@ -39,8 +39,19 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private android.webkit.PermissionRequest cameraRequest;
 
+    // Phone camera: the permission request that is waiting for the user's answer (person, mode), if any.
+    private String[] cameraAfterPermission;
+
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
+        if (code == 1011) {
+            String[] wanted = cameraAfterPermission;
+            cameraAfterPermission = null;
+            if (wanted == null) return;
+            if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) launchCamera(wanted[0], wanted[1]);
+            else notifyCamera("denied", CameraInbox.waiting(ScanStore.root(this)).size());
+            return;
+        }
         if (code == 1010 && cameraRequest != null) {
             if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED)
                 cameraRequest.grant(new String[]{android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE});
@@ -84,6 +95,15 @@ public final class MainActivity extends Activity {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return loader.shouldInterceptRequest(request.getUrl());
             }
+            @Override public void onPageFinished(WebView view, String url) {
+                // Give the page a moment to attach its listeners, then deliver what finished before it loaded.
+                view.postDelayed(() -> {
+                    pageReady = true;
+                    android.util.Log.i("IMEI-Lens", "Page ready: delivering " + afterPage.size() + " queued notice(s)");
+                    for (Runnable action : afterPage) action.run();
+                    afterPage.clear();
+                }, 1500);
+            }
         });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(android.webkit.PermissionRequest request) {
@@ -120,6 +140,7 @@ public final class MainActivity extends Activity {
         } else root.setFitsSystemWindows(true);
         setContentView(root);
         webView.loadUrl("https://appassets.androidplatform.net/assets/index.html");
+        resumeFolderJobs();
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
@@ -127,6 +148,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 1006) { handleCameraResult(resultCode); return; }
         if (requestCode == 1002) {
             if (webFileCallback != null) webFileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
             webFileCallback = null;
@@ -148,52 +170,66 @@ public final class MainActivity extends Activity {
             return;
         }
         if (requestCode == 1004) {
-            boolean saved = false;
-            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingFolder != null) {
-                try {
-                    Uri tree = data.getData();
-                    Uri parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
-                    Uri folder = DocumentsContract.createDocument(getContentResolver(), parent, DocumentsContract.Document.MIME_TYPE_DIR, pendingFolderName);
-                    if (folder == null) throw new IllegalStateException("Cannot create folder");
-                    File[] files = pendingFolder.listFiles();
-                    if (files != null) for (File file : files) {
-                        String name = file.getName();
-                        String mime = name.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : name.endsWith(".jpg") ? "image/jpeg" : "application/octet-stream";
-                        Uri target = DocumentsContract.createDocument(getContentResolver(), folder, mime, name);
-                        if (target == null) throw new IllegalStateException("Cannot create " + name);
-                        try (InputStream input = new FileInputStream(file); OutputStream output = getContentResolver().openOutputStream(target)) {
-                            if (output == null) throw new IllegalStateException("Cannot open " + name);
-                            byte[] chunk = new byte[8192]; int count;
-                            while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
-                        }
-                    }
-                    saved = true;
-                } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Folder export failed", error); }
-            }
-            String name = pendingFolderName;
-            deleteFolder(pendingFolder);
+            // The job was journaled before the picker opened, so this works also when Android ended the app while the picker was open.
+            String key = folderJobs().getString(AWAITING_PICKER, null);
+            folderJobs().edit().remove(AWAITING_PICKER).commit();
+            FolderExport.Job job = key == null ? null : FolderExport.load(jobStore(key));
             pendingFolder = null;
             pendingFolderName = null;
-            reportExport(saved ? "saved" : resultCode == RESULT_CANCELED ? "cancelled" : "failed", name);
+            if (job == null) { reportExport("failed", "the export"); return; }
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                FolderExport.deleteFolder(new File(job.staged));
+                jobStore(key).remove(FolderExport.KEY);
+                reportExport(resultCode == RESULT_CANCELED ? "cancelled" : "failed", job.sub);
+                return;
+            }
+            Uri tree = data.getData();
+            // Keep the access across a restart, so an interrupted copy can be finished; released again when the job is done.
+            try { getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION); }
+            catch (Exception ignored) { /* the copy below still works while the app runs */ }
+            job.tree = tree.toString();
+            job.rootId = DocumentsContract.getTreeDocumentId(tree);
+            job.where = folderLabel(tree);
+            job.awaitingPicker = false;
+            FolderExport.save(jobStore(key), job);
+            EXPORTS.execute(() -> runFolderJob(key, false));
             return;
         }
         if (requestCode == 1003) {
-            boolean saved = false;
-            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingExport != null) {
-                try (InputStream input = new FileInputStream(pendingExport);
-                     OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+            // The in-memory record is gone when Android ended the process during the Save dialog: use the journal.
+            ExportCommit.Pending pending = pendingExport != null && pendingExportName != null
+                ? new ExportCommit.Pending(pendingExport, pendingExportName, pendingExport.length())
+                : ExportCommit.recover(exportStore());
+            boolean ok = resultCode == RESULT_OK && data != null && data.getData() != null;
+            Uri target = ok ? data.getData() : null;
+            android.util.Log.i("IMEI-Lens", "Save result: ok=" + ok + ", staged in memory=" + (pendingExport != null) + ", recovered from journal=" + (pending != null));
+            boolean written = false;
+            if (ok && pending != null) {
+                try (OutputStream output = getContentResolver().openOutputStream(target, "wt")) {
                     if (output == null) throw new IllegalStateException("Cannot open destination");
-                    byte[] chunk = new byte[8192]; int count;
-                    while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
-                    output.flush();
-                    saved = true;
+                    ExportCommit.copyVerified(pending, output);
+                    written = true;
                 } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Export failed", error); }
+                // Read the file back after the stream is closed and count what is really there. (The size the provider
+                // reports can be stale for a moment, even 0 for a good file, so it is never used to delete anything.)
+                if (written) {
+                    long onDisk = bytesInDocument(target);
+                    android.util.Log.i("IMEI-Lens", "Save check: expected=" + pending.size + ", read back=" + onDisk);
+                    written = ExportCommit.sizeMatches(onDisk, pending.size);
+                }
             }
-            String name = pendingExportName;
+            ExportCommit.Outcome outcome = ExportCommit.decide(ok, resultCode == RESULT_CANCELED, pending, written);
+            // Never leave an empty or partial file behind unannounced.
+            if (target != null && ExportCommit.mustRemoveTarget(outcome)) removeDocument(target);
+            String name = pending != null ? pending.name : pendingExportName;
+            // No record in memory: this app was restarted while the Save dialog was open (the page must be told, after it has loaded).
+            boolean afterRestart = pendingExport == null;
+            if (pending != null) pending.file.delete();
             if (pendingExport != null) pendingExport.delete();
             pendingExport = null;
             pendingExportName = null;
-            reportExport(saved ? "saved" : resultCode == RESULT_CANCELED ? "cancelled" : "failed", name);
+            ExportCommit.clear(exportStore());
+            reportExport(ExportCommit.status(outcome), name == null ? "the export" : name, "", afterRestart);
             return;
         }
         if (requestCode != 1001 || resultCode != RESULT_OK || data == null) return;
@@ -203,6 +239,82 @@ public final class MainActivity extends Activity {
             WorkManager.getInstance(this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE,
                 new OneTimeWorkRequest.Builder(ScanWorker.class).build());
         }
+        notifyWeb();
+    }
+
+    // ---- The phone's own camera app (the only camera this app uses) ----
+
+    private android.content.SharedPreferences cameraPrefs() { return getSharedPreferences("camera-capture", MODE_PRIVATE); }
+
+    private void notifyCamera(String state, int waiting) {
+        final String script = "window.dispatchEvent(new CustomEvent('android-camera',{detail:{state:'" + state + "',waiting:" + waiting + "}}))";
+        runOnUiThread(() -> webView.evaluateJavascript(script, null));
+    }
+
+    /**
+     * Opens the phone's camera app. It writes the full-size photo straight into this app's private camera-waiting folder; the target
+     * is journaled first, so the photo is still found when Android ended this app while the camera was open.
+     * mode: "now" (scan the photo right away), "series" (scan it, then open the camera again) or "collect" (keep it for a later "Scan now").
+     */
+    private void launchCamera(String person, String mode) {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            cameraAfterPermission = new String[]{person, mode};
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, 1011);
+            return;
+        }
+        File shot;
+        Uri target;
+        try {
+            shot = CameraInbox.newShot(ScanStore.root(this));
+            target = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".files", shot);
+        } catch (Exception error) {
+            android.util.Log.e("IMEI-Lens", "Camera: could not prepare the photo file", error);
+            notifyCamera("failed", CameraInbox.waiting(ScanStore.root(this)).size());
+            return;
+        }
+        cameraPrefs().edit().putString("shot", shot.getAbsolutePath()).putString("person", person).putString("mode", mode).commit();
+        Intent intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+        intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, target);
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setClipData(ClipData.newRawUri("", target)); // older Android versions grant access through the clip
+        try { startActivityForResult(intent, 1006); }
+        catch (Exception error) {
+            android.util.Log.e("IMEI-Lens", "Camera: no camera app could be opened", error);
+            cameraPrefs().edit().remove("shot").commit();
+            CameraInbox.settle(shot);
+            notifyCamera("unavailable", CameraInbox.waiting(ScanStore.root(this)).size());
+        }
+    }
+
+    private void handleCameraResult(int resultCode) {
+        android.content.SharedPreferences prefs = cameraPrefs();
+        String path = prefs.getString("shot", null), person = prefs.getString("person", selectedPerson), mode = prefs.getString("mode", "now");
+        prefs.edit().remove("shot").commit();
+        File root = ScanStore.root(this);
+        File shot = path == null ? null : new File(path);
+        boolean ours = shot != null && CameraInbox.waitingDir(root).equals(shot.getParentFile());
+        boolean real = ours && CameraInbox.settle(shot); // a cancelled camera leaves nothing; a real photo is never deleted here
+        android.util.Log.i("IMEI-Lens", "Camera result: code=" + resultCode + ", photo=" + real + ", mode=" + mode);
+        if (!real || resultCode != RESULT_OK) { notifyCamera(real ? "kept" : (resultCode == RESULT_CANCELED ? "cancelled" : "failed"), CameraInbox.waiting(root).size()); return; }
+        if ("collect".equals(mode)) { notifyCamera("waiting", CameraInbox.waiting(root).size()); return; }
+        File moved = CameraInbox.accept(root, shot);
+        if (moved == null) { notifyCamera("failed", CameraInbox.waiting(root).size()); return; }
+        queueCameraPhotos(java.util.Collections.singletonList(moved), person);
+        notifyCamera("queued", CameraInbox.waiting(root).size());
+        if ("series".equals(mode)) runOnUiThread(() -> launchCamera(person, mode));
+    }
+
+    /** Starts the same background scan as shared photos, or adds the photos to the one that is already running. */
+    private void queueCameraPhotos(java.util.List<File> files, String person) {
+        JSONArray queue = new JSONArray();
+        for (File file : files) {
+            try { queue.put(new JSONObject().put("uri", Uri.fromFile(file).toString()).put("name", file.getName())); }
+            catch (Exception ignored) { /* a name that cannot be written is skipped */ }
+        }
+        if (queue.length() == 0) return;
+        if (ScanStore.start(this, queue, person)) {
+            WorkManager.getInstance(this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+        } else ScanStore.addPending(this, queue, person);
         notifyWeb();
     }
 
@@ -289,93 +401,167 @@ public final class MainActivity extends Activity {
         runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-save-folder',{detail:" + detail + "}))", null));
     }
 
-    private void notifySaved(boolean ok, int count, String where, String problem) {
+    private void notifySaved(boolean ok, int count, String where, String problem, boolean resumed) {
         JSONObject detail = new JSONObject();
-        try { detail.put("ok", ok); detail.put("count", count); detail.put("where", where); detail.put("error", problem); } catch (Exception ignored) { }
+        try { detail.put("ok", ok); detail.put("count", count); detail.put("where", where); detail.put("error", problem); detail.put("resumed", resumed); } catch (Exception ignored) { }
         runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-saved',{detail:" + detail + "}))", null));
     }
 
-    /** The id of a file or folder with this name inside a folder of the saved tree, or null. */
-    private String findChild(Uri tree, String parentId, String name) {
-        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId);
-        try (Cursor cursor = getContentResolver().query(children, new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null) while (cursor.moveToNext()) if (name.equals(cursor.getString(1))) return cursor.getString(0);
-        } catch (Exception ignored) { }
-        return null;
+    // ---- Folder exports: journaled jobs, run one at a time off the UI thread, resumed after a restart (see FolderExport) ----
+
+    private static final java.util.concurrent.ExecutorService EXPORTS = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final String JOB_PREFIX = "fx:", AWAITING_PICKER = "awaiting-picker";
+
+    private android.content.SharedPreferences folderJobs() { return getSharedPreferences("folder-exports", MODE_PRIVATE); }
+
+    /** The journal of one job (FolderExport writes under its own key name; each job has its own entry here). */
+    private ExportCommit.Store jobStore(String key) {
+        final android.content.SharedPreferences prefs = folderJobs();
+        return new ExportCommit.Store() {
+            @Override public String get(String ignored) { return prefs.getString(key, null); }
+            @Override public void put(String ignored, String value) { prefs.edit().putString(key, value).commit(); }
+            @Override public void remove(String ignored) { prefs.edit().remove(key).commit(); }
+        };
     }
 
-    /** Remove the pictures and numbers file an earlier save left in this folder, so a new save replaces them exactly. */
-    private void removeOldReport(Uri tree, String parentId) {
-        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId);
-        java.util.ArrayList<String> old = new java.util.ArrayList<>();
-        try (Cursor cursor = getContentResolver().query(children, new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null) while (cursor.moveToNext()) {
-                String name = cursor.getString(1);
-                if (name != null && (name.equals("numbers.txt") || name.matches("^\\d{3,4}-.+\\.(jpg|jpeg|png|webp)$"))) old.add(cursor.getString(0));
+    private static String jobKey(File staged) { return JOB_PREFIX + staged.getName(); }
+
+    /** Copy the staged files into the remembered folder (in a sub-folder). Journaled first, so it is finished even if the app is closed meanwhile. */
+    private void commitToSavedFolder(File folder, String subfolder, boolean clean) {
+        android.content.SharedPreferences prefs = getSharedPreferences("app-state", MODE_PRIVATE);
+        String saved = prefs.getString("save-tree", "");
+        if (saved.isEmpty()) { deleteFolder(folder); notifySaved(false, 0, "", "No save folder is chosen. Choose one in Settings.", false); return; }
+        FolderExport.Job job = new FolderExport.Job();
+        job.mode = FolderExport.MODE_SAVED;
+        job.staged = folder.getAbsolutePath();
+        job.tree = saved;
+        job.rootId = DocumentsContract.getTreeDocumentId(Uri.parse(saved));
+        job.sub = subfolder == null ? "" : subfolder.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+        job.clean = clean;
+        job.where = prefs.getString("save-tree-name", "your folder");
+        String key = jobKey(folder);
+        FolderExport.save(jobStore(key), job);
+        EXPORTS.execute(() -> runFolderJob(key, false));
+    }
+
+    /** Runs (or resumes) one journaled job and tells the page. Called on the EXPORTS thread only. */
+    private void runFolderJob(String key, boolean atStart) {
+        ExportCommit.Store store = jobStore(key);
+        FolderExport.Job job = FolderExport.load(store);
+        if (job == null || job.awaitingPicker) return;
+        FolderExport.Result result;
+        try { result = FolderExport.run(new SafDocs(Uri.parse(job.tree)), store, job, new java.util.Date()); }
+        catch (Exception error) {
+            android.util.Log.e("IMEI-Lens", "Folder export could not run", error);
+            store.remove(FolderExport.KEY);
+            result = new FolderExport.Result();
+            result.problem = "Could not save to the folder.";
+        }
+        if (atStart) result.resumed = true; // finished after the app was closed: the page is not waiting for it, so it must be told explicitly
+        if (!result.ok) android.util.Log.e("IMEI-Lens", "Folder export: " + result.problem);
+        if (FolderExport.MODE_PICKER.equals(job.mode)) {
+            // A one-off folder: give its access back (the remembered save folder keeps its own permission).
+            String remembered = getSharedPreferences("app-state", MODE_PRIVATE).getString("save-tree", "");
+            if (!job.tree.equals(remembered)) {
+                try { getContentResolver().releasePersistableUriPermission(Uri.parse(job.tree), Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION); }
+                catch (Exception ignored) { /* never taken or already gone */ }
             }
-        } catch (Exception ignored) { }
-        for (String id : old) {
-            try { DocumentsContract.deleteDocument(getContentResolver(), DocumentsContract.buildDocumentUriUsingTree(tree, id)); } catch (Exception ignored) { }
+            final FolderExport.Result done = result;
+            afterPageLoad(() -> reportExport(done.ok ? "saved" : "failed", job.sub, done.problem, done.resumed));
+        } else {
+            String where = result.where + (result.dated ? " (a new dated folder: this storage cannot replace files safely, so the earlier export was kept)" : "");
+            final FolderExport.Result done = result;
+            afterPageLoad(() -> notifySaved(done.ok, done.copied, where, done.problem, done.resumed));
         }
     }
 
-    private static String mimeFor(String name) {
-        String lower = name.toLowerCase(java.util.Locale.ROOT);
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".webp")) return "image/webp";
-        if (lower.endsWith(".txt")) return "text/plain";
-        return "application/octet-stream";
+    /** At start: finish every folder export that was interrupted (the app was closed or ended during the copy). */
+    private void resumeFolderJobs() {
+        for (String key : new java.util.ArrayList<>(folderJobs().getAll().keySet())) {
+            if (!key.startsWith(JOB_PREFIX)) continue;
+            FolderExport.Job job = FolderExport.load(jobStore(key));
+            if (job == null) { folderJobs().edit().remove(key).commit(); continue; }
+            if (job.awaitingPicker) {
+                // The picker result may still arrive to this new screen; drop it only when it is old.
+                File staged = new File(job.staged);
+                if (!staged.isDirectory() || staged.lastModified() < System.currentTimeMillis() - 24L * 3600L * 1000L) {
+                    FolderExport.deleteFolder(staged);
+                    folderJobs().edit().remove(key).commit();
+                }
+                continue;
+            }
+            EXPORTS.execute(() -> runFolderJob(key, true));
+        }
     }
 
-    /** Copy the staged files into the remembered folder (in a sub-folder), replacing files with the same names. */
-    private void commitToSavedFolder(File folder, String subfolder, boolean clean) {
-        int copied = 0;
-        String where = "", problem = "";
-        try {
-            android.content.SharedPreferences prefs = getSharedPreferences("app-state", MODE_PRIVATE);
-            String saved = prefs.getString("save-tree", "");
-            if (saved.isEmpty()) throw new IllegalStateException("No save folder is chosen. Choose one in Settings.");
-            Uri tree = Uri.parse(saved);
-            String rootId = DocumentsContract.getTreeDocumentId(tree);
-            String parentId = rootId;
-            String sub = subfolder == null ? "" : subfolder.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
-            where = prefs.getString("save-tree-name", "your folder");
-            if (!sub.isEmpty()) {
-                String existing = findChild(tree, rootId, sub);
-                if (existing != null) parentId = existing;
-                else {
-                    Uri created = DocumentsContract.createDocument(getContentResolver(), DocumentsContract.buildDocumentUriUsingTree(tree, rootId), DocumentsContract.Document.MIME_TYPE_DIR, sub);
-                    if (created == null) throw new IllegalStateException("Cannot create the folder " + sub + ".");
-                    parentId = DocumentsContract.getDocumentId(created);
-                }
-                where = where + "/" + sub;
+    /** Staged folders that a journaled job still needs (cache cleaning must keep them). */
+    private java.util.Set<String> journaledFolders() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (String key : folderJobs().getAll().keySet()) {
+            if (!key.startsWith(JOB_PREFIX)) continue;
+            FolderExport.Job job = FolderExport.load(jobStore(key));
+            if (job != null) out.add(new File(job.staged).getAbsolutePath());
+        }
+        return out;
+    }
+
+    private boolean pageReady;
+    private final java.util.ArrayList<Runnable> afterPage = new java.util.ArrayList<>();
+
+    /** Events sent before the page has loaded would be lost (a job resumed at start finishes early): queue them until it has. */
+    private void afterPageLoad(Runnable action) {
+        runOnUiThread(() -> {
+            android.util.Log.i("IMEI-Lens", "Folder export notice: " + (pageReady ? "page ready, delivered" : "queued until the page has loaded"));
+            if (pageReady) action.run(); else afterPage.add(action);
+        });
+    }
+
+    /** FolderExport.Docs on the Storage Access Framework, inside one granted folder tree. */
+    private final class SafDocs implements FolderExport.Docs {
+        private final Uri tree;
+        SafDocs(Uri tree) { this.tree = tree; }
+        private Uri doc(String id) { return DocumentsContract.buildDocumentUriUsingTree(tree, id); }
+
+        @Override public String find(String parentId, String name) throws Exception {
+            for (String[] child : children(parentId)) if (name.equals(child[1])) return child[0];
+            return null;
+        }
+        @Override public java.util.List<String[]> children(String parentId) throws Exception {
+            java.util.List<String[]> out = new java.util.ArrayList<>();
+            Uri uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId);
+            try (Cursor cursor = getContentResolver().query(uri, new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+                if (cursor == null) throw new java.io.IOException("Cannot read the folder.");
+                while (cursor.moveToNext()) out.add(new String[]{cursor.getString(0), cursor.getString(1)});
             }
-            if (clean) removeOldReport(tree, parentId);
-            File[] files = folder.listFiles();
-            if (files != null) {
-                java.util.Arrays.sort(files);
-                for (File file : files) {
-                    String existing = findChild(tree, parentId, file.getName());
-                    Uri target;
-                    if (existing != null) target = DocumentsContract.buildDocumentUriUsingTree(tree, existing);
-                    else {
-                        target = DocumentsContract.createDocument(getContentResolver(), DocumentsContract.buildDocumentUriUsingTree(tree, parentId), mimeFor(file.getName()), file.getName());
-                        if (target == null) throw new IllegalStateException("Cannot create " + file.getName() + ".");
-                    }
-                    try (InputStream input = new FileInputStream(file); OutputStream output = getContentResolver().openOutputStream(target, "wt")) {
-                        if (output == null) throw new IllegalStateException("Cannot open " + file.getName() + ".");
-                        byte[] chunk = new byte[16384]; int count;
-                        while ((count = input.read(chunk)) != -1) output.write(chunk, 0, count);
-                    }
-                    copied++;
-                }
-            }
-        } catch (Exception error) {
-            android.util.Log.e("IMEI-Lens", "Saving to the remembered folder failed", error);
-            problem = error.getMessage() == null ? "Could not save to the folder." : error.getMessage();
-        } finally { deleteFolder(folder); }
-        notifySaved(problem.isEmpty(), copied, where, problem);
+            return out;
+        }
+        @Override public String createDir(String parentId, String name) throws Exception {
+            Uri created = DocumentsContract.createDocument(getContentResolver(), doc(parentId), DocumentsContract.Document.MIME_TYPE_DIR, name);
+            return created == null ? null : DocumentsContract.getDocumentId(created);
+        }
+        @Override public String createFile(String parentId, String mime, String name) throws Exception {
+            Uri created = DocumentsContract.createDocument(getContentResolver(), doc(parentId), mime, name);
+            return created == null ? null : DocumentsContract.getDocumentId(created);
+        }
+        @Override public OutputStream openWrite(String id) throws Exception { return getContentResolver().openOutputStream(doc(id), "wt"); }
+        @Override public long readBack(String id) { return bytesInDocument(doc(id)); }
+        @Override public boolean canRename(String id) {
+            try (Cursor cursor = getContentResolver().query(doc(id), new String[]{DocumentsContract.Document.COLUMN_FLAGS}, null, null, null)) {
+                return cursor != null && cursor.moveToFirst() && (cursor.getInt(0) & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) != 0;
+            } catch (Exception error) { return false; }
+        }
+        @Override public String rename(String id, String newName) throws Exception {
+            Uri renamed = DocumentsContract.renameDocument(getContentResolver(), doc(id), newName);
+            return renamed == null ? id : DocumentsContract.getDocumentId(renamed); // null means: same id, renamed in place
+        }
+        @Override public boolean delete(String id) {
+            try { return DocumentsContract.deleteDocument(getContentResolver(), doc(id)); } catch (Exception error) { return false; }
+        }
+        @Override public boolean exists(String id) {
+            try (Cursor cursor = getContentResolver().query(doc(id), new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID}, null, null, null)) {
+                return cursor != null && cursor.moveToFirst();
+            } catch (Exception error) { return false; } // a removed document cannot be queried
+        }
     }
 
     private boolean packageInstalled(String name) {
@@ -399,10 +585,42 @@ public final class MainActivity extends Activity {
         File[] items = getCacheDir().listFiles();
         if (items == null) return;
         long cutoff = System.currentTimeMillis() - 60L * 60L * 1000L;
+        String journaled = ExportCommit.journaledPath(exportStore());
+        java.util.Set<String> folderJobs = journaledFolders();
         for (File item : items) {
-            if (item.getName().startsWith("imei-folder-") && item.isDirectory() && item.lastModified() < cutoff) deleteFolder(item);
-            else if (item.getName().startsWith("imei-export-") && item.lastModified() < cutoff) item.delete();
+            if (item.getName().startsWith("imei-folder-") && item.isDirectory() && item.lastModified() < cutoff && !folderJobs.contains(item.getAbsolutePath())) deleteFolder(item);
+            else if (item.getName().startsWith("imei-export-") && item.lastModified() < cutoff
+                && !item.getAbsolutePath().equals(journaled)) item.delete();
         }
+        // A journal older than a day, or whose file is gone, is dead: drop it.
+        if (journaled != null && (!new File(journaled).isFile() || new File(journaled).lastModified() < System.currentTimeMillis() - 24L * 3600L * 1000L)) {
+            new File(journaled).delete();
+            ExportCommit.clear(exportStore());
+        }
+    }
+
+    private ExportCommit.Store exportStore() {
+        final android.content.SharedPreferences prefs = getSharedPreferences("export-journal", MODE_PRIVATE);
+        return new ExportCommit.Store() {
+            @Override public String get(String key) { return prefs.getString(key, null); }
+            @Override public void put(String key, String value) { prefs.edit().putString(key, value).commit(); }
+            @Override public void remove(String key) { prefs.edit().remove(key).commit(); }
+        };
+    }
+
+    /** Number of bytes actually readable from the saved document, or -1 when it cannot be opened (then it is not judged). */
+    private long bytesInDocument(Uri uri) {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) return -1;
+            byte[] chunk = new byte[8192]; long total = 0; int count;
+            while ((count = input.read(chunk)) != -1) total += count;
+            return total;
+        } catch (Exception error) { return -1; }
+    }
+
+    private void removeDocument(Uri uri) {
+        try { DocumentsContract.deleteDocument(getContentResolver(), uri); }
+        catch (Exception error) { android.util.Log.e("IMEI-Lens", "Could not remove the incomplete file", error); }
     }
 
     private static void deleteFolder(File folder) {
@@ -412,10 +630,13 @@ public final class MainActivity extends Activity {
         folder.delete();
     }
 
-    private void reportExport(String status, String filename) {
-        runOnUiThread(() -> {
+    private void reportExport(String status, String filename) { reportExport(status, filename, "", false); }
+
+    private void reportExport(String status, String filename, String problem, boolean resumed) {
+        // After a restart the page is still loading when the result arrives: hold the message until it can be shown.
+        afterPageLoad(() -> {
             JSONObject detail = new JSONObject();
-            try { detail.put("status", status); detail.put("filename", filename == null ? "file" : filename); }
+            try { detail.put("status", status); detail.put("filename", filename == null ? "file" : filename); detail.put("problem", problem == null ? "" : problem); detail.put("resumed", resumed); }
             catch (Exception ignored) { }
             webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-export-result',{detail:" + detail + "}))", null);
         });
@@ -439,6 +660,28 @@ public final class MainActivity extends Activity {
             });
         }
 
+        /** Opens the phone's camera app. mode: "now", "series" or "collect" (see launchCamera). */
+        @JavascriptInterface public void takePhoto(String personId, String mode) {
+            final String person = personId.length() > 80 ? personId.substring(0, 80) : personId;
+            final String clean = "series".equals(mode) || "collect".equals(mode) ? mode : "now";
+            selectedPerson = person;
+            runOnUiThread(() -> launchCamera(person, clean));
+        }
+
+        /** How many photos were taken with "collect first" and are not scanned yet. */
+        @JavascriptInterface public int cameraWaiting() { return CameraInbox.waiting(ScanStore.root(MainActivity.this)).size(); }
+
+        /** Scans every waiting camera photo. Returns how many were queued. */
+        @JavascriptInterface public int scanWaitingCamera(String personId) {
+            final String person = personId.length() > 80 ? personId.substring(0, 80) : personId;
+            java.util.List<File> moved = CameraInbox.acceptAllWaiting(ScanStore.root(MainActivity.this), ScanStore.MAX_PHOTOS);
+            queueCameraPhotos(moved, person);
+            return moved.size();
+        }
+
+        /** Deletes the camera photos that were never scanned (only this app's own copies; the gallery is never touched). */
+        @JavascriptInterface public int discardWaitingCamera() { return CameraInbox.discardWaiting(ScanStore.root(MainActivity.this)); }
+
         /** Scan speed ("fast", "standard", "detailed") and products per photo (0 = Auto) for the background scanner. */
         @JavascriptInterface public void setScanOptions(String speed, int expected) {
             String clean = "fast".equals(speed) || "detailed".equals(speed) ? speed : "standard";
@@ -456,6 +699,26 @@ public final class MainActivity extends Activity {
             boolean value = QueueService.stopRequested;
             QueueService.stopRequested = false;
             return value;
+        }
+
+        /** The scan report: counts for the current scan and one entry per source photo (outcome, products, IMEIs, duplicates, reason). */
+        @JavascriptInterface public String scanReport() {
+            try { return ScanStore.reportJson(MainActivity.this); }
+            catch (Exception error) { return "{\"jobId\":\"\",\"report\":{},\"photos\":[]}"; }
+        }
+
+        /** Scans again the photos that failed or show a product without an IMEI. Returns how many photos were queued. */
+        @JavascriptInterface public int rescanNeeded(String personId) {
+            try {
+                String person = personId == null || personId.isEmpty() || personId.length() > 80 ? selectedPerson : personId;
+                JSONArray queue = ScanStore.rescanQueue(MainActivity.this);
+                if (queue.length() == 0) return 0;
+                if (ScanStore.start(MainActivity.this, queue, person)) {
+                    WorkManager.getInstance(MainActivity.this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+                } else ScanStore.addPending(MainActivity.this, queue, person);
+                notifyWeb();
+                return queue.length();
+            } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Rescan failed", error); return 0; }
         }
 
         @JavascriptInterface public String status() {
@@ -596,7 +859,8 @@ public final class MainActivity extends Activity {
                 folder = stagingFolder;
                 stagingFolder = null; stagingFolderToken = null; stagingFolderName = null;
             }
-            new Thread(() -> commitToSavedFolder(folder, subfolder, clean)).start();
+            // Journals the job and queues it (the copy itself runs on the export thread), keeping the order of quick successive saves.
+            commitToSavedFolder(folder, subfolder, clean);
             return true;
         }
 
@@ -647,6 +911,13 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public boolean finishFile(String token, String filename, String mimeType) {
             synchronized (MainActivity.this) {
                 if (stagingExport == null || !token.equals(stagingToken) || pendingExport != null) return false;
+                try { ExportCommit.begin(exportStore(), stagingExport, filename); }
+                catch (Exception error) {
+                    android.util.Log.e("IMEI-Lens", "Nothing to export", error);
+                    stagingExport.delete(); stagingExport = null; stagingToken = null;
+                    reportExport("failed", filename);
+                    return false;
+                }
                 pendingExport = stagingExport;
                 pendingExportName = filename;
                 stagingExport = null;
@@ -665,6 +936,7 @@ public final class MainActivity extends Activity {
                     if (pendingExport != null) pendingExport.delete();
                     pendingExport = null;
                     pendingExportName = null;
+                    ExportCommit.clear(exportStore());
                     reportExport("failed", filename);
                 }
             });
@@ -705,15 +977,26 @@ public final class MainActivity extends Activity {
                 stagingFolder = null;
                 stagingFolderToken = null;
                 stagingFolderName = null;
+                // Journal the job before the picker opens: if Android ends the app while the picker is open, the result still finds it.
+                FolderExport.Job job = new FolderExport.Job();
+                job.mode = FolderExport.MODE_PICKER;
+                job.staged = pendingFolder.getAbsolutePath();
+                job.sub = pendingFolderName;
+                job.awaitingPicker = true;
+                String key = jobKey(pendingFolder);
+                FolderExport.save(jobStore(key), job);
+                folderJobs().edit().putString(AWAITING_PICKER, key).commit();
             }
             runOnUiThread(() -> {
                 try {
                     Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                    intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                     startActivityForResult(intent, 1004);
                 } catch (Exception error) {
                     android.util.Log.e("IMEI-Lens", "Folder picker failed", error);
                     String name = pendingFolderName;
+                    String key = folderJobs().getString(AWAITING_PICKER, null);
+                    if (key != null) folderJobs().edit().remove(key).remove(AWAITING_PICKER).commit();
                     deleteFolder(pendingFolder);
                     pendingFolder = null;
                     pendingFolderName = null;

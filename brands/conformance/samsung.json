@@ -1,0 +1,182 @@
+{
+  "note": "Conformance baseline for Samsung behaviour, captured BEFORE the profile refactor. Synthetic text only. Both the Java and the web readers must satisfy it unchanged. Numbers are 14-digit bodies; the test adds the check digit.",
+  "brand": "samsung",
+  "evidence": [
+    {
+      "text": "SAMSUNG\nModel : SM-A165F/DS",
+      "match": true
+    },
+    {
+      "text": "Model: SM-A16SF/DS",
+      "match": true
+    },
+    {
+      "text": "Samsung Electronics",
+      "match": true
+    },
+    {
+      "text": "SM - S938B",
+      "match": true
+    },
+    {
+      "text": "iPhone 16 Pro 256GB\nIMEI/MEID 1234\nIMEI2 5678",
+      "match": false
+    },
+    {
+      "text": "Xiaomi Redmi Note 14 IMEI1 IMEI2",
+      "match": false
+    },
+    {
+      "text": "Pixel 9 Model GR83Y",
+      "match": false
+    },
+    {
+      "text": "OPPO A79 CPH2553",
+      "match": false
+    },
+    {
+      "text": "vivo V2318",
+      "match": false
+    },
+    {
+      "text": "sm-a165f",
+      "match": false
+    },
+    {
+      "text": "",
+      "match": false
+    }
+  ],
+  "modelReads": [
+    {
+      "text": "Model : SM-A165F/DS\nSM-A165FZADMEA\nGray\n4GB |128GB",
+      "model": "SM-A165F",
+      "uncertain": false
+    },
+    {
+      "text": "SM-A376BZKDEUE\nIMEI 1: 35",
+      "model": "SM-A376B",
+      "uncertain": false
+    },
+    {
+      "text": "Model : SM-A16SF/DS\nSM-A16SFZADMEA",
+      "model": "SM-A165F",
+      "uncertain": true,
+      "noteHas": "not clearly readable"
+    },
+    {
+      "text": "Model : SM-A1B5F/DS\nSM-A165FZADMEA",
+      "model": "SM-A165F",
+      "uncertain": true,
+      "noteHas": "disagree"
+    },
+    {
+      "text": "Model : SM-A16SF/DS\nSM-A165FZADMEA",
+      "model": "SM-A165F",
+      "uncertain": false
+    },
+    {
+      "text": "Model : SM-A165F/DS\nSM-A175FZADMEA",
+      "model": "SM-A165F",
+      "uncertain": true,
+      "noteHas": "Different model codes"
+    },
+    {
+      "text": "Model : SM-AXXXF/DS",
+      "model": "",
+      "uncertain": true,
+      "noteHas": "could not be read clearly"
+    },
+    {
+      "text": "IMEI 1 : 1234",
+      "model": "",
+      "uncertain": true,
+      "noteHas": ""
+    }
+  ],
+  "repairs": [
+    {
+      "code": "A16SF",
+      "repaired": "A165F"
+    },
+    {
+      "code": "S93BB",
+      "repaired": "S938B"
+    },
+    {
+      "code": "AO5SF",
+      "repaired": "A055F"
+    },
+    {
+      "code": "AXYZF",
+      "repaired": ""
+    }
+  ],
+  "editShape": [
+    {
+      "model": "SM-A165F",
+      "ok": true
+    },
+    {
+      "model": "sm-s938b/ds",
+      "ok": true
+    },
+    {
+      "model": "SM-A165F/DS",
+      "ok": true
+    },
+    {
+      "model": "A165F",
+      "ok": false
+    },
+    {
+      "model": "SM-A16SF",
+      "ok": false
+    },
+    {
+      "model": "SM-A16",
+      "ok": false
+    },
+    {
+      "model": "",
+      "ok": false
+    }
+  ],
+  "sameDeviceImei1": [
+    {
+      "name": "found by the shared serial part",
+      "imei2": "99434383811431",
+      "barcodes": [
+        "99132678811432",
+        "99132678811431",
+        "99434383811431"
+      ],
+      "expect": 1
+    },
+    {
+      "name": "only IMEI 2 itself",
+      "imei2": "99434383811431",
+      "barcodes": [
+        "99434383811431"
+      ],
+      "expect": -1
+    },
+    {
+      "name": "another device only",
+      "imei2": "99434383811431",
+      "barcodes": [
+        "99132678811432"
+      ],
+      "expect": -1
+    },
+    {
+      "name": "two candidates: no choice",
+      "imei2": "99434383811431",
+      "barcodes": [
+        "99132678811431",
+        "99555555811431"
+      ],
+      "expect": -1
+    }
+  ]
+}
