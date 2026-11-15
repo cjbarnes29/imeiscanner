@@ -23,6 +23,11 @@ assert.equal(boxes.length,3,'the count is simply the number of boxes: no separat
 assert.ok(B.addBox(boxes,box(6,6,28,28)).error,'the same label drawn twice is refused');
 assert.ok(B.addBox(boxes,box(60,60,1,1)).error,'a stray tap is not a label');
 assert.ok(B.addBox(boxes,box(0,0,100,100)).error,'the whole photo is not a label');
+// turning the photo a quarter turns its boxes with it: a box at the top-left goes to the top-right (clockwise), and back
+assert.deepEqual(B.turnBox(box(10,20,30,40),'right'),box(40,10,40,30),'clockwise: top-left box moves to the top-right');
+assert.deepEqual(B.turnBox(box(10,20,30,40),'left'),box(20,60,40,30),'anticlockwise: top-left box moves to the bottom-left');
+assert.deepEqual(B.turnBox(B.turnBox(box(10,20,30,40),'right'),'left'),box(10,20,30,40),'right then left is the same box');
+let spun=box(5,7,22,33);for(let i=0;i<4;i++)spun=B.turnBox(spun,'right');assert.deepEqual(spun,box(5,7,22,33),'four quarter turns = the start');
 assert.deepEqual(B.hitTest(boxes,{x:20,y:20}),{index:0,part:'body'});
 assert.deepEqual(B.hitTest(boxes,{x:35.5,y:5.5}),{index:0,part:'ne'},'corner handles are found first');
 assert.equal(B.hitTest(boxes,{x:90,y:90}),null);

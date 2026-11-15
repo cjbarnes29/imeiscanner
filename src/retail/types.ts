@@ -1,0 +1,103 @@
+/**
+ * RetailLens data model. IMEI Lens stays the scanning engine (records, photos, people); everything here is kept apart from the scan records, under its
+ * own "retail:" keys, and refers to records only by id / IMEI. Nothing in this folder touches a picture or changes a scan record.
+ */
+export type Segment = 'flagship1' | 'flagship2' | 'flagship3' | 'mid' | 'low' | 'tablet' | 'wearable' | 'other';
+/** The segments a target can be set for ('other' = not classified yet: it is shown for review and counts toward no target). */
+export const SEGMENTS: Segment[] = ['flagship1', 'flagship2', 'flagship3', 'mid', 'low', 'tablet', 'wearable'];
+export const SEGMENT_LABEL: Record<Segment, string> = {
+  flagship1: 'Flagship 1', flagship2: 'Flagship 2', flagship3: 'Flagship 3', mid: 'Mid', low: 'Low', tablet: 'Tablet', wearable: 'Wearables', other: 'Unclassified'
+};
+export const isSegment = (value: unknown): value is Segment => typeof value === 'string' && (value === 'other' || (SEGMENTS as string[]).includes(value));
+
+/** 'YYYY-MM' and 'YYYY-MM-DD' in the phone's own time (a sale made at 23:50 belongs to that day). */
+export type Month = string;
+export type DateKey = string;
+const two = (n: number) => String(n).padStart(2, '0');
+export const dateKey = (date: Date = new Date()): DateKey => `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+export const monthOf = (key: DateKey | Date): Month => (typeof key === 'string' ? key : dateKey(key)).slice(0, 7);
+/** The phone's local day of a stored time (records keep UTC times; an upload at 23:50 belongs to that day, not the next UTC day). '' when it is not a time. */
+export const localDay = (iso?: string): DateKey => { const d = new Date(iso || ''); return Number.isNaN(d.getTime()) ? '' : dateKey(d); };
+export const isDateKey = (value: unknown): value is DateKey => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+export const isMonth = (value: unknown): value is Month => typeof value === 'string' && /^\d{4}-\d{2}$/.test(value);
+/** Days in a month and days left in it counting today (never below 1 while the month is running, 0 after it ended). */
+export function daysInMonth(month: Month): number { const [y, m] = month.split('-').map(Number); return new Date(y, m, 0).getDate(); }
+export function daysLeft(month: Month, today: DateKey): number {
+  if (monthOf(today) < month) return daysInMonth(month);
+  if (monthOf(today) > month) return 0;
+  return daysInMonth(month) - Number(today.slice(8, 10)) + 1;
+}
+
+export type Variant = { sku: string; ram: string; storage: string; colors: string[] };
+export type CatalogItem = {
+  /** Four-character model code shared by every region and colour: "A176" for SM-A176B. */
+  code: string;
+  name: string;
+  /** Short name used in WhatsApp reports: "A17 5G". */
+  abbreviation: string;
+  segment: Segment;
+  /** A model can move to another segment for one month (Samsung changes them): month -> segment. */
+  monthly: Record<Month, Segment>;
+  variants: Variant[];
+  /** Made or changed by the person (kept), as opposed to the built-in list. */
+  custom: boolean;
+};
+
+export type RecordMeta = { segment?: Segment; ram?: string; storage?: string; color?: string };
+
+/** A confirmed sale. A sale is attributed to the person who owned the phone when it was confirmed; see sales.ts for the rules. */
+export type Sale = {
+  id: string; recordId: string; imei: string; model: string; modelName: string; ram: string; storage: string; color: string;
+  segment: Segment; personId: string; date: DateKey; month: Month;
+  submitted: boolean; submittedAt?: string;
+  /** 'owner' = confirmed by the owner of the phone; 'approved' = attributed to someone else after an explicit approval (with a reason). */
+  attributedBy: 'owner' | 'approved'; reason?: string;
+  voided?: boolean; voidedAt?: string; createdAt: string;
+};
+
+export type TargetLine = { segment: Segment; target: number; achieved: number };
+export type PersonTarget = { personId: string; month: Month; lines: TargetLine[]; source: 'screenshot' | 'manual'; importedAt: string; note?: string };
+
+export type IncentiveRates = { perUnit: Record<Segment, number>; multiplier: { 70: number; 100: number; 120: number }; currency: string };
+
+export type AllocationItem = { recordId: string; imei: string; segment: Segment; from: string; to: string };
+export type AllocationEvent = { id: string; at: string; month: Month; source: 'recommended' | 'manual'; items: AllocationItem[]; status: 'applied' | 'undone'; undoneAt?: string; note?: string };
+
+export type DayLog = {
+  activations: number; scPlus: number;
+  competitor: { brand: string; model: string; qty: number }[];
+  shifts: { person: string; shift: string }[];
+  checklist: Record<string, boolean>;
+  custom: { id: string; text: string; done: boolean }[];
+};
+
+export type StockAdjust = { id: string; at: string; date: DateKey; code: string; name: string; storage: string; color: string; delta: number; note: string };
+
+export type ReportSection = { key: 'sellout' | 'stock' | 'activations' | 'scplus' | 'competitor' | 'shifts' | 'total' | 'other'; heading: string; lines: string[] };
+export type ReportTemplate = {
+  /** The title line with {date} where the date goes, e.g. "*Daily Report {date}*". */
+  title: string; dateFormat: 'DD/MM/YYYY' | 'DD-MM-YYYY' | 'D MMM YYYY' | 'YYYY-MM-DD';
+  sections: { key: ReportSection['key']; heading: string; bullet: string; sep: string; useAbbreviation: boolean; showColor: boolean; showStorage: boolean; qtyBefore: boolean; verbatim?: string[]; inline?: string }[];
+  promoter?: string;
+};
+
+export type Audit = { at: string; what: string; detail: string };
+
+export type RetailState = {
+  version: 1;
+  catalog: CatalogItem[];
+  /** Verified corrections to remember: model code -> segment (a person changed it, so the app learns it). */
+  corrections: Record<string, Segment>;
+  recordMeta: Record<string, RecordMeta>;
+  sales: Sale[];
+  targets: Record<Month, Record<string, PersonTarget>>;
+  rates: IncentiveRates;
+  allocations: AllocationEvent[];
+  days: Record<DateKey, DayLog>;
+  stockAdjust: StockAdjust[];
+  template?: ReportTemplate;
+  settings: { myPersonId: string; myThreshold: 70 | 100 | 120; lowStock: number; reportAuthor: string };
+  /** Closed months, kept for history: the targets, sales count and incentives as they were. */
+  history: Record<Month, { closedAt: string; targets: Record<string, PersonTarget>; sales: number; byPerson: Record<string, number> }>;
+  audit: Audit[];
+};

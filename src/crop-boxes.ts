@@ -106,6 +106,13 @@ export function boxToPixels(box: Box, width: number, height: number) {
   return { left, top, width: clamp(Math.round(box.width / 100 * width), 1, width - left), height: clamp(Math.round(box.height / 100 * height), 1, height - top) };
 }
 
+/** The same box after the photo is turned a quarter: 'right' = clockwise. Boxes are in % of the photo, so they stay on their label. */
+export function turnBox(box: Box, direction: 'left' | 'right'): Box {
+  return clampBox(direction === 'right'
+    ? { x: 100 - box.y - box.height, y: box.x, width: box.height, height: box.width }
+    : { x: box.y, y: 100 - box.x - box.width, width: box.height, height: box.width });
+}
+
 /** True when every box is valid and none repeats another. Used before anything is cut. */
 export function boxesAreSound(boxes: Box[]): boolean {
   return boxes.every(isUsableBox) && boxes.every((box, index) => duplicateOf(boxes.slice(0, index), box) < 0);

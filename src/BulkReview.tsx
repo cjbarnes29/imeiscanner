@@ -18,12 +18,15 @@ type Props = {
   onAccept: () => void;
   onUndoAccept: () => void;
   onClose: () => void;
+  /** How many photos need a look in all, and opening them one by one in the photo editor (Bulk edit photos). */
+  photoCount?: number;
+  onEditPhotos?: () => void;
 };
 
 const digitsOnly = (text: string) => text.replace(/\D/g, '').slice(0, 15);
 
 /** The fast list: every record that needs a look, with its label photo and editable IMEI and serial. Edits save as you type. */
-export function BulkReview({ rows, goodCount, acceptedCount, onSave, onDone, onFull, onAccept, onUndoAccept, onClose }: Props) {
+export function BulkReview({ rows, goodCount, acceptedCount, onSave, onDone, onFull, onAccept, onUndoAccept, onClose, photoCount = 0, onEditPhotos }: Props) {
   const [drafts, setDrafts] = useState<Record<string, Fields>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const timers = useRef<Record<string, number>>({});
@@ -71,6 +74,7 @@ export function BulkReview({ rows, goodCount, acceptedCount, onSave, onDone, onF
           </div>
           <button className="iconbtn" aria-label="Close review" onClick={onClose}><X /></button>
         </div>
+        {onEditPhotos && photoCount > 0 && <div className="bulk-photos"><button type="button" className="subtle-btn" onClick={onEditPhotos}>Bulk edit photos ({photoCount})</button><span>Crop, turn or delete them one by one; Finish rescans only the photos you changed.</span></div>}
         {(goodCount > 0 || acceptedCount > 0) && <div className="bulk-accept" role="group" aria-label="Accept records that look right">
           {goodCount > 0 && <button type="button" className="primary" onClick={onAccept}>Accept {goodCount} that look right</button>}
           {acceptedCount > 0 && <span>Accepted {acceptedCount}. <button type="button" className="subtle-btn" onClick={onUndoAccept}>Undo</button></span>}

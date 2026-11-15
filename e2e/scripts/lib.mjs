@@ -11,7 +11,10 @@ const truthData = existsSync(truthFile) ? JSON.parse(readFileSync(truthFile, 'ut
 export const truth = truthData.photos || {};
 /** Extra synthetic photos for single tests (EDGE-*.jpg): not part of the five-photo set. */
 export const extras = truthData.extras || {};
-const isFixture = name => Object.hasOwn(truth, name) || Object.hasOwn(extras, name);
+/** Photos for the automatic-retry tests (RETRY-*.jpg, see fixtures/make-retry-fixtures.mjs): synthetic as well. */
+const retryFile = join(here, '..', 'fixtures', 'out', 'retry-truth.json');
+export const retryTruth = existsSync(retryFile) ? (JSON.parse(readFileSync(retryFile, 'utf8')).photos || {}) : {};
+const isFixture = name => Object.hasOwn(truth, name) || Object.hasOwn(extras, name) || Object.hasOwn(retryTruth, name);
 export const mask = d => (d && /^\d{15}$/.test(d)) ? `${d.slice(0, 8)}***${d.slice(-4)}` : (d || '(none)');
 const adbPath = () => join(process.env.ANDROID_HOME || join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk'), 'platform-tools', 'adb.exe');
 
@@ -57,7 +60,7 @@ export function guardApp(app) { if (app !== 'com.imeilens.scanner.phonetest') th
 // folder (run-as) and handed over as ACTION_SEND intents with a content URI of the app's own FileProvider (the same path WhatsApp or Gallery
 // shares take). Only fixture files named E2E-*.jpg from e2e/fixtures/out are ever staged.
 const SHARE_TMP = '/data/local/tmp/imei-lens-e2e-share'; // shell-owned scratch folder: not user storage, not indexed by the gallery
-export const SYNTHETIC_NAME = /^(E2E|EDGE)-[A-Za-z0-9-]+\.jpg$/;
+export const SYNTHETIC_NAME = /^(E2E|EDGE|RETRY)-[A-Za-z0-9-]+\.jpg$/;
 const fixturesDir = join(here, '..', 'fixtures', 'out');
 export const shareUri = (app, name) => `content://${app}.files/shared/${name}`;
 
@@ -90,7 +93,7 @@ export function sharePhoto(device, app, name) {
 /** Removes the staged copies (only E2E-*.jpg in the test app's own cache folder). */
 export function unstageSyntheticPhotos(device, app) {
   guardApp(app);
-  adb(device, 'shell', `run-as ${app} sh -c 'rm -f cache/E2E-*.jpg cache/EDGE-*.jpg'`);
+  adb(device, 'shell', `run-as ${app} sh -c 'rm -f cache/E2E-*.jpg cache/EDGE-*.jpg cache/RETRY-*.jpg'`);
 }
 export function nativeStore(device, app) {
   guardApp(app);

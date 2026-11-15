@@ -1,4 +1,4 @@
-// The crop queue at a glance: Pending, Processing, Process later, Needs review, Completed.
+// The crop queue at a glance: Queued, Processing, Process later, Needs review, Completed.
 // Needs review lists ONLY affected photos: ones that could not be cut or read (with the reason) and finished photos with a crop
 // that is not certain. Each has Retry / Quick edit / Approve. Completed can be selected for export in one tap.
 import { useState } from 'react';
@@ -30,7 +30,7 @@ export function QueuePanel(p: Props) {
   const byId = new Map(p.records.map(row => [row.id, row]));
   const thumb = (id?: string) => { const row = id ? byId.get(id) : undefined; return row ? <img src={row.cropDataUrl || row.dataUrl} alt="" loading="lazy" decoding="async" /> : <span className="queue-thumb-missing" />; };
   const nameOf = (item: QueueItem) => item.name || byId.get(item.recordId)?.name || 'Photo';
-  const tabs: [Tab, string, number][] = [['pending', 'Pending', pending.length], ['processing', 'Processing', processing ? 1 : 0], ...(later.length ? [['later', 'Process later', later.length] as [Tab, string, number]] : []), ['review', 'Needs review', reviewCount], ['completed', 'Completed', p.completedLog.length]];
+  const tabs: [Tab, string, number][] = [['pending', 'Queued', pending.length], ['processing', 'Processing', processing ? 1 : 0], ...(later.length ? [['later', 'Process later', later.length] as [Tab, string, number]] : []), ['review', 'Needs review', reviewCount], ['completed', 'Completed', p.completedLog.length]];
   const flaggedIn = (entry: QueueLogEntry) => entry.recordIds.filter(id => byId.get(id)?.cropNeedsReview);
   const more = (total: number) => total > shown && <button type="button" className="textbtn" onClick={() => setShown(n => n + PAGE)}>Show {Math.min(PAGE, total - shown)} more</button>;
 

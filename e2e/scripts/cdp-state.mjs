@@ -6,7 +6,7 @@ export async function evaluate(device, app, expression, port = 9333) {
   const pid = adb(device, 'shell', 'pidof', app).trim();
   if (!pid) throw new Error('the test app is not running');
   adb(device, 'forward', `tcp:${port}`, `localabstract:webview_devtools_remote_${pid}`);
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(10000) })).json(); // never wait forever on a stale forward
   const page = targets.find(t => t.type === 'page');
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise(resolve => ws.addEventListener('open', resolve));

@@ -2,7 +2,7 @@
 //   node scripts/e2e-queue.mjs
 // 1. Bulk crop with 4 photos: the single Save all closes the editor at once and cuts all 4 in the background (no boxes drawn = cut automatically).
 // 2. The queue runs while the page stays usable.
-// 3. Queue panel: Pending / Processing / Needs review / Completed counts (Process later only shows for older queues); Needs review lists ONLY affected photos
+// 3. Queue panel: Queued / Processing / Needs review / Completed counts (Process later only shows for older queues); Needs review lists ONLY affected photos
 //    (with the reason); Retry, Approve, Select for export.
 // 4. Settings apply to queued jobs: the same photo with Scan speed Fast vs Standard (Fast skips the extra passes).
 // 5. Interrupted processing: reload while a photo is being read; the queue is offered again with that photo waiting.
@@ -64,7 +64,7 @@ try{
   // ---------- 3. panel ----------
   await clickText('.queue-banner button','Queue');await waitFor(`!!document.querySelector('.queue-panel')`,'panel');
   let tabs=await tabCounts();ok('queue panel tabs: '+JSON.stringify(tabs));
-  assert.equal(tabs['Pending'],0);assert.ok(!('Process later' in tabs),'no Process later tab when nothing is set aside');assert.ok(tabs['Completed']+tabs['Needs review']>=3,'the finished photos are Completed or Needs review');
+  assert.equal(tabs['Queued'],0);assert.ok(!('Process later' in tabs),'no Process later tab when nothing is set aside');assert.ok(tabs['Completed']+tabs['Needs review']>=3,'the finished photos are Completed or Needs review');
   await clickText('.queue-tabs button','Needs review');await sleep(300);
   const reviewRows=await run(`[...document.querySelectorAll('.queue-list .queue-row')].map(r=>r.innerText.replace(/\\n/g,' | '))`);
   assert.ok(reviewRows.every(t=>/need a look|label|could not|No separate|Found/i.test(t)),'only affected photos with a reason: '+reviewRows);

@@ -15,9 +15,9 @@ android {
         if (project.hasProperty('phoneTest')) {
             applicationIdSuffix '.phonetest'
             versionNameSuffix '-phonetest'
-            manifestPlaceholders = [appLabel: 'IMEI Lens Test']
+            manifestPlaceholders = [appLabel: 'RetailLens Test']
         } else {
-            manifestPlaceholders = [appLabel: 'IMEI Lens']
+            manifestPlaceholders = [appLabel: 'RetailLens']
         }
         // Real phones only: drops the emulator-only x86 libraries to shrink the APK.
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }

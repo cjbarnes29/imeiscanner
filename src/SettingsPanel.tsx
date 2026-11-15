@@ -342,6 +342,6 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     {guide === 'new' && <WhatsNewDialog onClose={() => setGuide('')} onTutorials={() => setGuide('tutorials')} />}
     {guide === 'tutorials' && <TutorialsDialog onClose={() => setGuide('')} />}
     <AuthorCredit />
-    <p className="settings-about">IMEI Lens · by Carlou Joseph Barnes<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
+    <p className="settings-about">RetailLens · scanning engine: IMEI Lens · by Carlou Joseph Barnes<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
   </section></div>;
 }

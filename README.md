@@ -1,4 +1,8 @@
-# IMEI Lens — Photo Scanner
+# RetailLens — Scan. Sell. Track. Achieve.
+
+**RetailLens** is an offline retail app for phone sellers: it scans label photos (IMEI Lens is the scanning engine), sorts phones into segments, tracks targets and stock, recommends who should get which phones, and writes your WhatsApp report. See the **Retail** tab and [docs/RETAILLENS-PROGRESS.md](docs/RETAILLENS-PROGRESS.md). Everything below describes the scanning engine, which works as before.
+
+# IMEI Lens — Photo Scanner (the scanning engine)
 
 Built by CJB. Version history: [CHANGELOG.md](CHANGELOG.md) (older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md)).
 

@@ -89,7 +89,7 @@ final class ScanStore {
             out.put("recordsFrom", start);
             out.put("recordsTotal", total);
             // The scan report: counts for the current scan (the per-photo list is fetched separately, see reportJson).
-            out.put("report", ScanLedger.summarize(photosOf(job), job.optString("id")));
+            out.put("report", ScanLedger.summarize(photosOf(job), reportIdOf(job)));
             return out.toString();
         } catch (Exception error) { throw new IllegalStateException(error); }
     }
@@ -100,13 +100,59 @@ final class ScanStore {
         return photos == null ? new JSONArray() : photos;
     }
 
+    /**
+     * The id the scan report groups its photos by. A normal scan reports under its own id; the automatic retry that follows it reports under
+     * the id of the scan it retries, so the report keeps showing the whole scan (and what the retry recovered) instead of only the retried photos.
+     */
+    static String reportIdOf(JSONObject job) {
+        String report = job.optString("reportId");
+        return report.isEmpty() ? job.optString("id") : report;
+    }
+
     /** The scan report for the web page: the summary of the current scan and one entry per source photo. */
     static synchronized String reportJson(Context context) {
         JSONObject job = load(context);
         try {
             JSONArray photos = photosOf(job);
-            return new JSONObject().put("jobId", job.optString("id")).put("report", ScanLedger.summarize(photos, job.optString("id"))).put("photos", photos).toString();
+            String report = reportIdOf(job);
+            return new JSONObject().put("jobId", report).put("report", ScanLedger.summarize(photos, report)).put("photos", photos).toString();
         } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
+    /**
+     * This photo's earlier records, in the order they were made, with their IMEIs: what ScanLedger.pairWithOld needs to say which earlier
+     * unreadable record a new reading replaces. Reads the saved job in place.
+     */
+    static synchronized java.util.List<ScanLedger.Old> recordsOfPhoto(Context context, String uri) {
+        java.util.List<ScanLedger.Old> found = new java.util.ArrayList<>();
+        if (uri == null || uri.isEmpty()) return found;
+        JSONArray records = load(context).optJSONArray("records");
+        if (records == null) return found;
+        for (int index = 0; index < records.length(); index++) {
+            JSONObject row = records.optJSONObject(index);
+            if (row == null || !uri.equals(row.optString("sourceUri"))) continue;
+            String id = row.optString("id");
+            boolean hasPicture;
+            try { hasPicture = image(context, id).isFile(); } catch (RuntimeException error) { hasPicture = false; }
+            if (hasPicture) found.add(new ScanLedger.Old(id, row.optString("imei"), row.optBoolean("imeiFallback")));
+        }
+        return found;
+    }
+
+    /**
+     * Starts the one automatic retry: the photos whose report entry is "pending" (they ended without an IMEI 1, or failed) are scanned again,
+     * once, with the slower reads. The retry job reports under the scan it follows and never starts another retry. False when nothing waits.
+     */
+    static synchronized boolean startAutoRetry(Context context, String personId) {
+        JSONObject job = load(context);
+        JSONArray queue;
+        try { queue = ScanLedger.autoRetryQueue(photosOf(job)); } catch (Exception error) { throw new IllegalStateException(error); }
+        if (queue.length() == 0) return false;
+        String report = reportIdOf(job);
+        if (!start(context, queue, personId)) return false;
+        try { job.put("retry", true).put("reportId", report); save(context, true); }
+        catch (Exception error) { throw new IllegalStateException(error); }
+        return true;
     }
 
     /**
@@ -182,6 +228,7 @@ final class ScanStore {
             job.put("queue", queue);
             job.put("personId", personId);
             job.put("error", "");
+            job.remove("retry"); job.remove("reportId"); // a normal scan reports under its own id; startAutoRetry sets both after this
             save(context, true);
             return true;
         } catch (Exception error) { throw new IllegalStateException(error); }
@@ -205,12 +252,12 @@ final class ScanStore {
         JSONObject job = load(context);
         JSONArray pending = job.optJSONArray("pending");
         if (pending == null || pending.length() == 0 || job.optString("id").isEmpty()) return false;
+        // Another scan is already queued or running (a photo shared right after the last one ended started it): these photos keep waiting
+        // in "pending" and start when that scan ends. Starting them now would replace its queue and lose its photos.
+        if (!ScanLedger.mayPromotePending(job.optString("status"))) return false;
         String person = job.optString("pendingPerson", "person-1");
-        try {
-            job.remove("pending"); job.remove("pendingPerson");
-            String status = job.optString("status");
-            if ("queued".equals(status) || "processing".equals(status)) job.put("status", "completed");
-        } catch (Exception error) { throw new IllegalStateException(error); }
+        try { job.remove("pending"); job.remove("pendingPerson"); }
+        catch (Exception error) { throw new IllegalStateException(error); }
         return start(context, pending, person);
     }
 

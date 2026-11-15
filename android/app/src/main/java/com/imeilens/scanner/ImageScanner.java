@@ -382,6 +382,18 @@ final class ImageScanner {
                 found.put(imei.isEmpty() ? "" : LabelGeometry.mask(imei));
             }
             diag.put("recordImeis", found);
+            // Why each record without a usable IMEI 1 has none (words only: see FailReason); the scan report counts these. A recovery that found a
+            // contradiction keeps its own reason; everything else is decided from the label's text and its cut-edge / partly-read evidence.
+            JSONArray reasons = new JSONArray();
+            for (int index = 0; index < output.length(); index++) {
+                JSONObject row = output.getJSONObject(index);
+                if (!FailReason.CONFLICT.equals(row.optString("failReason"))) {
+                    String kind = FailReason.classify(row.optString("raw"), row.optString("imei"), row.optBoolean("imeiFallback"), row.optString("labelIssue"));
+                    if (kind.isEmpty()) row.remove("failReason"); else row.put("failReason", kind);
+                }
+                reasons.put(row.optString("failReason"));
+            }
+            diag.put("reasons", reasons);
             diag.put("ms", Prof.end());
             int fallbacks = 0;
             for (int index = 0; index < output.length(); index++) if (output.getJSONObject(index).optBoolean("imeiFallback")) fallbacks++;
@@ -415,6 +427,17 @@ final class ImageScanner {
         }
         // Barcodes are exact: pair each with the "IMEI 1" / "IMEI 2" text printed under it.
         String barcode1 = labelledBarcode(ocr, codes, region, LABEL_ONE), barcode2 = labelledBarcode(ocr, codes, region, LABEL_TWO);
+        // Recovery (second pass only: Detailed, a rescan or the automatic retry): IMEI 1's barcode was not found with the whole-photo read, so it is looked for
+        // again at full resolution in the strip above this label's own "IMEI 1" line, in several sizes and contrasts. Accepted only by the strict rules of
+        // BarcodeRecovery (valid checksum, the only candidate, not IMEI 2, not contradicted by the printed digits); a decoded barcode is a barcode's own number.
+        String recoveredBy = "", failOverride = "";
+        if (secondPass() && barcode1.isEmpty() && (imei.isEmpty() || ImeiSource.usesSecondImei(raw, imei))) {
+            long tr = Prof.now();
+            BarcodeRecovery.Decision decision = recoverImei1Barcode(photo, ocr, raw, barcode2.isEmpty() ? ImeiSource.secondImeiInText(raw) : barcode2);
+            Prof.add(decision.accepted() ? "recoverHit" : "recoverMiss", tr);
+            if (decision.accepted()) { barcode1 = decision.imei; recoveredBy = "barcode"; }
+            else if (BarcodeRecovery.CONFLICT.equals(decision.why)) failOverride = FailReason.CONFLICT;
+        }
         // The brand is decided from THIS label's own text only (brand profiles, brands/profiles/*.json). A brand-only IMEI rule can run only for the
         // brand that was decided; no evidence (or evidence of several brands) = the generic profile, which has no rules, and a "brand unclear" mark.
         final BrandRegistry.Decision brand = BrandRegistry.detect(raw);
@@ -488,6 +511,8 @@ final class ImageScanner {
         if (imei1ByRule && imei.equals(barcode1)) { row.put("imeiNeedsReview", true); row.put("imeiNote", sharedRule.note); }
         else if (imei1FromPhoto) { row.put("imeiNeedsReview", true); row.put("imeiNote", ImeiSource.PHOTO_READ_NOTE); }
         row.put("status", imei.isEmpty() ? "Review" : "Valid");
+        if (!recoveredBy.isEmpty() && imei.equals(barcode1)) row.put("recoveredBy", recoveredBy);
+        if (!failOverride.isEmpty() && imei.isEmpty()) row.put("failReason", failOverride);
         row.put("cropNeedsReview", cropReview);
         // The review screen asks "1 device or N?" for a photo that shows more labels than could be separated.
         if (cropReview && deviceCount > 1 && region == null) row.put("deviceCount", deviceCount);
@@ -669,6 +694,51 @@ final class ImageScanner {
             } finally { part.recycle(); }
         }
         return known;
+    }
+
+    /**
+     * Strict recovery of IMEI 1 from its barcode: the barcode is printed directly above the label's own "IMEI 1" text line, so that strip is cut out
+     * of the (full-resolution) picture and decoded again in a few sizes and contrasts (a small or soft barcode the whole-photo read missed).
+     * Needs exactly one "IMEI 1" line to anchor on. Only barcodes in the same place the first-pass rule uses (bottom edge just above the line, overlapping
+     * it sideways) count. Then BarcodeRecovery decides (checksum, uniqueness, not IMEI 2, agrees with the printed digits). Never throws.
+     */
+    private static BarcodeRecovery.Decision recoverImei1Barcode(Bitmap photo, Text ocr, String raw, String imei2) {
+        final BarcodeRecovery.Decision none = new BarcodeRecovery.Decision("", BarcodeRecovery.NONE);
+        Bitmap part = null;
+        try {
+            List<Rect> labelLines = new ArrayList<>();
+            for (Text.TextBlock block : ocr.getTextBlocks()) for (Text.Line line : block.getLines()) {
+                Rect box = line.getBoundingBox();
+                if (box != null && LABEL_ONE.matcher(line.getText()).find()) labelLines.add(box);
+            }
+            if (labelLines.size() != 1) return none; // nothing to anchor on, or two labels in one picture: not strict enough to take a barcode
+            Rect text = labelLines.get(0);
+            int height = Math.max(8, text.height());
+            Rect strip = new Rect(Math.max(0, text.left - 3 * height), Math.max(0, text.top - 9 * height),
+                Math.min(photo.getWidth(), text.right + 10 * height), Math.min(photo.getHeight(), text.top + height));
+            if (strip.width() < 40 || strip.height() < 16) return none;
+            part = Bitmap.createBitmap(photo, strip.left, strip.top, strip.width(), strip.height());
+            List<String> candidates = new ArrayList<>();
+            float[][] variants = {{2f, 1f}, {3f, 1f}, {2f, 1.8f}, {3f, 2.4f}}; // {size factor, contrast}; the first one that finds a valid barcode ends the search
+            for (float[] variant : variants) {
+                Bitmap big = null;
+                try {
+                    big = enhance(part, variant[0], variant[1]);
+                    float sx = big.getWidth() / (float) part.getWidth(), sy = big.getHeight() / (float) part.getHeight();
+                    for (Code code : barcodes(big)) {
+                        if (!luhn(code.value)) continue;
+                        int left = strip.left + Math.round(code.box.left / sx), right = strip.left + Math.round(code.box.right / sx), bottom = strip.top + Math.round(code.box.bottom / sy);
+                        boolean above = bottom >= text.top - height * 3 && bottom <= text.top + height;
+                        boolean overlaps = left < text.right + height * 4 && right > text.left - height;
+                        if (above && overlaps) candidates.add(code.value);
+                    }
+                } catch (Throwable error) { /* one size failing (memory) only means one try less */ }
+                finally { if (big != null) big.recycle(); }
+                if (!candidates.isEmpty()) break;
+            }
+            return BarcodeRecovery.decide(candidates, imei2, FailReason.printedRun(raw));
+        } catch (Throwable error) { return none; } // a recovery never breaks a scan (out of memory included)
+        finally { if (part != null) part.recycle(); }
     }
 
     /** Different 15-digit barcodes that pass the IMEI checksum (a label has one per IMEI). */

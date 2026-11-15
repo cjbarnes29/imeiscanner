@@ -6,7 +6,8 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import ts from 'typescript';
 const dir=await mkdtemp(join(tmpdir(),'imei-report-'));
-await writeFile(join(dir,'scan-report.mjs'),ts.transpileModule(await readFile('src/scan-report.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
+const compile=async name=>writeFile(join(dir,name+'.mjs'),ts.transpileModule((await readFile('src/'+name+'.ts','utf8')).replace(/from '\.\/([a-z-]+)'/g,(_,m)=>"from './"+m+".mjs'"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
+await compile('fail-reason');await compile('scan-report');
 const r=await import(pathToFileURL(join(dir,'scan-report.mjs')).href);
 
 // summary: missing or bad values count as 0 (an older app sends no report)

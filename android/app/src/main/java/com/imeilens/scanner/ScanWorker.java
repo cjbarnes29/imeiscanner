@@ -56,14 +56,17 @@ public final class ScanWorker extends Worker {
     }
 
     /** The scan report entry of one photo. Never throws: a report problem must not stop the scan. */
-    private static JSONObject ledgerEntry(PhotoResult result, String jobId, JSONArray products, ScanLedger.Split split) {
+    private static JSONObject ledgerEntry(PhotoResult result, String jobId, JSONArray products, ScanLedger.Split split, boolean retryJob) {
         try {
             java.text.SimpleDateFormat clock = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
             clock.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
             String at = clock.format(new java.util.Date());
-            if (!result.error.isEmpty()) return ScanLedger.failed(result.uri, result.name, result.hash, jobId, at, result.error);
-            if (!result.duplicateOfUri.isEmpty()) return ScanLedger.duplicatePhoto(result.uri, result.name, result.hash, jobId, at, result.duplicateOfUri);
-            return ScanLedger.scanned(result.uri, result.name, result.hash, jobId, at, products, split.unique, split.duplicates, split.emptyRepeats, split.supersedes);
+            JSONObject entry;
+            if (!result.error.isEmpty()) entry = ScanLedger.failed(result.uri, result.name, result.hash, jobId, at, result.error);
+            else if (!result.duplicateOfUri.isEmpty()) entry = ScanLedger.duplicatePhoto(result.uri, result.name, result.hash, jobId, at, result.duplicateOfUri);
+            else entry = ScanLedger.scanned(result.uri, result.name, result.hash, jobId, at, products, split.unique, split.duplicates, split.emptyRepeats, split.supersedes);
+            ScanLedger.markAutoRetry(entry, retryJob); // the photo's one automatic retry: pending after a normal scan, done after the retry
+            return entry;
         } catch (Exception error) {
             android.util.Log.w("IMEI-Lens", "Could not write the scan report entry", error);
             return null;
@@ -78,7 +81,7 @@ public final class ScanWorker extends Worker {
             new Intent(context, StopReceiver.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("IMEI Lens is scanning")
+            .setContentTitle("RetailLens is scanning")
             .setContentText(completed + " of " + total + " photos · " + detail)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -98,7 +101,9 @@ public final class ScanWorker extends Worker {
         // Photo content (SHA-256) -> the first uri seen with it in this scan; IMEI -> the id of the record that holds it.
         final java.util.Map<String, String> seenPhotos = new java.util.concurrent.ConcurrentHashMap<>();
         java.util.HashMap<String, String> seenImeis = new java.util.HashMap<>();
-        final String jobId = job.optString("id");
+        // The automatic retry job (see ScanStore.startAutoRetry) reports under the scan it follows, and never starts another retry.
+        final boolean retryJob = job.optBoolean("retry");
+        final String jobId = ScanStore.reportIdOf(job);
         JSONArray existingRecords = job.optJSONArray("records");
         if (existingRecords != null) for (int index = 0; index < existingRecords.length(); index++) {
             JSONObject row = existingRecords.optJSONObject(index);
@@ -110,31 +115,34 @@ public final class ScanWorker extends Worker {
             catch (Exception ignored) { /* A previous photo may no longer be accessible. */ }
         }
         final DeviceProfile profile = DeviceProfile.detect(context);
-        final int maxWorkers = profile.maxWorkers;
+        // The retry is for the few photos that failed: one or two at a time, each decoded larger (small barcodes survive) and read at Detailed.
+        final int maxWorkers = retryJob ? Math.min(2, profile.maxWorkers) : profile.maxWorkers;
+        final int startWorkers = retryJob ? 1 : profile.startWorkers;
+        final int retryEdge = 4096; // Android decodes in halves (4000 px stays 4000 only with a cap of 4000 or more); a larger cap is what lets a small barcode survive. Out of memory steps back down.
         final String personId = job.optString("personId", "person-1");
         // The Scan speed and Products in each photo the user chose on the Scan screen (also used by the camera scan).
         final android.content.SharedPreferences prefs = context.getSharedPreferences("app-state", Context.MODE_PRIVATE);
-        final String speed = prefs.getString("scan-speed", "standard");
+        final String speed = retryJob ? "detailed" : prefs.getString("scan-speed", "standard");
         final int expectedProducts = prefs.getInt("scan-expected", 0);
         // Photos scanned before that still have no IMEI (or failed) get the slower second-pass reads; photos read the first time never pay for them.
         final java.util.Set<String> secondPass = new java.util.HashSet<>();
         try { JSONArray again = ScanStore.rescanQueue(context); for (int i = 0; i < again.length(); i++) secondPass.add(again.getJSONObject(i).optString("uri")); } catch (Exception ignored) { /* no ledger yet */ }
         final boolean detailedSpeed = "detailed".equals(speed);
-        final java.util.concurrent.atomic.AtomicInteger maxEdge = new java.util.concurrent.atomic.AtomicInteger(profile.maxEdge);
+        final java.util.concurrent.atomic.AtomicInteger maxEdge = new java.util.concurrent.atomic.AtomicInteger(retryJob ? retryEdge : profile.maxEdge);
         // The pool can grow up to maxWorkers; permits decide how many are actually running.
-        final java.util.concurrent.Semaphore permits = new java.util.concurrent.Semaphore(profile.startWorkers);
+        final java.util.concurrent.Semaphore permits = new java.util.concurrent.Semaphore(startWorkers);
         final java.util.concurrent.BlockingQueue<TextRecognizer> recognizers = new java.util.concurrent.ArrayBlockingQueue<>(maxWorkers);
         final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(maxWorkers);
         final java.util.Map<Integer, java.util.concurrent.Future<PhotoResult>> futures = new java.util.HashMap<>();
         final boolean adaptive = "auto".equals(profile.mode);
-        int next = completed, active = profile.startWorkers, peak = active;
+        int next = completed, active = startWorkers, peak = active;
         boolean growing = adaptive && maxWorkers > active;
         long started = android.os.SystemClock.elapsedRealtime();
         long windowStart = started;
         int windowDone = 0;
         double lastRate = 0;
         try {
-            setForegroundAsync(foreground(completed, queue.length(), profile.label)).get();
+            setForegroundAsync(foreground(completed, queue.length(), (retryJob ? "Trying unread photos again · " : "") + profile.label)).get();
             ScanStore.update(context, completed, failed, new JSONArray());
             for (int slot = 0; slot < maxWorkers; slot++) recognizers.add(TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS));
             for (int index = completed; index < queue.length(); index++) {
@@ -155,8 +163,8 @@ public final class ScanWorker extends Worker {
                                     if (first != null) { result.duplicateOfUri = first; return result; }
                                     try { result.rows = ImageScanner.scan(context, uri, result.name, personId, recognizer, maxEdge.get(), speed, expectedProducts, detailedSpeed || secondPass.contains(result.uri)); }
                                     catch (OutOfMemoryError tooBig) {
-                                        maxEdge.set(1600); // Out of memory: shrink for every worker and retry once.
-                                        result.rows = ImageScanner.scan(context, uri, result.name, personId, recognizer, 1600, speed, expectedProducts, detailedSpeed || secondPass.contains(result.uri));
+                                        maxEdge.set(retryJob && maxEdge.get() > profile.maxEdge ? profile.maxEdge : 1600); // Out of memory: shrink for every worker and retry once.
+                                        result.rows = ImageScanner.scan(context, uri, result.name, personId, recognizer, maxEdge.get(), speed, expectedProducts, detailedSpeed || secondPass.contains(result.uri));
                                     }
                                 } catch (Exception | OutOfMemoryError error) { result.error = describe(error); }
                             } finally { recognizers.put(recognizer); }
@@ -182,6 +190,8 @@ public final class ScanWorker extends Worker {
                 try {
                     split = ScanLedger.split(additions, seenImeis,
                         result.error.isEmpty() && result.duplicateOfUri.isEmpty() ? ScanStore.emptyRecordsOfPhoto(context, result.uri, result.hash) : new java.util.ArrayList<String>(),
+                        // This photo's earlier records: a new reading can then say exactly which unreadable record it replaces (see ScanLedger.pairWithOld).
+                        result.error.isEmpty() && result.duplicateOfUri.isEmpty() ? ScanStore.recordsOfPhoto(context, result.uri) : null,
                         row -> ScanStore.image(context, row.optString("id")).delete());
                 } catch (Exception error) {
                     // The decision itself failed: keep every product rather than lose one.
@@ -190,7 +200,7 @@ public final class ScanWorker extends Worker {
                     for (int rowIndex = 0; rowIndex < additions.length(); rowIndex++) split.unique.put(additions.optJSONObject(rowIndex));
                 }
                 JSONArray unique = split.unique;
-                JSONObject photoEntry = ledgerEntry(result, jobId, additions, split);
+                JSONObject photoEntry = ledgerEntry(result, jobId, additions, split, retryJob);
                 if (isStopped() || ScanStore.isStopped(context)) return Result.success();
                 ScanStore.update(context, index + 1, failed, unique, photoEntry);
 
@@ -210,12 +220,15 @@ public final class ScanWorker extends Worker {
                 }
                 long seconds = Math.max(1, (android.os.SystemClock.elapsedRealtime() - started) / 1000);
                 int perMinute = (int) ((index + 1 - completed) * 60L / seconds);
-                setForegroundAsync(foreground(index + 1, queue.length(), profile.label + " · " + active + " at once · " + perMinute + "/min")).get();
+                setForegroundAsync(foreground(index + 1, queue.length(), (retryJob ? "Retry · " : "") + profile.label + " · " + active + " at once · " + perMinute + "/min")).get();
             }
             long seconds = Math.max(1, (android.os.SystemClock.elapsedRealtime() - started) / 1000);
-            DeviceProfile.rememberRun(context, (int) ((queue.length() - completed) * 60L / seconds), peak, profile.label);
+            if (!retryJob) DeviceProfile.rememberRun(context, (int) ((queue.length() - completed) * 60L / seconds), peak, profile.label); // the slow retry must not skew the speed the phone remembers
             ScanStore.finish(context, "completed", "");
-            if (ScanStore.promotePending(context)) {
+            // Photos shared during this scan go first; otherwise the photos that ended without an IMEI 1 get their one automatic retry (never after a retry).
+            boolean nextJob = ScanStore.promotePending(context);
+            if (!nextJob && !retryJob) nextJob = ScanStore.startAutoRetry(context, personId);
+            if (nextJob) {
                 androidx.work.WorkManager.getInstance(context).enqueueUniqueWork("imei-lens-background-scan",
                     androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE, new androidx.work.OneTimeWorkRequest.Builder(ScanWorker.class).build());
             }

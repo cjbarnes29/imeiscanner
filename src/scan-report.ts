@@ -1,3 +1,5 @@
+import { failReasonShort, readReasons, reasonsLine } from './fail-reason';
+
 /**
  * The scan report of the Android background scan: source PHOTOS counted apart from the product RECORDS read from them.
  * The numbers come from the app (ScanLedger.java); this file only reads and words them, so it can be tested.
@@ -14,6 +16,12 @@ export type ReportSummary = {
   needRescan: number;
   /** Photos of this scan that miss a label the scanner could explain (cut by an edge, partly read, unreadable): "retake these". */
   retake: number;
+  /** Why labels of this scan have no IMEI 1: {kind: count} (see fail-reason.ts). */
+  reasons: Record<string, number>;
+  /** Photos of this scan the automatic retry went over, labels it recovered, and photos where something is still unresolved. */
+  retried: number; recovered: number; unresolved: number;
+  /** Photos (any scan) still waiting for their one automatic retry. */
+  retryPending: number;
 };
 
 export type ReportPhoto = {
@@ -24,6 +32,8 @@ export type ReportPhoto = {
   duplicateOfUri?: string; scans?: number;
   /** Why a label of this photo is missing (see label-issue.ts); empty when nothing is known. */
   retake: boolean; retakeKind: string; retakeSide: string; retakeMissing: number; retakeDigits: number;
+  /** Why labels of this photo have no IMEI 1 ({kind: count}); its automatic retry: "pending", "done" or empty; labels the retry recovered. */
+  reasons: Record<string, number>; autoRetry: string; recovered: number;
 };
 
 export type ScanReportData = { jobId: string; report: ReportSummary; photos: ReportPhoto[] };
@@ -31,7 +41,7 @@ export type ScanReportData = { jobId: string; report: ReportSummary; photos: Rep
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
-export const EMPTY_SUMMARY: ReportSummary = { photos: 0, scanned: 0, failed: 0, duplicatePhotos: 0, products: 0, saved: 0, imeisDetected: 0, missingImei: 0, duplicateImeis: 0, emptyRepeats: 0, review: 0, needRescanInJob: 0, needRescan: 0, retake: 0 };
+export const EMPTY_SUMMARY: ReportSummary = { photos: 0, scanned: 0, failed: 0, duplicatePhotos: 0, products: 0, saved: 0, imeisDetected: 0, missingImei: 0, duplicateImeis: 0, emptyRepeats: 0, review: 0, needRescanInJob: 0, needRescan: 0, retake: 0, reasons: {}, retried: 0, recovered: 0, unresolved: 0, retryPending: 0 };
 
 /** Reads the summary the app sends with every status; anything missing (an older app, a bad value) counts as 0. */
 export function readSummary(value: unknown): ReportSummary {
@@ -39,7 +49,8 @@ export function readSummary(value: unknown): ReportSummary {
   return {
     photos: num(v.photos), scanned: num(v.scanned), failed: num(v.failed), duplicatePhotos: num(v.duplicatePhotos),
     products: num(v.products), saved: num(v.saved), imeisDetected: num(v.imeisDetected), missingImei: num(v.missingImei),
-    duplicateImeis: num(v.duplicateImeis), emptyRepeats: num(v.emptyRepeats), review: num(v.review), needRescanInJob: num(v.needRescanInJob), needRescan: num(v.needRescan), retake: num(v.retake)
+    duplicateImeis: num(v.duplicateImeis), emptyRepeats: num(v.emptyRepeats), review: num(v.review), needRescanInJob: num(v.needRescanInJob), needRescan: num(v.needRescan), retake: num(v.retake),
+    reasons: readReasons(v.reasons), retried: num(v.retried), recovered: num(v.recovered), unresolved: num(v.unresolved), retryPending: num(v.retryPending)
   };
 }
 
@@ -58,7 +69,8 @@ export function parseReport(raw: string): ScanReportData | null {
         emptyRepeats: Array.isArray(e.emptyRepeats) ? (e.emptyRepeats as unknown[]).map(d => ({ of: text((d as Record<string, unknown>)?.of) })) : [],
         supersedes: Array.isArray(e.supersedes) ? (e.supersedes as unknown[]).map(text).filter(Boolean) : [],
         review: num(e.review), reason: text(e.reason), needsRescan: e.needsRescan === true, duplicateOfUri: text(e.duplicateOfUri), scans: num(e.scans) || 1,
-        retake: e.retake === true, retakeKind: text(e.retakeKind), retakeSide: text(e.retakeSide), retakeMissing: num(e.retakeMissing) || 1, retakeDigits: num(e.retakeDigits)
+        retake: e.retake === true, retakeKind: text(e.retakeKind), retakeSide: text(e.retakeSide), retakeMissing: num(e.retakeMissing) || 1, retakeDigits: num(e.retakeDigits),
+        reasons: readReasons(e.reasons), autoRetry: text(e.autoRetry), recovered: num(e.recovered)
       };
     });
     return { jobId: text(data.jobId), report: readSummary(data.report), photos };
@@ -81,7 +93,12 @@ export function summaryLine(summary: ReportSummary): string {
     `${plural(summary.products, 'product')} found`,
     `${plural(summary.imeisDetected, 'IMEI')} read`
   ];
-  if (summary.missingImei) parts.push(`${summary.missingImei} without an IMEI`);
+  const why = reasonsLine(summary.reasons);
+  if (summary.missingImei) parts.push(`${summary.missingImei} without an IMEI${why ? ` (${why})` : ''}`);
+  if (summary.retried) parts.push(summary.recovered
+    ? `retried ${plural(summary.retried, 'photo')}: ${summary.recovered} recovered${summary.unresolved ? `, ${summary.unresolved} still unresolved` : ''}`
+    : `retried ${plural(summary.retried, 'photo')}: nothing more could be read`);
+  else if (summary.retryPending) parts.push(`${plural(summary.retryPending, 'photo')} waiting to be tried again`);
   if (summary.duplicateImeis) parts.push(`${plural(summary.duplicateImeis, 'duplicate IMEI')} not saved again`);
   if (summary.emptyRepeats) parts.push(`${plural(summary.emptyRepeats, 'unreadable record')} already listed, not added again`);
   if (summary.duplicatePhotos) parts.push(`${plural(summary.duplicatePhotos, 'repeated picture')}`);
@@ -99,7 +116,11 @@ export function photoStatus(photo: ReportPhoto): PhotoStatus {
   if (photo.outcome === 'duplicate-photo') return { label: 'Same picture as another one in this scan', tone: 'info' };
   const bits: string[] = [plural(photo.products, 'product')];
   if (photo.imeis.length) bits.push(`${plural(photo.imeis.length, 'IMEI')} read`);
-  if (photo.missingImei) bits.push(`${photo.missingImei} without an IMEI`);
+  const why = reasonsLine(photo.reasons);
+  if (photo.missingImei) bits.push(`${photo.missingImei} without an IMEI${why ? ` (${why})` : ''}`);
+  else if (photo.reasons?.['imei2-only']) bits.push(failReasonShort('imei2-only'));
+  if (photo.autoRetry === 'done') bits.push(photo.recovered ? `tried again: ${photo.recovered} recovered` : 'tried again: nothing more could be read');
+  else if (photo.autoRetry === 'pending') bits.push('waiting to be tried again');
   if (photo.orphanBarcodes) bits.push('a label may have been missed (barcode numbers without a matching label)');
   if (photo.emptyRepeats.length) bits.push(`${photo.emptyRepeats.length} unreadable already listed, not added again`);
   if (photo.duplicates.length) bits.push(`${plural(photo.duplicates.length, 'duplicate')} not saved again`);

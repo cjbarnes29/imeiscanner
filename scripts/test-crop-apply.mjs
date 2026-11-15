@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = await readFile('src/App.tsx', 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['luhnValid', 'recordImeiPair', 'modelForCrop', 'splitRecords', 'extractImei1s', 'extractPreferredImei', 'unindexedImeisShim'].filter(n => n !== 'unindexedImeisShim');
+const names = ['luhnValid', 'recordImeiPair', 'modelForCrop', 'splitRecords', 'keepNumbers', 'extractImei1s', 'extractPreferredImei', 'unindexedImeisShim'].filter(n => n !== 'unindexedImeisShim');
 let helpers = 'let idCounter = 0; const newId = () => "id" + (++idCounter) + "-abcdefgh";\nconst digits = s => s.replace(/\\D/g, "");\n';
 helpers += 'const identifyModel = (text) => { const m = text.match(/\\bSM-[A-Z][0-9]{3}[A-Z0-9]/i); return m ? m[0].toUpperCase() : "Unknown unit — review"; };\n';
 { const iv = ts.createSourceFile('imei-validate.ts', await readFile('src/imei-validate.ts', 'utf8'), ts.ScriptTarget.ES2022, true); const node = iv.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'pairedImei2'); assert.ok(node, 'Missing pairedImei2'); helpers += node.getText(iv).replace(/^export /, '') + '\n'; }
@@ -63,6 +63,22 @@ try {
   assert.equal(kept.personId, 'person-9'); assert.equal(kept.number, 7);
   // …and a crop that did read a number wins over the old one
   assert.equal(f.splitRecords(single, [crop(B, 'SM-S938B')], 8)[0].imei, B);
+
+  // Background rescan (keepManual): a record with a checksum-valid or confirmed IMEI keeps its numbers; a different reading only flags it
+  const typed = { ...single, imei2: undefined, checked: true, serial: 'TYPED123456', model: 'SM-S938B' };
+  const rescanned = f.splitRecords(typed, [crop(B, 'SM-A165F')], 8, true)[0];
+  assert.equal(rescanned.imei, A, 'the rescan never overwrites a saved IMEI 1');
+  assert.equal(rescanned.serial, 'TYPED123456', 'nor the saved serial');
+  assert.equal(rescanned.model, 'SM-S938B', 'nor the saved model');
+  assert.equal(rescanned.imeiNeedsReview, true, 'a different reading is flagged for a look');
+  assert.equal(rescanned.checked, false, 'and the record comes back into the review list');
+  assert.ok(!/\d{6}/.test(rescanned.imeiNote), 'the note holds no number');
+  assert.equal(rescanned.dataUrl, 'data:crop-' + B, 'the new picture is kept');
+  const same = f.splitRecords(typed, [crop(A, 'SM-S938B')], 8, true)[0];
+  assert.equal(same.imei, A); assert.equal(same.checked, true, 'the same reading keeps the confirmation'); assert.ok(!same.imeiNeedsReview);
+  // A record with no valid number takes the new reading; several products are never guarded (each label is its own record)
+  assert.equal(f.splitRecords({ ...single, imei: '352099001761480', checked: false }, [crop(B, 'SM-S938B')], 8, true)[0].imei, B, 'an invalid IMEI is replaced by the rescan');
+  assert.deepEqual(f.splitRecords({ ...original, imei: A }, [crop(A, 'SM-S938B'), crop(B, 'SM-A165F')], 8, true).map(r => r.imei), [A, B], 'a multi-product photo splits as before');
 
   // Uncertain readings are flagged
   const flagged = f.splitRecords(original, [{ ...crop(A, 'SM-S938B'), review: true }, crop(B, 'SM-A165F')], 8);

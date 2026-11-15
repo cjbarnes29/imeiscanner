@@ -57,7 +57,7 @@ public final class QueueService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_crop)
-            .setContentTitle("IMEI Lens is cropping photos")
+            .setContentTitle("RetailLens is cropping photos")
             .setContentText(done + " of " + total + " photos done - tap to open")
             .setContentIntent(open).setOnlyAlertOnce(true).setOngoing(true)
             .setProgress(Math.max(1, total), Math.min(done, Math.max(1, total)), false)

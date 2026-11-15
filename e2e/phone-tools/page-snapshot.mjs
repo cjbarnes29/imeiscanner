@@ -51,7 +51,7 @@ export function snapshot(device, app) {
   guardApp(app);
   const run = queue.then(async () => {
     const data = await evaluate(device, app, `(${pageCollect.toString()})()`);
-    if (!data || !Array.isArray(data.records)) throw new Error('The test app did not answer. Open IMEI Lens Test on the phone (not the real app) and try again.');
+    if (!data || !Array.isArray(data.records)) throw new Error('The test app did not answer. Open RetailLens Test on the phone (not the real app) and try again.');
     return { takenAt: new Date().toISOString(), ...maskDeep(data) };
   });
   queue = run.catch(() => {});

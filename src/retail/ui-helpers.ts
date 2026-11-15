@@ -1,0 +1,38 @@
+// Shared by the RetailLens screens: the props every section receives, and small helpers. No React here, so the screens can import it freely.
+import { itemFor, segmentOf } from './catalog';
+import { emptyDay } from './data';
+import { variantOf, type StockSource } from './inventory';
+import { monthOf, type DateKey, type DayLog, type RetailState } from './types';
+
+export type RetailRecord = StockSource & { name: string; createdAt?: string; imei2?: string; serial?: string; needsReview?: boolean };
+export type RetailCtx = {
+  state: RetailState;
+  /** Saves the new state. `why` is kept with the snapshot before it (Undo); '' = a trivial change, no snapshot. */
+  change: (next: RetailState, why: string) => void;
+  records: RetailRecord[];
+  people: { id: string; name: string }[];
+  today: DateKey;
+  /** Sets the owner of phones (an approved Give, or its undo). */
+  assign: (changes: { id: string; personId: string }[]) => void;
+  /** The text of an image, read offline on the phone. */
+  readImage: (file: File) => Promise<string>;
+  counts: { scanning: number; needsReview: number };
+  notify: (text: string) => void;
+  /** A WhatsApp report shared to the app as text: opens Reports with it filled in. */
+  sharedText?: string;
+  /** Shows these phones in Records (a filter such as `day:2026-11-15`). */
+  openRecords: (filter: string) => void;
+  download: (blob: Blob, name: string) => void;
+  share: (text: string) => void;
+};
+
+export const num = (value: string) => Math.max(0, Math.floor(Number(value) || 0));
+export const who = (ctx: Pick<RetailCtx, 'people'>, id: string) => (id ? ctx.people.find(p => p.id === id)?.name || 'Unnamed' : 'Unassigned');
+export const last4 = (imei: string) => `…${imei.slice(-4)}`;
+export const updateDay = (state: RetailState, date: DateKey, fn: (day: DayLog) => DayLog): RetailState => ({ ...state, days: { ...state.days, [date]: fn(state.days[date] || emptyDay()) } });
+
+/** What a sale records about a phone: model name, segment this month, memory and colour (from the person's edit or the label). */
+export const sellDetails = (ctx: Pick<RetailCtx, 'state' | 'today'>, record: Pick<StockSource, 'id' | 'model' | 'raw'>) => {
+  const item = itemFor(ctx.state, record.model), v = variantOf(ctx.state, record);
+  return { modelName: item?.name || record.model || 'Unknown model', segment: segmentOf(ctx.state, record.model, monthOf(ctx.today), ctx.state.recordMeta[record.id]), ram: v.ram, storage: v.storage, color: v.color };
+};

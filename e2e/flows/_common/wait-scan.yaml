@@ -4,6 +4,19 @@ appId: com.imeilens.scanner.phonetest
 - extendedWaitUntil:
     visible: ".*photos scanned · completed.*"
     timeout: 180000
+# Photos the scan could not read are retried once automatically by the phone (it says "Trying N unread photos again"); the review list opens only
+# after that, so wait for the retry to begin (a few seconds, only when a photo was unread) and then for it to end.
+- extendedWaitUntil:
+    visible: ".*Trying [0-9]+ unread.*|.*unread tried again.*"
+    timeout: 8000
+    optional: true
+- extendedWaitUntil:
+    notVisible: ".*Trying [0-9]+ unread.*"
+    timeout: 240000
+# The page's own reader then tries what is still unread (a banner says so); wait for that too (returns at once when nothing was queued).
+- extendedWaitUntil:
+    notVisible: ".*Cropping in the background.*"
+    timeout: 300000
 # When some new records need a look the review list opens by itself about 3 s later and covers the tab bar. Give it time to appear, then close it
 # (its edits are saved on close) so the flow can carry on with the screen underneath. No list = nothing to do.
 - extendedWaitUntil:

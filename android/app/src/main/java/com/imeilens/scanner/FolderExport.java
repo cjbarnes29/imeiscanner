@@ -227,7 +227,7 @@ final class FolderExport {
         for (File file : files) { String id = docs.find(parent, file.getName()); if (id != null) { sample = id; break; } }
         if (sample == null && job.clean) for (String[] child : docs.children(parent)) if (oldReportFile(child[1])) { sample = child[0]; break; }
         if (sample != null && !docs.canRename(sample)) {
-            String datedName = (job.sub.isEmpty() ? "IMEI Lens export" : job.sub) + " " + new SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.ROOT).format(now);
+            String datedName = (job.sub.isEmpty() ? "RetailLens export" : job.sub) + " " + new SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.ROOT).format(now);
             String created = docs.createDir(job.rootId, datedName);
             if (created == null) throw new IOException("Cannot create the folder " + datedName + ".");
             job.parentId = created; job.createdByUs = true; job.dated = true; job.sub = datedName;

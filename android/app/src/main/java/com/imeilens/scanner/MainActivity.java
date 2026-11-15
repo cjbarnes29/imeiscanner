@@ -348,6 +348,17 @@ public final class MainActivity extends Activity {
         boolean single = Intent.ACTION_SEND.equals(action), many = Intent.ACTION_SEND_MULTIPLE.equals(action);
         if (!single && !many) return;
         String type = intent.getType();
+        // A report shared as text (for example from WhatsApp): kept until the page asks for it (takeSharedText), so a cold start does not lose it.
+        if (single && type != null && type.startsWith("text/")) {
+            String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+            setIntent(new Intent(this, MainActivity.class)); // handled: do not run again if the screen is recreated
+            if (text != null && !text.trim().isEmpty()) {
+                getSharedPreferences("app-state", MODE_PRIVATE).edit().putString("shared-text", text.length() > 20000 ? text.substring(0, 20000) : text).apply();
+                // On a cold start this runs inside onCreate, before the page exists: the page asks for the text itself when it loads (takeSharedText).
+                if (webView != null) runOnUiThread(() -> webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('android-shared-text'))", null));
+            }
+            return;
+        }
         if (type != null && !type.startsWith("image/") && !"*/*".equals(type)) return;
         ArrayList<Uri> uris = new ArrayList<>();
         if (single) {
@@ -719,6 +730,14 @@ public final class MainActivity extends Activity {
                 notifyWeb();
                 return queue.length();
             } catch (Exception error) { android.util.Log.e("IMEI-Lens", "Rescan failed", error); return 0; }
+        }
+
+        /** The text shared to the app (a WhatsApp report), once: it is cleared when read. Empty when there is none. */
+        @JavascriptInterface public String takeSharedText() {
+            android.content.SharedPreferences prefs = getSharedPreferences("app-state", MODE_PRIVATE);
+            String text = prefs.getString("shared-text", "");
+            if (!text.isEmpty()) prefs.edit().remove("shared-text").apply();
+            return text;
         }
 
         @JavascriptInterface public String status() {
