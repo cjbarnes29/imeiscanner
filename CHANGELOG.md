@@ -2,6 +2,13 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — simpler review: one Save, a bulk list, fewer popups (Android and web)
+- **Review dialog:** one **Save** button (saves, then moves to the next record; closes after the last). Previous / Next stay. Rotate and Straighten are under **Fix photo**; Download photo, Delete this record and the details are under **More**.
+- **Nothing is lost when you leave:** closing the review (or the list) saves every edit. A half-typed IMEI keeps the old IMEI, flags the record and leaves a note instead of being thrown away. The Save / Discard popup is gone.
+- **Bulk review list:** after a scan, records that need a look open in a fast list (IMEI 1 and Serial per row, edits autosave). **Accept N that look right** (valid IMEI, no duplicate, no flags) with **Undo**. The banner **Review all (N)** opens it again.
+- **Archive hint:** a new record whose IMEI is already in the archive shows **Also in archive** (a soft hint; nothing is flagged or moved) with a **View archive** button.
+- **Fewer popups and buttons:** duplicate / invalid notes are short messages; Archive duplicates acts at once with Undo; the Records table no longer has an extra Edit photo button; Share has the extras under **More ways to send**; the linked picture has one **Copy numbers** button; Give tab: *Who gets how many* and *Send one at a time* (renamed, both kept).
+- Tests: `scripts/e2e-review.mjs` (9 checks), `scripts/e2e-bulk.mjs` (8 checks), `npm test` (11 suites), emulator tests 00 to 18 all pass on a freshly booted emulator. **Not verified:** the real phone.
 ## Unreleased — the phone camera app is the only camera (Android)
 - **Take photo / Scan with camera now open the phone's own camera app.** The in-app live preview (small, wrong shape, often did not scan) is no longer used on the phone; the browser version keeps it.
 - The camera writes the full-size photo straight into a private folder inside the app (never the gallery) and it is scanned by the same background scanner as chosen photos. A photo survives the app being closed while the camera is open.

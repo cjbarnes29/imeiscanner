@@ -25,6 +25,7 @@ Results of the last run are in `e2e/reports/<time>/REPORT.md` (git-ignored). Num
 | Installing over the real app, signature, data compatibility | none | M | needs a release-signed build and a decision |
 
 ## What was run and the result
+Latest run on 2026-11-15 (new review UX build, freshly booted emulator): **all 19 tests 00 to 18 pass**, 0 crashes (02 and 08 were rerun after a test fix; 07, 11, 12, 13 failed on a degraded emulator, with the same failure on the build before the changes, and passed after a fresh boot). The older run below is kept for the check counts.
 Full run on 2026-11-13 (emulator, isolated test app, Maestro 2.12.1): **10 passed, 1 known failing (expected), 0 crashes** (00-smoke, 01-scan-gallery 15/15 checks, 02-records 7/7, 03-crop-archive-undo 7/7, 04-restore-from-archive-list 6/6, 05-duplicates-archive-undo 10/10, 06-export-csv 13/13, 08-share 7/7, 09-background-scan 6/6, 10-background-queue 5/5; 07-export-interrupted fails as designed: a 0-byte file is left behind). Each full run takes about 15 minutes. Stability: one fully clean run so far; an earlier run had 3 failures that were test mistakes (wrong field lookup, a read before the app saved, text Maestro cannot see), all fixed. The live results are always in the newest `REPORT.md`.
 
 ## Not in CI (on purpose)
