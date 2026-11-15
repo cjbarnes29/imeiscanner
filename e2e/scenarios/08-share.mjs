@@ -9,6 +9,8 @@ check(results, 'Share tab opens', await clickText(c, '^Share$'));
 await sleep(1000);
 check(results, 'Share all button is offered', await clickText(c, '^Share all'));
 check(results, 'the dialog says "Share 5 records"', await waitForText(c, 'Share 5 records', 8000));
+await clickText(c, '^More ways to send', { tag: 'summary' }); // the numbers list sits under this heading now
+await sleep(500);
 const text = await bodyText(c);
 check(results, 'Share all numbers and Copy numbers are offered', text.includes('Share all numbers') && text.includes('Copy numbers'));
 const A = truth['E2E-single-A.jpg'].imei1[0];
