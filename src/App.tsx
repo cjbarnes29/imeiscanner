@@ -1199,8 +1199,8 @@ function CropResults({ groups, setGroups, busy, onBack, onApply }: { groups: Cro
  * Cropping from start to finish, for one photo (from the review window) or many (bulk crop):
  * draw the boxes in the Crop Studio, read the crops, check them, replace the originals.
  */
-function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose, onLater, onQueue }: {
-  items: BulkItem[]; initialPlans?: Record<string, Box[]>; startIndex?: number; knownTacs: ReadonlySet<string>; onQueue?: (entries: StudioPlan[], mode?: 'later') => void;
+function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose, onLater, onQueue, background }: {
+  items: BulkItem[]; initialPlans?: Record<string, Box[]>; startIndex?: number; knownTacs: ReadonlySet<string>; onQueue?: (entries: StudioPlan[], mode?: 'later') => void; background?: boolean;
   onApply: (groups: CropGroup[]) => void; onClose: () => void; onLater: (boxes: number, photos: number) => void;
 }) {
   const [stage, setStage] = useState<'draw' | 'results'>('draw');
@@ -1238,7 +1238,7 @@ function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose
   return <CropStudio items={items} initialPlans={plans} startIndex={startIndex} progress={progress} notice={notice}
     title={items.length > 1 ? 'Bulk crop' : 'Crop photo'}
     detect={async source => ({ ...(await autoDetectBoxes(await worker(), source)) })}
-    onSaveAll={list => void process(list)} onQueue={onQueue}
+    onSaveAll={list => void process(list)} onQueue={onQueue} background={background}
     onAutosave={(list, index) => { writeDraft(localStorage, asDraft(list), index); }}
     onSaveLater={(list, index) => { writeDraft(localStorage, asDraft(list), index); onLater(list.reduce((sum, plan) => sum + plan.boxes.length, 0), list.filter(plan => plan.boxes.length).length); }}
     onClose={onClose} onDiscard={discard} />;
@@ -5294,9 +5294,9 @@ export default function App() {
             </div>
 
             {inArchive(selected) && <div className="review-question" role="note"><div><strong>Also in your archive</strong><span>An archived record has this IMEI too. Nothing was changed.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={() => setArchiveOpen(true)}>View archive</button></div></div>}
-            {(() => { const issue = issueTextFor(selected); return issue && <div className="review-question retake-prompt" role="alert" aria-label="Retake this photo"><div><strong>{issue.title}</strong><span>{issue.text}</span><small>Nothing is filled in for you, and your original photo is kept.</small></div><div className="review-question-buttons"><button className="primary" onClick={() => { setSelected(null); openNativeCamera(); }}>Retake photo</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop manually</button><button className="subtle-btn" onClick={() => { updateRow(selected.id, { labelIssueDismissed: true }); setSelected(current => current && { ...current, labelIssueDismissed: true }); }}>Keep as is</button></div></div>; })()}
-            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={autoSplitBusy.current} onClick={() => void autoSplitRecords([selected]).then(n => { if (n) setSelected(null); })}>Split automatically</button><button className="subtle-btn" onClick={() => setCropEditorOpen(true)}>Crop each myself</button></div></div>}
-            {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off.</span></div><div className="review-question-buttons"><button className="primary" onClick={() => setCropEditorOpen(true)}>Adjust crop</button></div></div>}
+            {(() => { const issue = issueTextFor(selected); return issue && <div className="review-question retake-prompt" role="alert" aria-label="Retake this photo"><div><strong>{issue.title}</strong><span>{issue.text}</span><small>Nothing is filled in for you, and your original photo is kept.</small></div><div className="review-question-buttons"><button className="primary" onClick={() => { setSelected(null); openNativeCamera(); }}>Retake photo</button><button className="subtle-btn" onClick={() => { updateRow(selected.id, { labelIssueDismissed: true }); setSelected(current => current && { ...current, labelIssueDismissed: true }); }}>Keep as is</button></div></div>; })()}
+            {selected.cropNeedsReview && (selected.deviceCount || 0) > 1 && <div className="review-question" role="group" aria-label="How many devices are in this photo"><div><strong>Is this 1 device or {selected.deviceCount}?</strong><span>The scanner found {selected.deviceCount} possible devices but could not cut the photo.</span></div><div className="review-question-buttons"><button className="subtle-btn" onClick={confirmSingleDevice}>1 device</button><button className="primary" disabled={autoSplitBusy.current} onClick={() => void autoSplitRecords([selected]).then(n => { if (n) setSelected(null); })}>Split automatically</button></div></div>}
+            {selected.cropNeedsReview && (selected.deviceCount || 0) <= 1 && <div className="review-question" role="alert"><div><strong>Check the crop</strong><span>The automatic crop may be cut off. Use Crop / edit photo above to fix it.</span></div></div>}
 
             <div className="manual-imei-entry review-fields">
               <div className="review-field">
@@ -5579,7 +5579,7 @@ export default function App() {
         const rows = bulkRowsRef.current;
         return <CropFlow key="bulk" items={rows.map(cropItem)} knownTacs={knownTacs}
           initialPlans={bulkDraft ? Object.fromEntries(bulkDraft.items.map(item => [item.recordId, item.boxes])) : undefined} startIndex={bulkDraft?.index}
-          onApply={groups => applyCropGroups(groups, false)} onClose={finishCropFlow} onLater={cropFlowLater} onQueue={enqueueCrops} />;
+          onApply={groups => applyCropGroups(groups, false)} onClose={finishCropFlow} onLater={cropFlowLater} onQueue={enqueueCrops} background />;
       })()}
       {linkedPicture !== null && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) closeLinkedPicture(); }}><section className="modal linked-picture" role="dialog" aria-modal="true" aria-label="Picture from Excel link">
         <div className="modal-head"><h2>{linkedPicture ? 'Picture' : 'Picture not found'}</h2><button className="subtle-btn" onClick={closeLinkedPicture}>Close</button></div>

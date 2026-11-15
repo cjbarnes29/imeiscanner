@@ -1,8 +1,8 @@
 // Background crop queue in headless Edge/Chrome (not part of `npm test`; run `npm run build` and `node scripts/make-composites.mjs` first).
 //   node scripts/e2e-queue.mjs
-// 1. Bulk crop with 4 photos: Process later on photo 1 moves to the next unfinished photo; Queue all queues the other 3.
-// 2. The queue runs while the page stays usable; set-aside photos are not read until Resume; Resume includes them.
-// 3. Queue panel: Pending / Processing / Process later / Needs review / Completed counts; Needs review lists ONLY affected photos
+// 1. Bulk crop with 4 photos: the single Save all closes the editor at once and cuts all 4 in the background (no boxes drawn = cut automatically).
+// 2. The queue runs while the page stays usable.
+// 3. Queue panel: Pending / Processing / Needs review / Completed counts (Process later only shows for older queues); Needs review lists ONLY affected photos
 //    (with the reason); Retry, Approve, Select for export.
 // 4. Settings apply to queued jobs: the same photo with Scan speed Fast vs Standard (Fast skips the extra passes).
 // 5. Interrupted processing: reload while a photo is being read; the queue is offered again with that photo waiting.
@@ -30,6 +30,8 @@ const run=async expr=>{const r=await send('Runtime.evaluate',{expression:expr,aw
 const waitFor=async(expr,label,ms=60000)=>{const end=Date.now()+ms;while(Date.now()<end){try{if(await run(expr))return true;}catch{}await sleep(300);}throw new Error('Timed out: '+label);};
 const clickText=(sel,text)=>run(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(sel)})].find(x=>(x.textContent||'').trim().startsWith(${JSON.stringify(text)})&&!x.disabled);if(!b)return false;b.click();return true;})()`);
 const rowsOf=()=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const db=o.result;const g=db.transaction('inventory').objectStore('inventory').getAll(IDBKeyRange.bound('record:','record:\\uffff'));g.onsuccess=()=>{const rows=g.result.map(r=>({id:r.id,imei:r.imei,review:!!r.cropNeedsReview,name:r.name}));db.close();res(rows);};};})`);
+// Save all, after the editor's automatic search for labels on a photo with no boxes has finished (it blocks the button while it runs).
+const saveAllNow=async()=>{await waitFor(`!/Looking for labels/.test(document.querySelector('.studio-message')?.textContent||'')&&!document.querySelector('.studio-tools .spin')`,'auto search done',120000);return clickText('.studio-actions button','Save all');};
 const banner=()=>run(`(document.querySelector('.queue-banner')?.innerText||'').replace(/\\n/g,' ')`);
 const tabCounts=()=>run(`Object.fromEntries([...document.querySelectorAll('.queue-tabs button')].map(b=>[b.childNodes[0].textContent.trim(),Number(b.querySelector('b').textContent)]))`);
 const ok=n=>console.log('PASS:',n);
@@ -40,34 +42,29 @@ try{
   await send('Page.enable');await send('Runtime.enable');
   // ONLY=crash runs just the last check (quick).
   if(process.env.ONLY!=='crash'){
-  // ---------- 1. Bulk crop: Process later + auto-next, Queue all ----------
+  // ---------- 1. Bulk crop: one Save all queues every photo ----------
   await fresh();await seed(photos);await open();
   await waitFor(`[...document.querySelectorAll('button')].some(b=>/^Bulk crop/.test(b.textContent.trim())&&!b.disabled)`,'Bulk crop');
   await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
   assert.match(await run(`document.querySelector('.studio-title').innerText`),/Photo 1 of 4/);
-  await clickText('.studio-actions button','Process later');
-  await waitFor(`/Photo 2 of 4/.test(document.querySelector('.studio-title').innerText)`,'auto-next to photo 2');
-  assert.ok(await run(`!!document.querySelector('.studio-thumb b.later')`),'photo 1 marked as set aside');
-  ok('Process later keeps photo 1 (marked ⏭) and opens the next unfinished photo (2 of 4)');
-  assert.ok(await run(`[...document.querySelectorAll('.studio-actions button')].some(b=>/Queue all in background \\(3\\)/.test(b.textContent))`),'queue all counts the 3 not set aside');
-  const t0=Date.now();await clickText('.studio-actions button','Queue all in background');
+  // the editor opens on photo 1 and searches it by itself; wait for that so the next step is not blocked
+  await waitFor(`!/Looking for labels/.test(document.querySelector('.studio-message')?.textContent||'')&&!document.querySelector('.studio-tools .spin')`,'auto search done',120000);
+  assert.ok(await run(`[...document.querySelectorAll('.studio-actions button')].length===1`),'the footer has a single button');
+  ok('the editor footer has one button (Save all)');
+  const t0=Date.now();await saveAllNow();
   await waitFor(`!document.querySelector('.studio')`,'studio closes');
-  ok(`Queue all (3) closes the editor at once (${Date.now()-t0} ms); banner: ${(await banner()).slice(0,120)}`);
-  assert.match(await banner(),/1 for later/);
+  ok(`Save all (4 photos) closes the editor at once (${Date.now()-t0} ms); banner: ${(await banner()).slice(0,120)}`);
   // the page answers while the queue runs: a timer must keep firing
   const ticks=await run(`new Promise(r=>{let n=0;const t=setInterval(()=>n++,100);setTimeout(()=>{clearInterval(t);r(n)},3000);})`);
   ok(`page stays responsive while the queue reads (${ticks} of ~30 timer ticks in 3 s)`);
-  // ---------- 2. set-aside photo is not read until Resume ----------
-  await waitFor(`/Photos set aside for later/.test(document.querySelector('.queue-banner')?.innerText||'')`,'pending done, later left',900000);
-  let rows=await rowsOf();assert.ok(rows.some(r=>r.id==='seed-0'),'set-aside photo not read yet');
-  ok('the 3 queued photos were read; the set-aside photo was not touched: '+(await banner()).slice(0,100));
+  // ---------- 2. all four photos are read ----------
+  await waitFor(`/finished/.test(document.querySelector('.queue-banner')?.innerText||'')`,'all photos done',900000);
+  let rows=await rowsOf();
+  ok('the 4 photos were read in the background: '+(await banner()).slice(0,100));
   // ---------- 3. panel ----------
   await clickText('.queue-banner button','Queue');await waitFor(`!!document.querySelector('.queue-panel')`,'panel');
   let tabs=await tabCounts();ok('queue panel tabs: '+JSON.stringify(tabs));
-  assert.equal(tabs['Process later'],1);assert.equal(tabs['Pending'],0);assert.ok(tabs['Completed']+tabs['Needs review']>=3,'3 finished photos are Completed or Needs review');
-  await clickText('.queue-actions button','Resume');
-  await waitFor(`(()=>{const t=[...document.querySelectorAll('.queue-tabs button')];const v=n=>Number(t.find(b=>b.childNodes[0].textContent.trim()===n)?.querySelector('b').textContent);return v('Process later')===0&&v('Pending')===0&&v('Processing')===0;})()`,'later photo processed',600000);
-  tabs=await tabCounts();ok('after Resume the set-aside photo was included: '+JSON.stringify(tabs));
+  assert.equal(tabs['Pending'],0);assert.ok(!('Process later' in tabs),'no Process later tab when nothing is set aside');assert.ok(tabs['Completed']+tabs['Needs review']>=3,'the finished photos are Completed or Needs review');
   await clickText('.queue-tabs button','Needs review');await sleep(300);
   const reviewRows=await run(`[...document.querySelectorAll('.queue-list .queue-row')].map(r=>r.innerText.replace(/\\n/g,' | '))`);
   assert.ok(reviewRows.every(t=>/need a look|label|could not|No separate|Found/i.test(t)),'only affected photos with a reason: '+reviewRows);
@@ -94,7 +91,7 @@ try{
   for(const [speed,photo] of [['fast',2],['standard',2],['fast-blurry',3],['standard-blurry',3]]){
     await fresh(`localStorage.setItem('imei-lens-scan-speed','${speed.split('-')[0]}');`);await seed([photos[photo]]);await open();
     await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
-    const s=Date.now();await clickText('.studio-actions button','Queue in background');
+    const s=Date.now();await saveAllNow();
     await waitFor(`/finished/.test(document.querySelector('.queue-banner')?.innerText||'')`,'done '+speed,600000);
     await sleep(2500);rows=await rowsOf();
     timing[speed]={seconds:Math.round((Date.now()-s)/1000),records:rows.length,imeis:rows.filter(r=>r.imei).length};
@@ -106,7 +103,7 @@ try{
   // Products in each photo applies too: 5 expected on a 4-product photo -> every crop is flagged "Found 4 of 5" -> Needs review -> Approve.
   await fresh(`localStorage.setItem('imei-lens-expected-products','5');`);await seed([photos[2]]);await open();
   await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
-  await clickText('.studio-actions button','Queue in background');
+  await saveAllNow();
   await waitFor(`/need review/.test(document.querySelector('.queue-banner')?.innerText||'')&&!/waiting · /.test(document.querySelector('.queue-banner')?.innerText.replace('0 waiting','')||'')`,'expected-5 run done',600000);
   await clickText('.queue-banner button','Queue');await waitFor(`!!document.querySelector('.queue-panel')`,'panel');
   await clickText('.queue-tabs button','Needs review');await sleep(300);
@@ -122,7 +119,7 @@ try{
   // ---------- 5. interrupted processing ----------
   await fresh();await seed([photos[2]]);await open();
   await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
-  await clickText('.studio-actions button','Queue in background');
+  await saveAllNow();
   await waitFor(`/Cropping in the background/.test(document.querySelector('.queue-banner')?.innerText||'')`,'running');
   await sleep(1500);
   await open();
@@ -138,7 +135,7 @@ try{
   for(let attempt=0;attempt<3;attempt++){
     await fresh();await seed([photos[1]]);await open();
     await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
-    await clickText('.studio-actions button','Queue in background');
+    await saveAllNow();
     await waitFor(`/1 of 1 done|cropping finished/.test(document.querySelector('.queue-banner')?.innerText||'')`,'photo finished',600000);
     await open(); // leave at once, like the app being killed
     await sleep(500);

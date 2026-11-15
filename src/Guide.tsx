@@ -30,7 +30,7 @@ export function AuthorCredit() {
 
 const NEW_ITEMS = [
   ['Camera that tells you what is wrong', 'The camera screen now says live whether the picture is sharp, blurry, too dark or has glare, tap the label to focus, and checks every shot (blur, glare and how many IMEI barcodes can be read).'],
-  ['Crop Studio and drafts', 'Draw one box per label (the count is automatic), move, resize or delete boxes, crop many photos at once, Save for later and Resume after a restart.'],
+  ['Crop Studio and drafts', 'Draw one box per label (the count is automatic), move, resize or delete boxes, crop many photos at once (they are cut in the background), and Resume after a restart. Closing the editor keeps your boxes.'],
   ['Barcodes in background scans', 'Choose photos and scan now reads the label barcodes and uses the exact IMEI from them, and levels tilted photos before separating the products.'],
   ['Confidence and learning', 'Each record shows how sure the app is (high, medium, low) in the review window. Correct a model code once and the app fixes the same misread next time.'],
   ['Several products in one photo', 'Choose how many products are in each photo (Scan tab). If fewer are found, the app reads the photo again in enlarged pieces. Tilted crops are straightened automatically, and the camera tells you right after a shot if barcodes are missing.'],
