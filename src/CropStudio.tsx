@@ -1,14 +1,15 @@
 // Crop Studio: one compact editor for cutting photos that hold several products.
 // - Drag on the photo to draw a box; the number of labels is simply the number of boxes (no count to type).
 // - Drag a box to move it, drag a corner to resize it, Delete (or the red button) removes it.
-// - "Select several" lets you move or delete a group of boxes together.
-// - Auto-detect is optional and only adds boxes.
+// - "Select several" (under More) lets you move or delete a group of boxes together.
+// - Auto-detect runs once when a photo with no boxes opens (and by its button); it only adds boxes.
 // - Works on one photo or on many; nothing is read or changed until Save all.
-// - Closing with unsaved boxes asks: Save for later, Discard, or Continue editing.
+// - Closing keeps the boxes as a draft (nothing is discarded, no question asked). One Save button: one photo is read now,
+//   several photos are cut one by one in the background.
 // Phones get a full-screen editor, larger screens a popup.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { ChevronLeft, ChevronRight, Hand, Loader2, MousePointer2, Redo2, Save, Trash2, Undo2, Wand2, ZoomIn, ZoomOut, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Hand, Loader2, MousePointer2, Trash2, Undo2, Wand2, ZoomIn, ZoomOut, X } from 'lucide-react';
 import { addBox, boxFromPoints, boxesAreSound, clampBox, hitTest, isUsableBox, moveBoxes, removeBoxes, resizeBox, type Box, type Part } from './crop-boxes';
 import { useBackLayer } from './back-layer';
 
@@ -34,6 +35,8 @@ type Props = {
   onAutosave?: (plans: StudioPlan[], index: number) => void;
   /** Send photos to the background queue: they are cut and read one by one while you carry on. A photo with no boxes is cut automatically. */
   onQueue?: (entries: StudioPlan[], mode?: 'later') => void;
+  /** Save all cuts in the background even for one photo (the bulk flow). Without it one photo is read now and its results are shown. */
+  background?: boolean;
 };
 
 type Drag =
@@ -43,7 +46,7 @@ type Drag =
 
 const ZOOMS = [1, 1.5, 2, 3, 4];
 
-export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress, title = 'Crop photos', detect, notice = '', onSaveAll, onSaveLater, onClose, onDiscard, onAutosave, onQueue }: Props) {
+export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress, title = 'Crop photos', detect, notice = '', onSaveAll, onSaveLater, onClose, onDiscard, onAutosave, onQueue, background = false }: Props) {
   const [plans, setPlans] = useState<Record<string, Box[]>>(() => Object.fromEntries(items.map(item => [item.id, initialPlans[item.id] || []])));
   const startPlans = useRef(JSON.stringify(plans));
   const [index, setIndex] = useState(Math.max(0, Math.min(items.length - 1, startIndex)));
@@ -53,9 +56,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   const [zoomStep, setZoomStep] = useState(0);
   const [message, setMessage] = useState('');
   const [detecting, setDetecting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [queued, setQueued] = useState<Set<string>>(new Set());
-  const [laterIds, setLaterIds] = useState<Set<string>>(new Set());
+  const autoTried = useRef<Set<string>>(new Set());
   const [draw, setDraw] = useState<Box | null>(null);
   const [view, setView] = useState({ w: 320, h: 400 });
   const [natural, setNatural] = useState({ w: 4, h: 3 });
@@ -72,6 +73,8 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   const total = useMemo(() => items.reduce((sum, entry) => sum + (plans[entry.id]?.length || 0), 0), [items, plans]);
   const photosWithBoxes = useMemo(() => items.filter(entry => plans[entry.id]?.length).length, [items, plans]);
   const dirty = JSON.stringify(plans) !== startPlans.current;
+  // Several photos (or the bulk flow) are cut one by one in the background; a photo with no boxes is cut automatically.
+  const inBackground = !!onQueue && (background || items.length > 1);
   const asList = useCallback((): StudioPlan[] => items.map(entry => ({ id: entry.id, boxes: plans[entry.id] || [] })), [items, plans]);
 
   // Keep the viewport size for fitting the photo.
@@ -87,6 +90,13 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
 
   // A fresh photo starts fitted, with nothing selected.
   useEffect(() => { setSelected([]); setZoomStep(0); setMessage(''); setDraw(null); }, [item.id]);
+
+  // A photo that opens with no boxes is searched once for labels, so you start with boxes to check instead of an empty photo.
+  useEffect(() => {
+    if (autoTried.current.has(item.id) || (plans[item.id] || []).length || progress) return;
+    autoTried.current.add(item.id);
+    void auto();
+  }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Draft autosave.
   useEffect(() => {
@@ -205,46 +215,20 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     onSaveAll(asList());
   }
   const saveLater = () => { onSaveLater(asList(), index); };
-  // Queue this photo and open the next one that is not queued yet; when none is left, close.
-  // The next photo after this one (wrapping around) that is neither queued nor set aside.
-  const nextUnfinished = (done: ReadonlySet<string>) => {
-    for (let step = 1; step < items.length; step++) { const i = (index + step) % items.length; if (!done.has(items[i].id)) return i; }
-    return -1;
-  };
-  function queueOne() {
-    if (busy || !onQueue) return;
-    if (!boxes.length) { setMessage('Draw at least one box first, or use Queue all to cut photos automatically.'); return; }
-    const done = new Set(queued).add(item.id);
-    onQueue([{ id: item.id, boxes }]);
-    setQueued(done); setLaterIds(old => { const n = new Set(old); n.delete(item.id); return n; });
-    startPlans.current = JSON.stringify(plans);
-    const next = nextUnfinished(new Set([...done, ...laterIds]));
-    if (next >= 0) setIndex(next); else onClose();
-  }
-  // Process later: keep this photo's boxes (or none: automatic) in the queue, set aside, and move on. Resume includes it.
-  function laterOne() {
-    if (busy || !onQueue) return;
-    const marked = new Set(laterIds).add(item.id);
-    onQueue([{ id: item.id, boxes }], 'later');
-    setLaterIds(marked);
-    startPlans.current = JSON.stringify(plans);
-    const next = nextUnfinished(new Set([...queued, ...marked]));
-    if (next >= 0) setIndex(next); else onClose();
-  }
-  // Queue every photo not queued yet. Photos with boxes keep them; photos with none are cut automatically.
+  // Several photos: cut and read one by one in the background while the app stays usable. A photo with no boxes is cut automatically.
   function queueAll() {
     if (busy || !onQueue) return;
-    // Photos set aside stay set aside (they are already in the queue); everything else is queued now.
-    const entries = items.filter(entry => !queued.has(entry.id) && !laterIds.has(entry.id)).map(entry => ({ id: entry.id, boxes: plans[entry.id] || [] }));
-    if (!entries.length) { onClose(); return; }
-    onQueue(entries);
+    const bad = items.find(entry => !boxesAreSound(plans[entry.id] || []));
+    if (bad) { setIndex(items.indexOf(bad)); setMessage('Two boxes cover the same label, or one is too small. Fix it first.'); return; }
+    onQueue(asList());
     startPlans.current = JSON.stringify(plans);
     onClose();
   }
-  const requestClose = () => { if (busy) return; if (dirty) setConfirmOpen(true); else onClose(); };
+  const save = () => { if (inBackground) queueAll(); else saveAll(); };
+  // Leaving never throws work away: boxes are kept as a draft (nothing to keep = the draft is cleared).
+  const requestClose = () => { if (busy) return; if (!dirty) onClose(); else if (total) saveLater(); else onDiscard(); };
 
-  useBackLayer(!confirmOpen, requestClose, 'crop-studio');
-  useBackLayer(confirmOpen, () => setConfirmOpen(false), 'crop-studio-confirm');
+  useBackLayer(true, requestClose, 'crop-studio');
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -270,16 +254,18 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
 
     <div className="studio-tools" role="toolbar" aria-label="Crop tools">
       <button className={`subtle-btn${!pan ? ' on' : ''}`} aria-pressed={!pan} disabled={busy} onClick={() => setPan(false)}><MousePointer2 size={16} /> Draw</button>
-      <button className={`subtle-btn${pan ? ' on' : ''}`} aria-pressed={pan} disabled={busy || zoom === 1} title={zoom === 1 ? 'Zoom in first' : 'Move around the zoomed photo'} onClick={() => setPan(true)}><Hand size={16} /> Pan</button>
+      {zoom > 1 && <button className={`subtle-btn${pan ? ' on' : ''}`} aria-pressed={pan} disabled={busy} title="Move around the zoomed photo" onClick={() => setPan(true)}><Hand size={16} /> Pan</button>}
       <button className="subtle-btn" aria-label="Zoom out" disabled={busy || zoomStep === 0} onClick={() => { setZoomStep(s => Math.max(0, s - 1)); if (zoomStep <= 1) setPan(false); }}><ZoomOut size={16} /></button>
       <span className="studio-zoom">{Math.round(zoom * 100)}%</span>
       <button className="subtle-btn" aria-label="Zoom in" disabled={busy || zoomStep === ZOOMS.length - 1} onClick={() => setZoomStep(s => Math.min(ZOOMS.length - 1, s + 1))}><ZoomIn size={16} /></button>
-      <button className={`subtle-btn${several ? ' on' : ''}`} aria-pressed={several} disabled={busy} onClick={() => setSeveral(s => !s)}>Select several</button>
-      <button className="subtle-btn" disabled={busy || !boxes.length} onClick={() => setSelected(selected.length === boxes.length ? [] : boxes.map((_, i) => i))}>{selected.length === boxes.length && boxes.length ? 'Select none' : 'Select all'}</button>
       <button className="subtle-btn" aria-label="Undo" disabled={busy || !history.current[item.id]?.length} onClick={undo}><Undo2 size={16} /> Undo</button>
-      <button className="subtle-btn" aria-label="Redo" disabled={busy || !future.current[item.id]?.length} onClick={redo}><Redo2 size={16} /> Redo</button>
       <button className="subtle-btn danger" disabled={busy || !selected.length} onClick={deleteSelected}><Trash2 size={16} /> Delete{selected.length > 1 ? ` ${selected.length}` : ''}</button>
       <button className="subtle-btn" disabled={busy} onClick={() => void auto()}>{detecting ? <Loader2 size={16} className="spin" /> : <Wand2 size={16} />} Auto-detect</button>
+      <details className="studio-more"><summary>More</summary>
+        <button className="subtle-btn" aria-label="Redo" disabled={busy || !future.current[item.id]?.length} onClick={redo}>Redo</button>
+        <button className={`subtle-btn${several ? ' on' : ''}`} aria-pressed={several} disabled={busy} onClick={() => setSeveral(s => !s)}>Select several</button>
+        <button className="subtle-btn" disabled={busy || !boxes.length} onClick={() => setSelected(selected.length === boxes.length ? [] : boxes.map((_, i) => i))}>{selected.length === boxes.length && boxes.length ? 'Select none' : 'Select all'}</button>
+      </details>
     </div>
 
     <p className="studio-hint">{pan ? 'Pan mode: drag the photo to move around.' : 'Drag on the photo to draw a box around each label. Drag a box to move it, a corner to resize it.'}</p>
@@ -305,26 +291,12 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     {items.length > 1 && <nav className="studio-strip" aria-label="Photos">
       <button className="subtle-btn" aria-label="Previous photo" disabled={busy || index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft size={18} /></button>
       <div className="studio-thumbs">{items.map((entry, i) => <button key={entry.id} className={`studio-thumb${i === index ? ' current' : ''}`} aria-label={`Photo ${i + 1}, ${plans[entry.id]?.length || 0} boxes`} disabled={busy} onClick={() => setIndex(i)}>
-        <img src={entry.source} alt="" loading="lazy" />{queued.has(entry.id) ? <b className="done" title="Queued">✓</b> : laterIds.has(entry.id) ? <b className="later" title="Process later">⏭</b> : !!plans[entry.id]?.length && <b>{plans[entry.id].length}</b>}</button>)}</div>
+        <img src={entry.source} alt="" loading="lazy" />{!!plans[entry.id]?.length && <b>{plans[entry.id].length}</b>}</button>)}</div>
       <button className="subtle-btn" aria-label="Next photo" disabled={busy || index === items.length - 1} onClick={() => setIndex(index + 1)}><ChevronRight size={18} /></button>
     </nav>}
 
     <footer className="studio-actions">
-      <button className="primary" disabled={busy || !total} onClick={saveAll}>{progress ? 'Working…' : `Save all${total ? ` (${total} crop${total === 1 ? '' : 's'}${photosWithBoxes > 1 ? `, ${photosWithBoxes} photos` : ''})` : ''}`}</button>
-      <button className="subtle-btn" disabled={busy || !total} onClick={saveLater}><Save size={16} /> Save for later</button>
-      {onQueue && items.length > 1 && <button className="subtle-btn" disabled={busy || !boxes.length || queued.has(item.id)} onClick={queueOne}>Queue this photo &amp; next →</button>}
-      {onQueue && items.length > 1 && <button className="subtle-btn" disabled={busy || queued.has(item.id) || laterIds.has(item.id)} onClick={laterOne}>Process later ⏭</button>}
-      {onQueue && <button className="subtle-btn" disabled={busy} onClick={queueAll} title="Photos without boxes are cut automatically">{items.length > 1 ? `Queue all in background (${items.filter(entry => !queued.has(entry.id) && !laterIds.has(entry.id)).length})` : 'Queue in background'}</button>}
+      <button className="primary" disabled={busy || (inBackground ? !items.length : !total)} onClick={save}>{progress ? 'Working…' : `Save all${total ? ` (${total} crop${total === 1 ? '' : 's'}${photosWithBoxes > 1 ? `, ${photosWithBoxes} photos` : ''})` : inBackground ? ` (cut ${items.length} photo${items.length === 1 ? '' : 's'} automatically)` : ''}`}</button>
     </footer>
-
-    {confirmOpen && <div className="studio-confirm" role="alertdialog" aria-modal="true" aria-label="Unsaved changes">
-      <div>
-        <strong>You have unsaved boxes</strong>
-        <p>{total ? `${total} box${total === 1 ? '' : 'es'} drawn on ${photosWithBoxes} photo${photosWithBoxes === 1 ? '' : 's'}.` : 'Your changes will be lost.'}</p>
-        <button className="primary" disabled={!total} onClick={saveLater}>Save for later</button>
-        <button className="subtle-btn danger" onClick={onDiscard}>Discard</button>
-        <button className="subtle-btn" onClick={() => setConfirmOpen(false)}>Continue editing</button>
-      </div>
-    </div>}
   </section></div>;
 }

@@ -30,7 +30,7 @@ export function QueuePanel(p: Props) {
   const byId = new Map(p.records.map(row => [row.id, row]));
   const thumb = (id?: string) => { const row = id ? byId.get(id) : undefined; return row ? <img src={row.cropDataUrl || row.dataUrl} alt="" loading="lazy" decoding="async" /> : <span className="queue-thumb-missing" />; };
   const nameOf = (item: QueueItem) => item.name || byId.get(item.recordId)?.name || 'Photo';
-  const tabs: [Tab, string, number][] = [['pending', 'Pending', pending.length], ['processing', 'Processing', processing ? 1 : 0], ['later', 'Process later', later.length], ['review', 'Needs review', reviewCount], ['completed', 'Completed', p.completedLog.length]];
+  const tabs: [Tab, string, number][] = [['pending', 'Pending', pending.length], ['processing', 'Processing', processing ? 1 : 0], ...(later.length ? [['later', 'Process later', later.length] as [Tab, string, number]] : []), ['review', 'Needs review', reviewCount], ['completed', 'Completed', p.completedLog.length]];
   const flaggedIn = (entry: QueueLogEntry) => entry.recordIds.filter(id => byId.get(id)?.cropNeedsReview);
   const more = (total: number) => total > shown && <button type="button" className="textbtn" onClick={() => setShown(n => n + PAGE)}>Show {Math.min(PAGE, total - shown)} more</button>;
 

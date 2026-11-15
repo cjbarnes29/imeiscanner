@@ -1,7 +1,8 @@
 // Crop Studio end to end in headless Edge/Chrome (not part of `npm test`; run `npm run build` first).
 //   node scripts/e2e-studio.mjs
-// Seeds one record with a two-product photo, then: draw 2 boxes (count is automatic), Save for later, reload,
-// Resume, exit prompt, Save all, read the crops, replace the original, and check the stored records.
+// Seeds one record with a two-product photo, then: wait for the automatic search on open, clear its boxes, draw 2 boxes (count is
+// automatic), close (the boxes are kept as a draft, no question), reload, Resume, closing again keeps the third box, Undo/Redo under
+// More, Save all, read the crops, replace the original, and check the stored records.
 import assert from 'node:assert/strict';
 import {readFile,readdir,mkdtemp} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -48,6 +49,13 @@ try{
   await waitFor(`!!document.querySelector('.studio-viewport img')&&document.querySelector('.studio-viewport img').getBoundingClientRect().width>50`,'studio photo');
   assert.ok(!/How many/i.test(await run(`document.querySelector('.studio').textContent`)),'no "how many labels" question');
   ok('Crop Studio opens with no label-count question');
+  await waitFor(`!/Looking for labels/.test(document.querySelector('.studio-message')?.textContent||'')&&!document.querySelector('.studio-tools .spin')`,'the automatic search on open finished',120000);
+  ok('the editor searches for labels by itself when it opens with no boxes');
+  if(await run(`!/^0 label/.test(document.querySelector('.studio-title b').textContent)`)){
+    await run(`document.querySelector('.studio-more summary').click()`);
+    await clickText('.studio-more button','Select all');await clickText('.studio-tools button','Delete');
+    await waitFor(`/^0 label/.test(document.querySelector('.studio-title b').textContent)`,'boxes cleared');
+  }
 
   const r=await imgRect();
   await drag(r.x+r.w*0.08,r.y+r.h*0.06,r.x+r.w*0.92,r.y+r.h*0.46);
@@ -56,10 +64,10 @@ try{
   await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'2 labels');
   ok('count is automatic: drawing 2 boxes shows "2 labels"');
 
-  await clickText('button','Save for later');
+  await run(`document.querySelector('.studio [aria-label="Close"]').click()`);
   await waitFor(`!document.querySelector('.studio')`,'studio closed');
   assert.ok(await run(`JSON.parse(localStorage.getItem('imei-lens-crop-draft-v1')||'{}').items?.[0]?.boxes?.length===2`),'draft with 2 boxes stored');
-  ok('Save for later stores the 2 boxes on the device');
+  ok('closing keeps the 2 boxes on the device (no question asked)');
   await send('Page.navigate',{url:'http://localhost:4194/'});
   await waitFor(`document.readyState==='complete'`,'reload 2');
   await waitFor(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Resume')`,'Resume banner');
@@ -68,32 +76,36 @@ try{
   await waitFor(`!!document.querySelector('.studio')&&/2 labels/.test(document.querySelector('.studio-title').textContent)`,'draft restored');
   ok('Resume restores the 2 boxes');
 
-  // an unsaved change (a third box) makes the exit prompt appear
+  // a third box: closing keeps it as a draft with no question
   const r2=await imgRect();
   await drag(r2.x+r2.w*0.25,r2.y+r2.h*0.47,r2.x+r2.w*0.75,r2.y+r2.h*0.53);
   await waitFor(`/3 labels/.test(document.querySelector('.studio-title').textContent)`,'3 labels');
   ok('a third box counts as 3 labels');
   await run(`document.querySelector('.studio [aria-label="Close"]').click()`);
-  await waitFor(`!!document.querySelector('.studio-confirm')`,'exit prompt');
-  const exitButtons=await run(`[...document.querySelectorAll('.studio-confirm button')].map(b=>b.textContent.trim())`);
-  assert.ok(exitButtons.includes('Save for later')&&exitButtons.includes('Discard')&&exitButtons.includes('Continue editing'),'exit prompt: '+exitButtons);
-  ok('closing with boxes asks Save for later / Discard / Continue editing');
-  await clickText('.studio-confirm button','Continue editing');
-  await waitFor(`!document.querySelector('.studio-confirm')&&!!document.querySelector('.studio')`,'continue editing');
+  await waitFor(`!document.querySelector('.studio')`,'closed without a prompt');
+  assert.ok(await run(`JSON.parse(localStorage.getItem('imei-lens-crop-draft-v1')||'{}').items?.[0]?.boxes?.length===3`),'draft with 3 boxes stored');
+  ok('closing with boxes asks nothing and keeps all 3 boxes');
+  await waitFor(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Resume')`,'Resume banner 2');
+  await clickText('button','Resume');
+  await waitFor(`!!document.querySelector('.studio')&&/3 labels/.test(document.querySelector('.studio-title').textContent)`,'3 boxes restored');
+  // tap the third (middle) box: Delete appears, and removes it
+  const r3=await imgRect();
+  await drag(r3.x+r3.w*0.5,r3.y+r3.h*0.5,r3.x+r3.w*0.5+1,r3.y+r3.h*0.5+1);
+  await waitFor(`[...document.querySelectorAll('.studio-tools button')].some(b=>/^Delete/.test(b.textContent.trim())&&!b.disabled)`,'Delete is enabled for a selected box');
+  ok('Delete is greyed out until a box is selected (the bar never changes height)');
+  await clickText('.studio-tools button','Delete');
+  await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'deleted to 2');
   await clickText('button','Undo');
-  await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'undo to 2');
-  ok('Undo removes the third box (back to 2 labels)');
-  await clickText('button','Redo');
-  await waitFor(`/3 labels/.test(document.querySelector('.studio-title').textContent)`,'redo to 3');
-  await clickText('button','Undo');
-  await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'undo again to 2');
-  ok('Redo brings the third box back; Undo removes it again');
+  await waitFor(`/3 labels/.test(document.querySelector('.studio-title').textContent)`,'undo to 3');
+  await run(`document.querySelector('.studio-more:not([open]) summary')?.click()`);
+  await clickText('.studio-more button','Redo');
+  await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'redo to 2');
+  ok('Delete removes the box; Undo brings it back; Redo (under More) removes it again');
 
   await clickText('.studio-actions button','Save all');
-  await waitFor(`[...document.querySelectorAll('button')].some(b=>/^Save \\d+ pictures? and archive/.test(b.textContent.trim()))`,'check screen',180000);
-  ok('Save all reads both boxes and shows a check screen');
-  await clickText('button','and archive');
-  await waitFor(`!document.querySelector('.studio-backdrop')`,'applied',60000);
+  await waitFor(`!document.querySelector('.studio-backdrop')`,'the editor closes at once (cutting continues in the background)',60000);
+  await waitFor(`/finished/.test(document.querySelector('.queue-banner')?.innerText||'')`,'background cutting finished',300000);
+  ok('Save all in the bulk crop closes the editor and cuts both boxes in the background');
   await sleep(1500);
   const rows=await readDb();
   assert.equal(rows.length,2,'two records: '+JSON.stringify(rows));
@@ -102,7 +114,7 @@ try{
   assert.ok(rows.every(x=>x.dataLen<photo.length*0.8),'the full photo is not copied into the crops');
   assert.ok(rows.every(x=>x.person===''),'the person is kept');
   assert.equal(await run(`!localStorage.getItem('imei-lens-crop-draft-v1')`),true,'draft cleared after saving');
-  ok('Save and archive original: 2 records, each with its own crop only, person kept, draft cleared');
+  ok('Background save: original archived, 2 records, each with its own crop only, person kept, draft cleared');
   console.log('   IMEIs read from the 2 crops:',rows.map(x=>x.imei).filter(Boolean).join(', ')||'(none)','| models:',rows.map(x=>x.model).join(', '));
 }catch(error){
   console.error('FAIL:',error.message);

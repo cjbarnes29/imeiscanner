@@ -40,7 +40,7 @@ check(results, 'the retake prompt appears', await waitForText(c, 'Retake this ph
 const body = await js(c, 'document.body.innerText');
 check(results, 'it explains the reason in words', /appears to be cut off at the bottom edge of the photo/.test(body));
 check(results, 'it tells the person what to do', /Retake the photo with the whole label inside the frame/.test(body));
-check(results, 'it offers Retake photo, Crop manually and Keep as is', ['Retake photo', 'Crop manually', 'Keep as is'].every(t => body.includes(t)));
+check(results, 'it offers Retake photo and Keep as is (and no second crop button)', ['Retake photo', 'Keep as is'].every(t => body.includes(t)) && !body.includes('Crop manually'));
 check(results, 'it says nothing is filled in and the original is kept', /Nothing is filled in for you, and your original photo is kept/.test(body));
 
 // never guessed, never lost

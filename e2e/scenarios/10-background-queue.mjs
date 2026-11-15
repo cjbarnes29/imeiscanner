@@ -1,11 +1,11 @@
-// Background crop queue: queue the two boxes of photo B, press Home, wait, come back: the original is archived (reason queue), crops are linked.
+// Background crop queue: Bulk crop on photo B, two boxes, Save all (cuts in the background), press Home, wait, come back: the original is archived (reason queue), crops are linked.
 import { ctx, scanAll, openStudioAndDrawTwoBoxes, clickText, webState, adb, sleep, check, finish } from './helpers.mjs';
 
 const c = ctx(), results = [];
 await scanAll(c);
 const before = await webState(c.device, c.app);
-await openStudioAndDrawTwoBoxes(c);
-check(results, 'Queue in background accepted', await clickText(c, '^Queue in background'));
+await openStudioAndDrawTwoBoxes(c, { bulk: true });
+check(results, 'Save all in the bulk crop is accepted and cuts in the background', await clickText(c, '^Save all'));
 await sleep(1500);
 adb(c.device, 'shell', 'input', 'keyevent', 'KEYCODE_HOME');
 let state, waited = 0;

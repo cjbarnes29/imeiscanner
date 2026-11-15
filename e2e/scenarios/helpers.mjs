@@ -1,7 +1,7 @@
 // Helpers for the hybrid scenarios: Maestro for system UI, DevTools (CDP) for the WebView, adb input for exact gestures.
 // Everything is limited to the isolated test app (guardApp).
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import fs, { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adb, guardApp, check, finish, isEmulator } from '../scripts/lib.mjs';
@@ -73,25 +73,61 @@ export async function scanAll(c) {
   maestro(c.device, '_common/scan-all.yaml');
   await sleep(1500);
 }
-/** Opens Crop Studio on the single-label photo B and draws two side-by-side boxes. */
-export async function openStudioAndDrawTwoBoxes(c) {
+/** Opens Crop Studio on the single-label photo B and draws two side-by-side boxes.
+ *  { bulk: true } opens it through the Records list instead (tick the photo, then Bulk crop): there Save all cuts in the background. */
+export async function openStudioAndDrawTwoBoxes(c, { bulk = false } = {}) {
   await clickText(c, '^Records');
   await sleep(800);
+  if (bulk) {
+    await clickText(c, '^Detailed'); // the tick boxes and Bulk crop are in the Detailed view
+    await sleep(800);
+    const ticked = await js(c, `(()=>{const row=[...document.querySelectorAll('tr,article')].find(r=>[...r.querySelectorAll('button')].some(b=>(b.innerText||'').trim()==='E2E-single-B.jpg'));const box=row&&row.querySelector('input.selection-check');if(!box)return false;box.click();return true})()`);
+    if (!ticked) throw new Error('could not tick the photo');
+    await sleep(600);
+    await clickText(c, '^More actions', { tag: 'summary' }); // Bulk crop is in the More actions menu
+    await sleep(500);
+    if (!await clickText(c, '^Bulk crop')) throw new Error('Bulk crop not found');
+    for (let i = 0; i < 40 && !await js(c, `!!document.querySelector('.studio')`); i++) await sleep(500);
+    await sleep(2500);
+    await clearAutoBoxes(c);
+    return await drawTwoBoxes(c);
+  }
   const opened = await js(c, `(()=>{const name=[...document.querySelectorAll('*')].find(e=>e.children.length===0&&(e.innerText||'').trim()==='E2E-single-B.jpg');if(!name)return 'no record';let e=name;for(let i=0;i<8&&e;i++){const b=[...e.querySelectorAll('button')].find(b=>(b.innerText||'').trim()==='E2E-single-B.jpg');if(b){b.click();return 'opened'}e=e.parentElement}return 'no edit button'})()`);
   if (opened !== 'opened') throw new Error('could not open the record: ' + opened);
   await sleep(2500);
   await clickText(c, '^Crop / edit photo');
   await sleep(2500);
+  await clearAutoBoxes(c);
+  return await drawTwoBoxes(c);
+}
+/** The editor searches for labels by itself when it opens; wait for that, then remove what it found so the test draws its own boxes. */
+async function clearAutoBoxes(c) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 90000) {
+    if (await js(c, `!/Looking for labels/.test(document.querySelector('.studio-message')?.textContent||'')&&!document.querySelector('.studio-tools .spin')`)) break;
+    await sleep(700);
+  }
+  if (await js(c, `!/^0 label/.test((document.querySelector('.studio-title b')||{textContent:'0 label'}).textContent)`)) {
+    await js(c, `document.querySelector('.studio-more:not([open]) summary')?.click()`);
+    await sleep(300);
+    await clickText(c, '^Select all');
+    await sleep(300);
+    await clickText(c, '^Delete');
+    await sleep(500);
+  }
+}
+async function drawTwoBoxes(c) {
   const r = await canvasRect(c);
   if (!r) throw new Error('crop canvas not found');
   // the drawing surface is the photo itself (.studio-stage)
-  const top = r.y + r.h * 0.06, bottom = r.y + r.h * 0.94, left = r.x + r.w * 0.13, right = r.x + r.w * 0.87;
+  // The photo can move a little when the editor's hint line disappears at the first touch, so its position is read again before every swipe.
+  const geom = async () => { const q = await canvasRect(c); const w = q.w * 0.74; const left = q.x + q.w * 0.13; return { top: q.y + q.h * 0.06, bottom: q.y + q.h * 0.94, left, right: q.x + q.w * 0.87, end1: left + w * 0.40, start2: left + w * 0.62 }; };
   // two side-by-side boxes (a drag that starts inside an existing box would move it instead of drawing a new one); every swipe is verified and retried if dropped
-  const w = right - left, end1 = left + w * 0.40, start2 = left + w * 0.62;
   const count = async () => Number(((await js(c, "(document.querySelector('.studio-head')||{innerText:''}).innerText")).match(/(\d+) label/) || [])[1] || 0);
-  for (let attempt = 0; attempt < 3 && await count() < 1; attempt++) { swipe(c, left, top, end1, bottom); await sleep(900); }
-  for (let attempt = 0; attempt < 3 && await count() < 2; attempt++) { swipe(c, start2, top, right, bottom); await sleep(900); }
-  if (await count() !== 2) throw new Error('could not draw two boxes (labels counted: ' + await count() + ')');
+  for (let attempt = 0; attempt < 3 && await count() < 1; attempt++) { { const g = await geom(); swipe(c, g.left, g.top, g.end1, g.bottom); } await sleep(900); }
+  for (let attempt = 0; attempt < 3 && await count() < 2; attempt++) { { const g = await geom(); swipe(c, g.start2, g.top, g.right, g.bottom); } await sleep(900); }
+  if (await count() !== 2) { try { const sdk = process.env.ANDROID_HOME || join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk'); fs.writeFileSync(join(here, '..', 'reports', 'debug-draw.png'), execFileSync(join(sdk, 'platform-tools', 'adb.exe'), ['-s', c.device, 'exec-out', 'screencap', '-p'], { maxBuffer: 1 << 26 })); } catch {} }
+  if (await count() !== 2) throw new Error('could not draw two boxes (labels counted: ' + await count() + '; ' + await js(c, `JSON.stringify({msg:(document.querySelector('.studio-message')||{}).textContent,tools:[...document.querySelectorAll('.studio-tools button')].map(b=>b.textContent.trim()+(b.disabled?'(off)':'')),boxes:[...document.querySelectorAll('.studio-box')].map(b=>b.getAttribute('style'))})`) + ')');
   return r;
 }
 /** Save all, check the result screen, apply: the original is archived. */

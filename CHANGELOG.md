@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — simpler crop screens (Android and web)
+- **One Save button in the crop editor.** One photo: **Save all** reads the labels now and shows the check screen as before. Several photos (Bulk crop): **Save all** cuts them one by one in the background (a photo with no boxes is cut automatically) and the editor closes at once. **Save for later**, **Queue in background**, **Queue this photo & next**, **Process later** and **Queue all** are gone; the Queue panel stays reachable from the banner (its Process later tab only shows for photos set aside by an older version).
+- **Closing never discards.** Closing the editor keeps your boxes as a draft you can Resume; the Save for later / Discard / Continue editing popup is gone.
+- **Boxes are found for you.** A photo that opens with no boxes is searched for labels once, so you start with boxes to check instead of "0 labels". The bar is shorter: Draw, zoom, Undo, Delete (greyed until a box is selected) and Auto-detect; Redo, Select several and Select all are under **More**; Pan appears when zoomed in.
+- **One way into the crop editor from a review:** the single **Crop / edit photo** button. The prompts ("Is this 1 device or N?", "Check the crop", "Retake this photo") keep only their decision buttons (1 device / Split automatically; Retake photo / Keep as is); the extra Crop each myself, Crop manually and Adjust crop buttons are removed.
+- Tests: browser `scripts/e2e-studio.mjs` (12 checks) and `scripts/e2e-queue.mjs` rewritten for the single Save; emulator 03, 04, 10 and 17 updated. **Not verified:** the real phone.
 ## Unreleased — simpler review: one Save, a bulk list, fewer popups (Android and web)
 - **Review dialog:** one **Save** button (saves, then moves to the next record; closes after the last). Previous / Next stay. Rotate and Straighten are under **Fix photo**; Download photo, Delete this record and the details are under **More**.
 - **Nothing is lost when you leave:** closing the review (or the list) saves every edit. A half-typed IMEI keeps the old IMEI, flags the record and leaves a note instead of being thrown away. The Save / Discard popup is gone.
