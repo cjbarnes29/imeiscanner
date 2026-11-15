@@ -55,9 +55,12 @@ jobs:
           - **After taking a photo** (setting under the camera button): keep taking photos, scanning each one while you shoot (default; press Back in the camera to stop) / scan each photo right away / take several, then scan them together (Scan now, or Discard waiting photos).
           - Clear messages for refused camera permission, cancelled camera, no camera app, or a photo that could not be saved.
           - Earlier on this branch: fix for 0-byte CSV exports, safer folder export, duplicates are archived (with Undo), Samsung IMEI 1 detection, "Retake photo" prompt for labels cut off by the photo edge, manufacturer profiles (Samsung complete, Apple draft).
+          - **Simpler review:** one **Save** button (saves, then goes to the next record). Leaving a review saves everything, nothing is discarded. **Fix photo** and **More** hold the rarely used buttons.
+          - **Bulk review list:** after a scan, records that need a look open in a fast list (IMEI 1 and Serial per row, autosaved). **Accept N that look right** with Undo; **Review all (N)** reopens it.
+          - A new record whose IMEI is already in your archive shows a soft **Also in archive** hint. Fewer popups: duplicate and invalid notes are short messages, Archive duplicates acts at once with Undo.
 
           ### Known limits
-          - Debug-signed test build. Tested on the emulator; **not yet verified on a real phone camera (POCO / HyperOS)**.
+          - Debug-signed test build. Tested on the emulator; **not yet verified on a real phone (camera, POCO / HyperOS, and the new review screens)**.
           - Photos physically cut off by the photo edge cannot be read: the app asks for a retake.
           NOTES
           gh release create "${GITHUB_REF_NAME}" out/*.apk out/*.sha256 \
