@@ -5,8 +5,8 @@ appId: com.imeilens.scanner.phonetest
 - takeScreenshot: 00-first-launch
 # WebView: web text is visible and tappable
 - assertVisible: "Upload photos"
-- tapOn: "Records.*"
-- assertVisible: ".*Scanned records.*"
+- tapOn: "Phones.*"
+- assertVisible: ".*Phones.*"
 - takeScreenshot: 01-records-empty
 - tapOn: "Scan"
 - assertVisible: "Choose photos and scan"
@@ -26,7 +26,7 @@ appId: com.imeilens.scanner.phonetest
       EXPECTED_SELECTED: "1"
 - runFlow: _common/wait-scan.yaml
 - takeScreenshot: 03-scan-completed
-- tapOn: "Records.*"
+- tapOn: "Phones.*"
 - scrollUntilVisible:
     element: ".*490154203237518.*"
     direction: DOWN

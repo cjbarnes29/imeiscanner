@@ -50,7 +50,9 @@ const stat=name=>run(`(()=>{const d=[...document.querySelectorAll('.retail-stats
 const readDb=key=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const db=o.result;const s=db.transaction('inventory').objectStore('inventory');const q=${key.endsWith(':')?`s.getAll(IDBKeyRange.bound(${JSON.stringify(key)},${JSON.stringify(key)}+'\\uffff'))`:`s.get(${JSON.stringify(key)})`};q.onsuccess=()=>{db.close();res(q.result);};};})`);
 const owners=async()=>Object.fromEntries((await readDb('record:')).map(r=>[r.id,r.personId]));
 const nav=label=>click('.bottom-nav button',label);
-const sub=label=>click('.retail-tabs button',label);
+const more=async label=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await waitFor(`!!document.querySelector('.more-list')`,'the More menu');await click('.more-list button',label);};
+// Home, Report and Targets are on the bottom bar; Gives, Segments, Catalog and Backup are under the ⋯ More menu
+const sub=async label=>{if(label==='Today')return nav('Home');if(label==='Report'||label==='Targets')return nav(label);return more(label==='Data'?'Backup':label);};
 const shot=async name=>{if(!process.env.SHOTS)return;await sleep(400);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});(await import('node:fs')).writeFileSync(join(process.env.SHOTS,name+'.png'),Buffer.from(r.result.data,'base64'));};
 const results=[];const ok=n=>{results.push(n);console.log('PASS:',n);};
 try{
@@ -70,10 +72,25 @@ try{
   ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
 
   // ---------- Report: paste a synthetic report, see it checked against the scanned phones ----------
-  await nav('Retail');
-  await waitFor(`!!document.querySelector('.retail-tabs')`,'retail tabs');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.retail-tabs button')].map(b=>b.textContent.replace(/\\d+$/,'').trim())`),['Today','Report','Targets','Gives','Segments','Catalog','Data'],'the retail tabs');
-  ok('Retail has Today, Report, Targets, Gives, Segments, Catalog and Data (no Stock tab)');
+  await nav('Home');
+  await waitFor(`!!document.querySelector('.retail-hub')`,'retail home');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`),['Home','Scan','Phones','Report','Targets','Export'],'the bottom bar');
+  assert.equal(await run(`document.querySelector('.view-head h2').innerText`),'Home','each screen has its own title');
+  assert.ok(!/Scanned records/.test(await run(`document.querySelector('.results').innerText`)),'no "Scanned records" header on Home');
+  await run(`document.querySelector('button[aria-label="More"]').click()`);
+  await waitFor(`!!document.querySelector('.more-list')`,'More menu');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People','Gives','Segments','Catalog','Assign by model','Share','Backup and data','Settings'],'the More menu');
+  await shot('10-more');
+  await run(`document.querySelector('.more-sheet [aria-label="Close"]').click()`);
+
+  // Home says whose month it is, with a person switcher
+  assert.deepEqual(await run(`[...document.querySelectorAll('.who-chips button')].map(b=>b.textContent.trim())`),['CCarlou Test','AAsha Test']);
+  assert.match(await body(),/Sell first for Carlou Test/);
+  await click('.who-chips button','AAsha');
+  await waitFor(`/Sell first for Asha Test/.test(document.body.innerText)`,'switch person');
+  await shot('7-home');
+  ok('Home has a person switcher and says whose targets "Sell first" is about');
+  ok('the bottom bar is Home, Scan, Phones, Report, Targets, Export; Gives, Segments, Catalog, People and Backup are under ⋯ More; each screen has its own title');
   await sub('Report');
   await waitFor(`!!document.querySelector('textarea[aria-label="The report"]')`,'paste box');
   const REPORT=['Location: DEMO','Date: Nov 11, 2026','','A17 5G 6/128GB : 00/04','(00,01,03) Gry,Blu,Blk','','A57 5G 8/256GB : 01/03','(02,01,00) GRY,NVY,LiLc','',
@@ -165,13 +182,38 @@ try{
   await shot('4-targets-lines');
 
   // the Records screen shows the person's own segment name
-  await nav('Records');
-  await waitFor(`!!document.querySelector('.badge-seg')`,'segment badges');
-  assert.ok(await run(`[...document.querySelectorAll('.badge-seg')].some(b=>b.textContent.trim()==='Fold 1')`),'S26 phones show Fold 1');
-  ok('Records shows "Fold 1" on the phones of the models placed in it');
+  await nav('Phones');
+  await waitFor(`!!document.querySelector('.phone-row')`,'phone rows');
+  assert.equal(await run(`document.querySelector('.view-head h2').innerText.replace(/\\d+$/,'')`),'Phones');
+  assert.ok(await run(`[...document.querySelectorAll('.phone-row .pr-facts')].some(f=>/Segment\\s*Fold 1/.test(f.innerText||f.textContent))`),'S26 phones show Fold 1');
+  ok('Phones shows "Fold 1" on the phones of the models placed in it');
+
+  // a short list: model and IMEI per phone, details on tap, tick boxes only in Select mode
+  const rowsText=await run(`[...document.querySelectorAll('.phone-row .pr-open')].map(b=>b.innerText.replace(/\\s+/g,' '))`);
+  assert.equal(rowsText.length,9); assert.ok(rowsText.every(t=>/\d{8} \d{6} \d/.test(t)),'IMEI in groups: '+rowsText[0]);
+  assert.ok(rowsText.some(t=>/Galaxy A17 5G 128GB/.test(t)),'model name and storage: '+rowsText[0]);
+  assert.equal(await run(`document.querySelector('.phone-row .pr-more').hidden`),true,'details are closed');
+  assert.equal(await run(`document.querySelector('.phone-row .selection-check').hidden`),true,'no tick boxes until Select');
+  const phonesText=await body();
+  assert.ok(!phonesText.includes('Group IMEIs by person')&&!phonesText.includes('New scans go to'),'the old controls are gone from the list');
+  await shot('8-phones');
+  await run(`document.querySelector('.phone-row .pr-open').click()`);
+  await waitFor(`!document.querySelector('.phone-row.open .pr-more').hidden`,'details open');
+  assert.match(await run(`document.querySelector('.phone-row.open .pr-facts').innerText`),/Colour[\s\S]*Segment/);
+  await shot('9-phones-open');
+  await click('button','Select');
+  await waitFor(`!!document.querySelector('.action-bar.show')`,'selection bar');
+  await run(`document.querySelector('.phone-row .selection-check').click()`);
+  await waitFor(`/Done \\(1 selected\\)/.test(document.body.innerText)`,'one selected');
+  await click('button','Done');
+  await waitFor(`!document.querySelector('.action-bar.show')`,'selection bar goes away');
+  ok('Phones is a short list (model and IMEI in groups), details open on tap, and the selection bar only shows in Select mode');
+  await nav('Scan');
+  await waitFor(`!!document.querySelector('select[aria-label="New scans go to"]')`,'new scans go to');
+  ok('"New scans go to" is on the Scan screen');
 
   // ---------- Gives: suggestions only ----------
-  await nav('Retail'); await sub('Gives');
+  await nav('Home'); await sub('Gives');
   await waitFor(`!!document.querySelector('.retail-gives')`,'gives');
   await run(`(()=>{const d=document.querySelector('.retail-gives details');d.open=true;return true;})()`);
   await setVal('.retail-gives details select',  'me');
@@ -206,7 +248,7 @@ try{
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'reload 2');
   await waitFor(`!!document.querySelector('.bottom-nav')`,'bottom nav after reload');
-  await nav('Retail'); await sub('Report');
+  await nav('Home'); await sub('Report');
   await waitFor(`!!document.querySelector('.rep-chips')&&document.querySelectorAll('.rep-row').length===4`,'report after reload');
   await sub('Segments');
   await waitFor(`/Fold 1/.test(document.body.innerText)`,'segment after reload');

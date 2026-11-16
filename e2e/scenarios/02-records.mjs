@@ -4,7 +4,7 @@ import { truth } from '../scripts/lib.mjs';
 
 const c = ctx(), results = [];
 await scanAll(c);
-await clickText(c, '^Records');
+await clickText(c, '^Phones');
 await sleep(1000);
 const A = truth['E2E-single-A.jpg'].imei1[0], B = truth['E2E-single-B.jpg'].imei1[0], FALLBACK = truth['E2E-imei2-only.jpg'].imei2[0];
 // IMEIs are in input fields: read what the list shows through the values of all inputs and the page text

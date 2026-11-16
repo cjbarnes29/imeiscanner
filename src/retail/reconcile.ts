@@ -12,7 +12,8 @@ import type { CatalogItem, ReportItem, RetailState, StockReport } from './types'
 
 export type IssueKind = 'unknown-model' | 'unreadable' | 'colours-sum' | 'stock-differs' | 'colour-differs' | 'colour-unmatched' | 'scanned-colour-missing' | 'not-scanned' | 'parts-mismatch';
 export type Issue = { kind: IssueKind; text: string };
-export type Status = 'agree' | 'differ' | 'unknown' | 'info';
+/** 'empty' = no stock in the report and none scanned: nothing to compare, so it is not counted as agreeing. */
+export type Status = 'agree' | 'differ' | 'unknown' | 'info' | 'empty';
 export type ScannedColour = { name: string; count: number };
 export type LineResult = {
   id: string; status: Status; code?: string; matchedName?: string; issues: Issue[];
@@ -22,7 +23,7 @@ export type LineResult = {
 };
 export type Reconciliation = {
   lines: LineResult[];
-  summary: { agree: number; differ: number; unknown: number; notScanned: number; scannedPhones: number; reportStock: number; listedSold: number; totalTyped?: number; totalDiff?: number };
+  summary: { agree: number; differ: number; unknown: number; empty: number; notScanned: number; scannedPhones: number; reportStock: number; listedSold: number; totalTyped?: number; totalDiff?: number };
 };
 
 const plus = (s: string) => s.replace(/\+/g, 'plus');
@@ -135,7 +136,7 @@ export function reconcile(state: RetailState, report: StockReport, records: Stoc
   return {
     lines,
     summary: {
-      agree: lines.filter(l => l.status === 'agree').length, differ: lines.filter(l => l.status === 'differ').length, unknown: lines.filter(l => l.status === 'unknown').length,
+      agree: lines.filter(l => l.status === 'agree').length, differ: lines.filter(l => l.status === 'differ').length, unknown: lines.filter(l => l.status === 'unknown').length, empty: lines.filter(l => l.status === 'empty').length,
       notScanned, scannedPhones, reportStock, listedSold: listed, totalTyped: typed, totalDiff: typed === undefined ? undefined : typed - listed
     }
   };
@@ -191,7 +192,8 @@ function checkLine(state: RetailState, index: Map<string, CatalogItem>, byCode: 
   }
 
   const real = issues.filter(i => i.kind !== 'not-scanned' && i.kind !== 'scanned-colour-missing' && i.kind !== 'colour-unmatched');
-  const status: Status = real.length ? 'differ' : issues.length ? 'info' : 'agree';
+  const nothing = item.stock === 0 && item.sold === 0 && scans.length === 0 && all.length === 0 && !item.parts.some(p => (p.count ?? 0) > 0);
+  const status: Status = real.length ? 'differ' : issues.length ? 'info' : nothing ? 'empty' : 'agree';
   return { id: item.id, status, code: model.code, matchedName: model.name, issues, scanned, partMatch };
 }
 

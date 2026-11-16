@@ -13,7 +13,7 @@ appId: com.imeilens.scanner.phonetest
 - tapOn: "Show scan report"
 - assertVisible: ".*5 photos.*"
 - takeScreenshot: scan-report
-- tapOn: "Records.*"
+- tapOn: "Phones.*"
 - scrollUntilVisible:
     element: ".*490154203237518.*"
     direction: DOWN

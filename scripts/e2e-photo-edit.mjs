@@ -218,15 +218,15 @@ try{
   ok(`an interrupted Bulk edit (page reload) offers Resume with ${drafted} box${drafted===1?'':'es'} kept`);
 
   // ---------- 5. Unknown models, People tab, no intro banner ----------
-  assert.deepEqual(await run(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`),['Scan','Retail','Records','Give','People','Share','Export']);
-  ok('the bottom bar has People and no Unknown tab');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`),['Home','Scan','Phones','Report','Targets','Export']);
+  ok('the bottom bar has no Unknown tab (People is under ⋯ More)');
   await click('.bottom-nav button','Scan');
   await waitFor(`!!document.querySelector('.dropzone, .android-scan')`,'scan controls');
   assert.ok(!await run(`!!document.querySelector('.hero')`),'no intro banner');
   const gap=await run(`Math.round((document.querySelector('.dropzone, .android-scan')).getBoundingClientRect().top)`);
   assert.ok(gap<400,'the scan controls are near the top: '+gap+'px');
   ok(`Scan shows its controls at once (no intro banner; first control at ${gap}px)`);
-  await click('.bottom-nav button','Records');
+  await click('.bottom-nav button','Phones');
   await waitFor(`[...document.querySelectorAll('.filter-chips button')].some(b=>/^Unknown model/.test(b.textContent.trim()))`,'Unknown model chip');
   await click('.filter-chips button','Unknown model');
   await waitFor(`!!document.querySelector('.unknown-tab')`,'naming cards');
@@ -240,7 +240,9 @@ try{
   ok('Review lists the unknown-model phone with an "Unknown model" note');
   await run(`document.querySelector('[aria-label="Close review"]').click()`);
   await sleep(400);
-  await click('.bottom-nav button','People');
+  await run(`document.querySelector('button[aria-label="More"]').click()`);
+  await waitFor(`!!document.querySelector('.more-list')`,'more menu');
+  await click('.more-list button','People');
   await waitFor(`!!document.querySelector('.people-search')`,'People tab');
   await click('.people-tab button','+ Add person');
   await waitFor(`!!document.querySelector('.people-tab input[aria-label="Person name"]')`,'name box');

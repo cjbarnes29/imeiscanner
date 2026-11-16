@@ -1,11 +1,14 @@
-// Manual editing in the Records table: a typed model code is validated against the Samsung shape (SM-A165F) and an invalid
+// Manual editing of a phone (open its row in Phones): a typed model code is validated against the Samsung shape (SM-A165F) and an invalid
 // one is flagged for review; a typed IMEI is checked (checksum). Nothing is saved silently as valid.
 import { ctx, scanAll, clickText, js, sleep, check, finish } from './helpers.mjs';
 
 const c = ctx(), results = [];
 await scanAll(c);
-await clickText(c, '^Records');
+await clickText(c, '^Phones');
 await sleep(1000);
+// a phone's fields open when its row is tapped
+await js(c, `(()=>{const b=document.querySelector('.phone-row .pr-open');if(b)b.click();return true;})()`);
+await sleep(600);
 
 const setField = (labelStart, value) => js(c, `(()=>{const inp=[...document.querySelectorAll('input')].find(i=>(i.getAttribute('aria-label')||'').startsWith(${JSON.stringify(labelStart)}));if(!inp)return 'no field';
   const st=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;st.call(inp,${JSON.stringify(value)});inp.dispatchEvent(new Event('input',{bubbles:true}));return inp.getAttribute('aria-label')})()`);
@@ -26,6 +29,6 @@ check(results, 'a valid model code removes the hint', !body.includes('Not a Sams
 const label = await setField('IMEI 1 for record', '490154203237519'); // synthetic, wrong check digit
 await sleep(800);
 check(results, 'IMEI field found', label !== 'no field');
-const status = await js(c, `(()=>{const inp=[...document.querySelectorAll('input')].find(i=>(i.getAttribute('aria-label')||'')===${JSON.stringify(label)});const card=inp&&inp.closest('tr');return card?card.innerText:''})()`);
+const status = await js(c, `(()=>{const inp=[...document.querySelectorAll('input')].find(i=>(i.getAttribute('aria-label')||'')===${JSON.stringify(label)});const card=inp&&inp.closest('.phone-row');return card?card.innerText:''})()`);
 check(results, 'a typed IMEI with a wrong checksum is flagged', /Needs review|Invalid/.test(status));
 finish('15-manual-edit-validation', results);

@@ -2,6 +2,15 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — RetailLens, version 3: a new interface (Android and web)
+**Fewer places to go, one title per screen.** The bottom bar is **Home, Scan, Phones, Report, Targets, Export**; People, Gives, Segments, Catalog, Assign by model, Share, Backup and Settings are under the **⋯ More** button in the top bar.
+- **One title per screen** (no repeated "Scanned records" card): Home, Phones, Report… each with a short status line.
+- **Phones:** a short list. Each phone is two lines (model with storage, IMEI in groups); tap it to open colour, RAM, IMEI 2, segment, stock status and the edit fields (model, IMEI, serial, person) with Copy, Share, Download, View photo and Delete. Tick boxes and the selection bar only appear after **Select**. "New scans go to" moved to the Scan screen.
+- **Home:** a person switcher; "Sell first for <name>" says whose target it is.
+- **Report:** a line with no stock on either side is counted as "no stock", not as agreeing.
+- **Catalog:** the segment dropdown always shows a value that can be picked.
+- Tests updated for the new names (browser suites, emulator scenarios and Maestro flows).
+
 ## Unreleased — RetailLens, version 2 (Android and web)
 **Retail redone around one pasted report.** Tabs: Today, Report, Targets, Gives, Segments, Catalog, Data. The Stock tab, the Reports writer and the Sold automation are gone.
 - **Report:** paste the store's WhatsApp report (`Model : sold/stock` and `(colour counts) names`). It is checked against the phones you scanned (model, storage, RAM, colour; phones marked sold or given do not count): every difference is described in words, abbreviations are resolved from the scanned phones, and an unknown name is matched once and remembered. Tap a line to fix the name, segment, sold, stock and colour counts (stock follows the colours). Copy it back out in your own layout with today's date; New day resets sold. Header, totals, other brands and shifts are kept as typed.

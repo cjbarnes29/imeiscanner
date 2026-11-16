@@ -2,7 +2,7 @@
 // 1. first save: folder chosen once, numbered pictures + numbers.txt, complete;
 // 2. same save again (duplicate names): every file replaced in place, no "(1)" copies, no temporary files, nothing empty;
 // 3. restart with an unfinished job in the journal (what Android leaves when it ends the app during a copy): finished at start, journal cleared.
-import { ctx, scanAll, clickText, adb, sleep, check, finish, pickFolder, listDir, listDirs, waitForText } from './helpers.mjs';
+import { ctx, scanAll, clickText, adb, sleep, check, finish, pickFolder, listDir, listDirs, waitForText, openMore } from './helpers.mjs';
 
 const c = ctx(), results = [];
 const BASE = '/sdcard/Documents/E2E-fx';
@@ -28,7 +28,7 @@ function checkReport(label) {
 
 // 1. first save
 // "Save to my phone" lives in the share view: Share tab > Share all
-await clickText(c, '^Share$');
+await openMore(c, 'Share');
 await sleep(800);
 await clickText(c, '^Share all');
 await sleep(1000);

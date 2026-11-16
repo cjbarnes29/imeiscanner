@@ -179,7 +179,8 @@ assert.ok(a07.issues.some(i => i.kind === 'colour-differs' && /Vlt \(Violet\): r
 assert.ok(a07.issues.some(i => i.kind === 'colour-unmatched' || i.kind === 'colour-differs'), 'Blk 13 has no scanned colour: it is pointed out');
 const a17 = by('A17 4G 128GB');
 assert.equal(a17.code, 'A175', '"4G" in a report name still finds the catalog model'); assert.ok(a17.issues.some(i => i.kind === 'colour-differs' && /Gry/.test(i.text)));
-assert.equal(by('S26U 256GB').code, 'S948', '"S26U" means the S26 Ultra'); assert.equal(by('S26U 256GB').status, 'agree');
+assert.equal(by('S26U 256GB').code, 'S948', '"S26U" means the S26 Ultra'); assert.equal(by('S26U 256GB').status, 'empty', 'no stock in the report and none scanned: nothing to compare, so not "agree"');
+assert.ok(rc.summary.empty >= 2 && rc.summary.agree === rc.lines.filter(l => l.status === 'agree').length, 'empty lines are counted on their own, never as agreeing');
 assert.equal(by('Z Flip8 256GB').scanned.total, 0, 'a duplicate and a phone marked sold are not in stock');
 assert.ok(by('Z Flip8 256GB').issues.some(i => i.kind === 'not-scanned') && by('Z Flip8 256GB').status === 'info', 'stock in the report that was never scanned is information, not an error');
 assert.equal(by('Z Fold8 1TB').status, 'differ'); assert.ok(by('Z Fold8 1TB').issues.some(i => i.kind === 'colours-sum' && /add up to 1 but stock says 0/.test(i.text)), 'a line that disagrees with itself');

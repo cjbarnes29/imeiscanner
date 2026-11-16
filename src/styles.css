@@ -778,3 +778,38 @@ main.scan-first{display:flex;flex-direction:column}main.scan-first>.workspace{or
 .tg-draft{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #1f2f44;padding-top:8px}.tg-draft strong,.tg-draft select{grid-column:1/-1}
 .tg-edit{border-color:#58d7b0}.tg-models{max-height:260px;overflow:auto}
 .gv-item{align-items:flex-start!important}.gv-main{display:grid;gap:2px;flex:1 1 200px}.gv-act{display:flex;gap:8px}
+
+/* RetailLens v3: one title per screen, the More menu, a short list of phones */
+.view-head{display:grid;gap:4px;min-width:0}.view-head h2{margin:0}.view-sub{margin:0;color:#9aabc4;font-size:13px}
+.back-more{justify-self:start;min-height:36px}
+.more-sheet{max-width:440px}.more-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.more-list button{width:100%;display:grid;gap:2px;text-align:left;padding:12px 14px;border:1px solid #26364b;border-radius:12px;background:#111d2d;color:#e7edf5;font:inherit;cursor:pointer;min-height:56px}.more-list small{color:#9aabc4;font-size:12px}
+.scan-owner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0;font-size:13px;color:#9eb0c4}
+.scan-owner select{min-height:44px;padding:8px 10px;border:1px solid #30435a;border-radius:9px;background:#091422;color:#e7edf5;font:inherit}
+.nav-mode .people-setup>strong{display:none}
+.nav-mode .people-controls .action-bar:not(.show),.nav-mode .more-actions:not(.show){display:none}
+.select-toggle{display:flex;justify-content:flex-end;margin-bottom:6px}
+.phone-list{display:grid;gap:0}
+.phone-row{border-top:1px solid #1f2f44}.phone-row:first-child{border-top:0}
+.pr-main{display:flex;align-items:center;gap:8px}.pr-main .selection-check[hidden]{display:none}
+.pr-open{flex:1;min-width:0;display:flex;align-items:center;gap:10px;background:none;border:0;color:#e7edf5;font:inherit;text-align:left;padding:10px 4px;min-height:56px;cursor:pointer}
+.pr-text{flex:1;min-width:0;display:grid;gap:2px}.pr-text strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr-imei{font-family:'DM Mono',monospace;font-size:13px;color:#9eb0c4;letter-spacing:.02em}
+.pr-dot{width:9px;height:9px;border-radius:50%;flex:none;background:#58d7b0}.pr-dot.warn{background:#f2b84b}.pr-dot.bad{background:#f07c82}
+.pr-who{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:#8ab4ff;color:#06121a;flex:none}.pr-who.none{background:#2a3b53;color:#9eb0c4}
+.pr-chev{color:#9eb0c4;font-size:12px}
+.phone-row.open{background:#0f1b2e;border-radius:12px;margin:2px -4px;padding:0 4px}
+.pr-more{display:grid;gap:10px;padding:4px 4px 14px}.pr-more[hidden]{display:none}
+.pr-more label{display:grid;gap:4px;font-size:12px;color:#9eb0c4}
+.pr-more input,.pr-more select{min-height:44px;padding:8px 10px;border:1px solid #30435a;border-radius:9px;background:#091422;color:#e7edf5;font:inherit;font-size:15px;max-width:100%;width:100%}
+.pr-facts{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:14px}.pr-facts span{display:block;color:#9eb0c4;font-size:11px}
+.pr-actions{display:flex;gap:8px;flex-wrap:wrap}.pr-actions .photo-cell{max-width:none;flex:1 1 100%}
+.phone-row.picked{box-shadow:inset 3px 0 0 #58d7b0}
+@media(min-width:900px){.phone-list{max-width:760px}}
+
+.who-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.who-chips button{flex:none;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:6px 14px 6px 8px;border:1px solid #30465d;border-radius:999px;background:#121f31;color:#b3c4d1;font:inherit;font-size:14px;cursor:pointer}
+.who-chips button.on{border-color:#58d7b0;background:#16332f;color:#fff}
+.who-av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:700;font-size:12px;color:#06121a;background:#58d7b0}
+.who-av.c1{background:#c9a7ff}.who-av.c2{background:#ffb38a}.who-av.c3{background:#7ed6ff}
+.nav-mode .stats{display:none}

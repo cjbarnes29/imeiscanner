@@ -5,7 +5,7 @@ import { truth } from '../scripts/lib.mjs';
 const c = ctx(), results = [];
 await scanAll(c);
 const imeiA = truth['E2E-single-A.jpg'].imei1[0];
-await clickText(c, '^Records');
+await clickText(c, '^Phones');
 await sleep(800);
 // Give record B the IMEI of record A through its IMEI field (what a person can do by editing): this creates a duplicate.
 const imeiB = truth['E2E-single-B.jpg'].imei1[0];

@@ -15,16 +15,13 @@ import { TargetsTab, SegmentsTab } from './RetailTargets';
 import { last4, updateDay, type RetailCtx, type RetailRecord } from './retail/ui-helpers';
 export type { RetailCtx, RetailRecord };
 
-const SUB = [['today', 'Today'], ['report', 'Report'], ['targets', 'Targets'], ['gives', 'Gives'], ['segments', 'Segments'], ['catalog', 'Catalog'], ['data', 'Data']] as const;
-type Sub = typeof SUB[number][0];
-export function RetailHub(ctx: RetailCtx) {
-  const [sub, setSub] = useState<Sub>(ctx.sharedText ? 'report' : 'today');
-  const problems = useMemo(() => (ctx.state.report ? reconcile(ctx.state, ctx.state.report, ctx.records).summary : null), [ctx.state, ctx.records]);
-  const toCheck = problems ? problems.differ + problems.unknown : 0;
+/** The RetailLens sections. Home (today), Report and Targets are on the bottom bar; Gives, Segments, Catalog and Data are under the ⋯ More menu. */
+export type RetailSub = 'today' | 'report' | 'targets' | 'gives' | 'segments' | 'catalog' | 'data';
+/** Which section is open is decided by the app (bottom bar / More menu); this shows it. */
+export function RetailHub(ctx: RetailCtx & { sub?: RetailSub; openSub?: (sub: RetailSub) => void }) {
+  const sub: RetailSub = ctx.sub || (ctx.sharedText ? 'report' : 'today');
+  const setSub = ctx.openSub || (() => undefined);
   return <div className="retail-hub">
-    <nav className="retail-tabs" role="tablist" aria-label="RetailLens sections">
-      {SUB.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={sub === key} className={sub === key ? 'on' : ''} onClick={() => setSub(key)}>{label}{key === 'report' && toCheck > 0 && <b>{toCheck}</b>}</button>)}
-    </nav>
     {sub === 'today' && <TodayTab {...ctx} openReport={() => setSub('report')} />}
     {sub === 'report' && <ReportTab {...ctx} />}
     {sub === 'targets' && <TargetsTab {...ctx} />}
@@ -39,7 +36,14 @@ export function RetailHub(ctx: RetailCtx) {
 function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
   const { state, records, today } = ctx;
   const [custom, setCustom] = useState('');
-  const dash = useMemo(() => todayDashboard(state, records, today, ctx.counts), [state, records, today, ctx.counts]);
+  const people = ctx.people;
+  const [pick, setPick] = useState('');
+  // whose month this is: the person chosen here, else me, else the first person
+  const me = state.settings.myPersonId;
+  const who = people.some(p => p.id === pick) ? pick : people.some(p => p.id === me) ? me : people[0]?.id || '';
+  const whoName = people.find(p => p.id === who)?.name || '';
+  const forWho = useMemo(() => ({ ...state, settings: { ...state.settings, myPersonId: who } }), [state, who]);
+  const dash = useMemo(() => todayDashboard(forWho, records, today, ctx.counts), [forWho, records, today, ctx.counts]);
   const check = useMemo(() => (state.report ? reconcile(state, state.report, records).summary : null), [state, records]);
   const low = useMemo(() => (state.report ? reportItems(state.report).filter(i => i.stock > 0 && i.stock <= state.settings.lowStock) : []), [state]);
   const tick = (id: string, done: boolean) => ctx.change(updateDay(state, today, d => ({ ...d, checklist: { ...d.checklist, [id]: !done }, custom: d.custom.map(c => c.id === id ? { ...c, done: !done } : c) })), '');
@@ -48,25 +52,27 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
     for (const r of records) { const d = localDay(r.createdAt); if (d) days.set(d, [...(days.get(d) || []), r]); }
     return [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
   }, [records]);
-  const me = state.settings.myPersonId;
+  const unassigned = records.filter(r => !r.personId).length;
   return <div className="retail-today">
+    {people.length > 0 && <div className="who-chips" role="group" aria-label="Whose month">{people.map((p, k) => <button key={p.id} type="button" aria-pressed={who === p.id} className={who === p.id ? 'on' : ''} onClick={() => setPick(p.id)}><i className={`who-av c${k % 4}`}>{p.name.slice(0, 1).toUpperCase()}</i>{p.name}</button>)}</div>}
     <div className="retail-stats">
       <div><span>Report lines to check</span><strong className={check && check.differ + check.unknown ? 'amber' : ''}>{check ? check.differ + check.unknown : '—'}</strong></div>
       <div><span>Phones scanned</span><strong>{check ? check.scannedPhones : records.length}</strong></div>
-      <div><span>My target</span><strong>{dash.summary ? `${dash.summary.totalPct}%` : '—'}</strong></div>
+      <div><span>{whoName ? `${whoName}’s target` : 'Target'}</span><strong>{dash.summary ? `${dash.summary.totalPct}%` : '—'}</strong></div>
       <div><span>Days left</span><strong>{dash.summary ? dash.summary.daysLeft : daysInMonth(monthOf(today)) - Number(today.slice(8)) + 1}</strong></div>
     </div>
-    <section className="retail-card"><h3>Sell first</h3>
-      {!me && <p className="settings-help">Choose who you are in Gives to see your selling priorities.</p>}
-      {me && !dash.summary && <p className="settings-help">No target for this month yet. Set your targets in Targets.</p>}
+    <section className="retail-card"><h3>Sell first{whoName ? ` for ${whoName}` : ''}</h3>
+      {!who && <p className="settings-help">Add people in More, then People, to see their selling priorities.</p>}
+      {who && !dash.summary && <p className="settings-help">No target for {whoName} this month yet. Set it in Targets.</p>}
       {dash.priorities.map(p => <p key={p.segment} className="retail-priority">{p.message}</p>)}
-      {dash.summary && !dash.priorities.length && <p className="settings-help">Your {state.settings.myThreshold}% target is reached in every segment.</p>}
+      {dash.summary && !dash.priorities.length && <p className="settings-help">{whoName}’s {state.settings.myThreshold}% target is reached in every segment.</p>}
     </section>
     <section className="retail-card"><h3>Report</h3>
       {!state.report && <p className="settings-help">No report yet. Paste your WhatsApp report in Report: it is checked against the phones you scanned.</p>}
       {state.report && check && <p className="settings-help">Last saved {state.report.savedAt.slice(0, 16).replace('T', ' ')} · {check.agree} agree · {check.differ} differ · {check.unknown} unknown.</p>}
       <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={ctx.openReport}>{state.report ? 'Open the report' : 'Paste a report'}</button></div>
     </section>
+    {unassigned > 0 && <section className="retail-card"><h3>Unassigned phones</h3><p className="settings-help">{unassigned} phone{unassigned === 1 ? ' has' : 's have'} no person yet.</p><div className="share-toolbar"><button type="button" className="subtle-btn" onClick={() => ctx.openRecords('All')}>Open Phones</button></div></section>}
     <section className="retail-card"><h3>Low stock ({low.length})</h3>
       <ul className="retail-list">{low.map(i => <li key={i.id}><span className="amber">{i.name}</span> <small>{i.stock} left in the report</small></li>)}{!low.length && <li className="settings-help">{state.report ? 'Nothing is low.' : 'Appears once a report is saved.'}</li>}</ul>
     </section>
@@ -128,14 +134,14 @@ function CatalogTab(ctx: RetailCtx) {
     <section className="retail-card"><h3>Models</h3>
       <div className="retail-inline"><input type="search" aria-label="Search models" placeholder="Search models" value={search} onChange={e => setSearch(e.target.value)} /><button type="button" className="subtle-btn" onClick={() => { setEditing({ code: '', name: '', abbreviation: '', segment: 'mid', monthly: {}, variants: [], custom: true }); setVariants(''); }}>+ Add model</button></div>
       <ul className="retail-list">{models.map(i => <li key={i.code}><span><strong>{i.abbreviation}</strong> <small>{i.name} · {i.code}{i.custom ? ' · edited' : ''}</small></span>
-        <span className="retail-inline"><select aria-label={`Segment of ${i.name}`} value={i.monthly[month] || i.segment} onChange={e => ctx.change(setModelSegment(state, i.code, e.target.value as Segment), 'segment')}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select>
+        <span className="retail-inline"><select aria-label={`Segment of ${i.name}`} value={segmentOf(state, i.code, month)} onChange={e => ctx.change(setModelSegment(state, i.code, e.target.value as Segment), 'segment')}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select>
           <button type="button" className="subtle-btn" onClick={() => { setEditing(i); setVariants(variantsText(i)); }}>Edit</button></span></li>)}</ul>
     </section>
     {editing && <section className="retail-card" role="dialog" aria-label="Edit model"><h3>{editing.code ? `Edit ${editing.name}` : 'Add a model'}</h3>
       <label>Model code (e.g. A176)<input value={editing.code} disabled={!!itemFor(state, editing.code) && !!editing.code} onChange={e => setEditing({ ...editing, code: e.target.value.toUpperCase() })} /></label>
       <label>Name<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></label>
       <label>Report abbreviation<input value={editing.abbreviation} onChange={e => setEditing({ ...editing, abbreviation: e.target.value })} /></label>
-      <label>Segment<select value={editing.segment} onChange={e => setEditing({ ...editing, segment: e.target.value as Segment })}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select></label>
+      <label>Segment<select value={[...segmentIds(state), 'other'].includes(editing.segment) ? editing.segment : 'other'} onChange={e => setEditing({ ...editing, segment: e.target.value as Segment })}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select></label>
       <label>Segment for {month} only<select value={editing.monthly[month] || ''} onChange={e => { const monthly = { ...editing.monthly }; if (e.target.value) monthly[month] = e.target.value as Segment; else delete monthly[month]; setEditing({ ...editing, monthly }); }}><option value="">Same as above</option>{segmentIds(state).map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select></label>
       <label>Variants, one per line: SKU | RAM | storage | colours<textarea rows={4} value={variants} onChange={e => setVariants(e.target.value)} placeholder="SM-A176BZKGINU | 6GB | 128GB | Black, Blue" /></label>
       <div className="share-toolbar"><button type="button" className="primary" disabled={!/^[A-Z0-9]{3,6}$/.test(editing.code)} onClick={() => { ctx.change(saveItem(state, { ...editing, variants: parseVariants(variants) }), 'catalog edit'); setEditing(null); }}>Save</button>

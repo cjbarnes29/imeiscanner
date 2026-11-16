@@ -28,8 +28,8 @@ const entry = (store?.photos || []).find(p => p.name === PHOTO);
 check(results, 'the scan report entry asks for a retake', entry?.retake === true && entry?.retakeKind === 'cut-edge', JSON.stringify({ retake: entry?.retake, kind: entry?.retakeKind }));
 
 // the review dialog of the unreadable record
-await waitForText(c, 'Records', 20000);
-await clickText(c, '^Records');
+await waitForText(c, 'Phones', 20000);
+await clickText(c, '^Phones');
 await sleep(1200);
 // The NEEDS REVIEW tile filters the list to the record that needs a look; its photo opens the review dialog.
 await js(c, `(()=>{const b=document.querySelector('button[aria-label="Show records that need review"]');if(b)b.click();return !!b})()`);

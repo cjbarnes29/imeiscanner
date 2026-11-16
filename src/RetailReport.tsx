@@ -11,7 +11,7 @@ import { num, type RetailCtx } from './retail/ui-helpers';
 
 type Draft = { name: string; sold: string; stock: string; parts: ReportPart[]; code: string; segment: Segment; remember: boolean; search: string; newCode: string };
 
-const mark = (status: LineResult['status']) => (status === 'agree' ? '✓' : status === 'unknown' ? '?' : status === 'differ' ? '!' : '•');
+const mark = (status: LineResult['status']) => (status === 'agree' ? '✓' : status === 'unknown' ? '?' : status === 'differ' ? '!' : status === 'empty' ? '–' : '•');
 const clipboard = (text: string, ctx: RetailCtx) => { void navigator.clipboard?.writeText(text).then(() => ctx.notify('Report copied. Paste it into WhatsApp.'), () => ctx.notify('Could not copy. Use Send instead.')); };
 
 export function ReportTab(ctx: RetailCtx) {
@@ -64,7 +64,7 @@ export function ReportTab(ctx: RetailCtx) {
 
   const items = report ? reportItems(report) : [];
   const shown = items.filter(i => only === 'all' || ['differ', 'unknown'].includes(byId.get(i.id)?.status || ''));
-  const order = (s?: LineResult['status']) => (s === 'unknown' ? 0 : s === 'differ' ? 1 : s === 'info' ? 2 : 3);
+  const order = (s?: LineResult['status']) => (s === 'unknown' ? 0 : s === 'differ' ? 1 : s === 'info' ? 2 : s === 'empty' ? 4 : 3);
   const sorted = [...shown].sort((a, b) => order(byId.get(a.id)?.status) - order(byId.get(b.id)?.status));
   const sum = rec?.summary;
   const rest = report ? report.entries.filter(e => e.t === 'text' && e.text.trim() && !/^[\s─\-=■♤]{3,}$/.test(e.text)).map(e => (e as { text: string }).text) : [];
@@ -98,7 +98,7 @@ export function ReportTab(ctx: RetailCtx) {
     {report && sum && <>
       <section className="retail-card"><h3>Report vs scanned phones</h3>
         <p className="settings-help">Scanned in the app (in stock): {sum.scannedPhones} · report stock: {sum.reportStock}</p>
-        <p className="rep-chips"><span className="rep-chip ok">{sum.agree} agree</span><span className="rep-chip w">{sum.differ} differ</span><span className="rep-chip q">{sum.unknown} unknown</span>{sum.notScanned > 0 && <span className="rep-chip">{sum.notScanned} not scanned yet</span>}</p>
+        <p className="rep-chips"><span className="rep-chip ok">{sum.agree} agree</span><span className="rep-chip w">{sum.differ} differ</span><span className="rep-chip q">{sum.unknown} unknown</span>{sum.empty > 0 && <span className="rep-chip">{sum.empty} no stock</span>}{sum.notScanned > 0 && <span className="rep-chip">{sum.notScanned} not scanned yet</span>}</p>
         <div className="share-toolbar"><button type="button" className="primary" onClick={copy}>Copy report</button><button type="button" className="subtle-btn" onClick={send}>Send</button>
           <button type="button" className="subtle-btn" onClick={() => setPasting(true)}>Paste new</button><button type="button" className="subtle-btn" onClick={newDay}>New day</button></div>
         {report.totalSellout && <p className="settings-help">Sellout in the list: {listedSold(report)} · the report says {report.totalSellout.typed}

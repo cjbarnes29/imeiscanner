@@ -9,6 +9,14 @@ import { evaluate, webState } from '../scripts/cdp-state.mjs';
 
 export { check, finish, webState, adb };
 const here = dirname(fileURLToPath(import.meta.url));
+/** Opens a section from the ⋯ More menu (People, Gives, Segments, Catalog, Share, Backup). */
+export async function openMore(c, label) {
+  await js(c, `document.querySelector('button[aria-label="More"]').click();true`);
+  await sleep(700);
+  const ok = await js(c, `(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(label)}));if(!b)return false;b.click();return true;})()`);
+  await sleep(700);
+  return ok;
+}
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 export const ctx = () => { const [, , device = 'emulator-5554', app = 'com.imeilens.scanner.phonetest'] = process.argv; guardApp(app); return { device, app }; };
 
@@ -76,12 +84,12 @@ export async function scanAll(c) {
 /** Opens Crop Studio on the single-label photo B and draws two side-by-side boxes.
  *  { bulk: true } opens it through the Records list instead (tick the photo, then Bulk crop): there Save all cuts in the background. */
 export async function openStudioAndDrawTwoBoxes(c, { bulk = false } = {}) {
-  await clickText(c, '^Records');
+  await clickText(c, '^Phones');
   await sleep(800);
   if (bulk) {
     await clickText(c, '^Detailed'); // the tick boxes and Bulk crop are in the Detailed view
     await sleep(800);
-    const ticked = await js(c, `(()=>{const row=[...document.querySelectorAll('tr,article')].find(r=>[...r.querySelectorAll('button')].some(b=>(b.innerText||'').trim()==='E2E-single-B.jpg'));const box=row&&row.querySelector('input.selection-check');if(!box)return false;box.click();return true})()`);
+    const ticked = await js(c, `(()=>{const row=[...document.querySelectorAll('tr,article')].find(r=>[...r.querySelectorAll('button')].some(b=>(b.textContent||'').trim()==='E2E-single-B.jpg'));const box=row&&row.querySelector('input.selection-check');if(!box)return false;box.click();return true})()`);
     if (!ticked) throw new Error('could not tick the photo');
     await sleep(600);
     await clickText(c, '^More actions', { tag: 'summary' }); // Bulk crop is in the More actions menu
@@ -92,7 +100,7 @@ export async function openStudioAndDrawTwoBoxes(c, { bulk = false } = {}) {
     await clearAutoBoxes(c);
     return await drawTwoBoxes(c);
   }
-  const opened = await js(c, `(()=>{const name=[...document.querySelectorAll('*')].find(e=>e.children.length===0&&(e.innerText||'').trim()==='E2E-single-B.jpg');if(!name)return 'no record';let e=name;for(let i=0;i<8&&e;i++){const b=[...e.querySelectorAll('button')].find(b=>(b.innerText||'').trim()==='E2E-single-B.jpg');if(b){b.click();return 'opened'}e=e.parentElement}return 'no edit button'})()`);
+  const opened = await js(c, `(()=>{const name=[...document.querySelectorAll('*')].find(e=>e.children.length===0&&(e.innerText||'').trim()==='E2E-single-B.jpg');if(!name)return 'no record';let e=name;for(let i=0;i<8&&e;i++){const b=[...e.querySelectorAll('button')].find(b=>(b.textContent||'').trim()==='E2E-single-B.jpg');if(b){b.click();return 'opened'}e=e.parentElement}return 'no edit button'})()`);
   if (opened !== 'opened') throw new Error('could not open the record: ' + opened);
   await sleep(2500);
   await clickText(c, '^Crop / edit photo');

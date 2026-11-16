@@ -46,8 +46,8 @@ try{
   await waitFor(`document.readyState==='complete'`,'reload');
   await sleep(1500);
   await run(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent));if(b)b.click();return true;})()`);
-  await waitFor(`!!document.querySelector('.results .imei-edit, .results tbody tr, .simple-record-photo')`,'records listed');
-  await run(`(()=>{const b=document.querySelector('.results button[title*="review" i], .results td img, .simple-record-photo, .results tbody tr button');if(b)b.click();return true;})()`);
+  await waitFor(`!!document.querySelector('.results .phone-row, .simple-record-photo')`,'records listed');
+  await run(`(()=>{const b=document.querySelector('.results .phone-row .photo-cell, .simple-record-photo');if(b)b.click();return true;})()`);
   await waitFor(`!!document.querySelector('.review-modal')`,'review sheet opens');
   await sleep(600);
   await shot('1-review-open');

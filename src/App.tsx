@@ -1,8 +1,10 @@
 import { activeIssue, issueTextFor } from './label-issue';
-import { RetailHub, type RetailRecord } from './RetailHub';
+import { RetailHub, type RetailRecord, type RetailSub } from './RetailHub';
+import { reconcile as reconcileReport } from './retail/reconcile';
 import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
-import { segmentOf as retailSegmentOf, setRecordMeta as retailSetMeta } from './retail/catalog';
+import { segmentOf as retailSegmentOf, setRecordMeta as retailSetMeta, setModelSegment as retailSetModelSegment } from './retail/catalog';
+import { variantOf as retailVariantOf } from './retail/inventory';
 import { pendingSubmissions } from './retail/sales';
 import { dateKey, localDay, monthOf as retailMonth, type RetailState, type Segment as RetailSegment } from './retail/types';
 import { segLabel as retailSegLabel, segmentIds as retailSegmentIds } from './retail/segments';
@@ -38,7 +40,7 @@ import {
   UploadCloud, ScanLine, Download, Search, Trash2,
   CheckCircle2, AlertTriangle, Copy, Smartphone, Image as ImageIcon,
   X, LoaderCircle, Eye,
-  CloudUpload, Camera, Pencil, Share2, Settings, ZoomIn, Users, Store
+  CloudUpload, Camera, Pencil, Share2, Settings, ZoomIn, Users, Store, House, ClipboardList, Target, Ellipsis, ChevronLeft
 } from 'lucide-react';
 import { createWorker, PSM } from 'tesseract.js';
 import { startOcrWorker } from './ocr-config';
@@ -307,6 +309,8 @@ function androidProgressText(job: { status: string; count: number; completed: nu
   }
   return `${job.completed} of ${job.count} photos scanned · ${job.status}${failed}`;
 }
+/** 350000000004821 -> 35000000 000482 1 (type, serial, check digit): easier to read and to say out loud. */
+function imeiGrouped(imei: string) { return /^\d{15}$/.test(imei) ? `${imei.slice(0, 8)} ${imei.slice(8, 14)} ${imei.slice(14)}` : imei; }
 function imeiIsFallback(row: RecordItem) {
   return !!row.imei && !row.imeiFallbackChecked && recordImeiPair(row).imei1 === '';
 }
@@ -1951,6 +1955,9 @@ export default function App() {
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem('imei-lens-simple-view') === 'true');
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** Phones: the one that is open (its details show), and whether the tick boxes and the selection bar are on. */
+  const [openPhone, setOpenPhone] = useState('');
+  const [selectOn, setSelectOn] = useState(false);
   const [personGroups, setPersonGroups] = useState<PersonGroup[]>(readPeople);
   const [activePersonId, setActivePersonId] = useState('person-1');
   const [personFilter, setPersonFilter] = useState('All');
@@ -2022,9 +2029,32 @@ export default function App() {
   const [recordsTab, setRecordsTab] = useState<'records' | 'models' | 'share' | 'people' | 'retail'>('records');
   /** Detailed mode shows one section at a time, chosen from the bar at the bottom of the screen. */
   const [mainView, setMainView] = useState<'scan' | 'results' | 'export'>('results');
-  const activeView: 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export' = mainView !== 'results' ? mainView : recordsTab;
-  function openView(view: 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export') {
-    if (view === 'scan' || view === 'export') setMainView(view); else { setMainView('results'); setRecordsTab(view); }
+  /** Which RetailLens section is open (Home = today). Home, Report and Targets are on the bottom bar; the rest are under the ⋯ More menu. */
+  const [retailSub, setRetailSub] = useState<RetailSub>('today');
+  const [moreOpen, setMoreOpen] = useState(false);
+  type View = 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export' | 'home' | 'report' | 'targets';
+  const activeView: View = mainView !== 'results' ? mainView : recordsTab === 'retail' ? (retailSub === 'today' ? 'home' : retailSub === 'report' ? 'report' : retailSub === 'targets' ? 'targets' : 'retail') : recordsTab;
+  function openView(view: View) {
+    if (view === 'scan' || view === 'export') setMainView(view);
+    else if (view === 'home' || view === 'report' || view === 'targets') { setMainView('results'); setRecordsTab('retail'); setRetailSub(view === 'home' ? 'today' : view); }
+    else { setMainView('results'); setRecordsTab(view); }
+    window.scrollTo({ top: 0 });
+  }
+  /** The title of the screen that is open, and a short status line under it. */
+  const viewInfo = (() => {
+    const back = recordsTab !== 'records' && !(recordsTab === 'retail' && ['today', 'report', 'targets'].includes(retailSub));
+    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'Gives', segments: 'Segments', catalog: 'Catalog', data: 'Backup and data' };
+    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' ? 'People' : recordsTab === 'models' ? 'Assign by model' : recordsTab === 'share' ? 'Share' : retailTitles[retailSub];
+    const unassigned = records.filter(r => r.personId === UNASSIGNED).length;
+    const sub = recordsTab === 'records' ? (records.length ? `${records.length} scanned${unassigned ? ` · ${unassigned} unassigned` : ''}` : 'Nothing scanned yet')
+      : recordsTab === 'retail' && retailSub === 'today' ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+    return { title, sub, back };
+  })();
+  /** Opens a section from the ⋯ More menu. */
+  function openMore(item: 'people' | 'models' | 'share' | RetailSub) {
+    setMoreOpen(false);
+    if (item === 'people' || item === 'models' || item === 'share') { setMainView('results'); setRecordsTab(item); }
+    else { setMainView('results'); setRecordsTab('retail'); setRetailSub(item); }
     window.scrollTo({ top: 0 });
   }
   // A WhatsApp report shared to the app as text opens Reports with it filled in.
@@ -2032,7 +2062,7 @@ export default function App() {
     const take = () => {
       const text = androidBridge?.takeSharedText?.() || '';
       if (!text) return;
-      setSharedText(text); setSimpleView(false); setMainView('results'); setRecordsTab('retail');
+      setSharedText(text); setSimpleView(false); setMainView('results'); setRecordsTab('retail'); setRetailSub('report');
     };
     take();
     window.addEventListener('android-shared-text', take);
@@ -2981,6 +3011,8 @@ export default function App() {
   // What RetailLens sees of the scan records (numbers and names only, never pictures), and the two things it may change: owners and nothing else.
   const retailRecords: RetailRecord[] = useMemo(() => records.map(r => ({ id: r.id, imei: r.imei, model: r.model, personId: r.personId, raw: r.raw, duplicate: r.duplicate, name: r.name, createdAt: r.createdAt, imei2: r.imei2, serial: recordSerial(r), needsReview: !r.checked && reviewStatus(r).includes('Needs review') })), [records]); // eslint-disable-line react-hooks/exhaustive-deps
   const retailPeople = personGroups.map(p => ({ id: p.id, name: personName(p) }));
+  /** Report lines that need a look (shown as the badge on the Report button). */
+  const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
   function assignOwners(changes: { id: string; personId: string }[]) {
     const owner = new Map(changes.map(change => [change.id, change.personId]));
     setRecords(old => markDuplicateRecords(old.map(r => owner.has(r.id) ? { ...r, personId: owner.get(r.id)! } : r)));
@@ -3114,6 +3146,7 @@ export default function App() {
   useEffect(() => { setRecordPage(1); }, [filter, query, personFilter]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedRows = records.filter(r => selectedIdSet.has(r.id));
+  const selectMode = selectOn || selectedRows.length > 0;
   const exportExcludedSet = useMemo(() => new Set(exportExcludedIds), [exportExcludedIds]);
   const exportCandidates = (selectedOnly ? selectedRows : records).filter(record =>
     imeiFilter === 'all' || (imeiFilter === 'with' ? !!record.imei : !record.imei)
@@ -4685,6 +4718,7 @@ export default function App() {
             <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
           </div>
           <button type="button" className="settings-btn reset-all-btn" aria-label="Reset: delete all scanned IMEIs" title="Reset: delete all scanned IMEIs" onClick={() => setResetOpen(true)}><Trash2 size={18} /></button>
+          {!simpleView && <button type="button" className="settings-btn" aria-label="More" title="More" onClick={() => setMoreOpen(true)}><Ellipsis size={18} /></button>}
           <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
           <span className="local-pill">
             <span /> {storageWarning ? 'Some records not saved' : 'Stored on this device'}
@@ -4705,6 +4739,14 @@ export default function App() {
           <button type="button" className="subtle-btn" autoFocus onClick={() => setResetOpen(false)}>Cancel</button>
           <button type="button" className="subtle-btn danger" onClick={resetEverything}>Delete everything</button>
         </div>
+      </section></div>}
+      {moreOpen && !simpleView && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) setMoreOpen(false); }}><section className="modal more-sheet" role="dialog" aria-modal="true" aria-label="More">
+        <div className="modal-head"><h2>More</h2><button className="iconbtn" aria-label="Close" onClick={() => setMoreOpen(false)}><X size={17} /></button></div>
+        <ul className="more-list">
+          {([['people', 'People', `${personGroups.length} people · devices and targets`], ['gives', 'Gives', 'Suggested phones for each person'], ['segments', 'Segments', 'Fold 1, Fold 2 and your own'], ['catalog', 'Catalog', 'Models, abbreviations, colours'], ['models', 'Assign by model', 'Give phones out by model'], ['share', 'Share', 'Send phones or numbers'], ['data', 'Backup and data', 'Backup, restore, undo, history']] as const).map(([key, label, hint]) =>
+            <li key={key}><button type="button" onClick={() => openMore(key)}><strong>{label}</strong><small>{hint}</small></button></li>)}
+          <li><button type="button" onClick={() => { setMoreOpen(false); setSettingsOpen(true); }}><strong>Settings</strong><small>Simple or Detailed mode, speed, language</small></button></li>
+        </ul>
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}${!simpleView && mainView === 'scan' ? ' scan-first' : ''}`}>
@@ -4770,6 +4812,11 @@ export default function App() {
               </div>
               <span className="tag">BULK UPLOAD</span>
             </div>
+            {!simpleView && personGroups.length > 0 && <label className="scan-owner">New phones go to
+              <select aria-label="New scans go to" value={activePersonId} onChange={e => setActivePersonId(e.target.value)}>
+                {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
+              </select>
+            </label>}
 
 {!simpleView && (<>
             {androidBridge && <div className="android-scan">
@@ -5115,12 +5162,16 @@ export default function App() {
 
         <section id="records" hidden={!simpleView && mainView !== 'results'} className={`results panel ${collapsedPanels.includes('records') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('records')} onClick={() => togglePanel('records')}>{collapsedPanels.includes('records') ? '▸' : '▾'} Scanned records {collapsedPanels.includes('records') ? '— expand' : '— minimize'}</button>
           <div className="results-top">
-            <div>
+            {simpleView ? <div>
               <div className="eyebrow">STEP 03</div>
               <h2>
                 Scanned records <span className="count">{records.length}</span>
               </h2>
-            </div>
+            </div> : <div className="view-head">
+              {viewInfo.back && <button type="button" className="subtle-btn back-more" onClick={() => setMoreOpen(true)}><ChevronLeft size={14} /> More</button>}
+              <h2>{viewInfo.title}{recordsTab === 'records' && <span className="count">{records.length}</span>}</h2>
+              {viewInfo.sub && <p className="view-sub">{viewInfo.sub}</p>}
+            </div>}
 
             <div className="result-actions">
               {(simpleView || recordsTab === 'records') && (
@@ -5163,7 +5214,7 @@ export default function App() {
           {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
             assign={assignOwners} readImage={readScreenshotText} notify={setToast} download={saveDirectFile} share={text => { void shareOrCopyText(text, 'The report'); }}
             counts={{ scanning: androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing') ? Math.max(0, androidJob.count - androidJob.completed) : 0, needsReview: needLookCount }}
-            sharedText={sharedText} openRecords={filter => jumpTo('records', filter)} />}
+            sharedText={sharedText} openRecords={filter => jumpTo('records', filter)} sub={retailSub} openSub={setRetailSub} />}
           {!simpleView && recordsTab === 'share' && shareTab}
 
           <div className="records-tab-body" hidden={!simpleView && recordsTab !== 'records'}>
@@ -5171,17 +5222,9 @@ export default function App() {
             {simpleView && peoplePanel}
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
-{!simpleView && (<>
-              <label>
-                New scans go to
-                <select value={activePersonId} onChange={e => setActivePersonId(e.target.value)}>
-                  {personGroups.map(person => (
-                    <option key={person.id} value={person.id}>{personName(person)}</option>
-                  ))}
-                </select>
-              </label>
-</>)}
-              <div className="action-bar" role="group" aria-label="Actions for selected phones">
+
+              {!simpleView && <div className="select-toggle"><button type="button" className="subtle-btn" aria-pressed={selectMode} onClick={() => { if (selectMode) { setSelectOn(false); setSelectedIds([]); } else setSelectOn(true); }}>{selectMode ? `Done${selectedRows.length ? ` (${selectedRows.length} selected)` : ''}` : 'Select'}</button></div>}
+              <div className={`action-bar${simpleView || selectMode ? ' show' : ''}`} role="group" aria-label="Actions for selected phones">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
@@ -5192,7 +5235,7 @@ export default function App() {
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
               </div>
-              <details className="more-actions">
+              <details className={`more-actions${simpleView || selectMode ? ' show' : ''}`}>
                 <summary>More actions</summary>
                 <div className="more-actions-body">
                   <button className="subtle-btn" disabled={!visible.length} onClick={() => void sendNumbers()}>Send numbers ({selectedRows.length || visible.length})</button>
@@ -5210,7 +5253,7 @@ export default function App() {
                 </div>
               </details>
             </div>
-            {personFilter === 'All' && personGroups.length > 0 && <p className="people-hint">Tap a person below to see, move or share their phones.</p>}
+            {simpleView && personFilter === 'All' && personGroups.length > 0 && <p className="people-hint">Tap a person below to see, move or share their phones.</p>}
             <div className="person-filters">
               <button className={personFilter === 'All' ? 'active' : ''} onClick={() => setPersonFilter('All')}>Everyone <b>{records.length}</b></button>
               {personGroups.map(person => (
@@ -5284,175 +5327,60 @@ export default function App() {
               </div>)}
             </div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>
-                      <input
-                        className="selection-check"
-                        type="checkbox"
-                        aria-label="Select all visible records"
-                        checked={allVisibleSelected}
-                        onChange={toggleVisibleSelection}
-                      />
-                    </th>
-                    <th>NO.</th>
-                    <th>PICTURE ID</th>
-                    <th>PHOTO / FILE</th>
-                    <th>PERSON</th>
-                    <th>DEVICE MODEL</th>
-                    <th>IMEI</th>
-                    <th>SERIAL NUMBER</th><th>VALIDATION</th>
-                    <th>STATUS</th>
-                    <th />
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {pageRows.map(r => (
-                    <tr key={r.id}>
-                      <td data-label="Select">
-                        <input
-                          className="selection-check"
-                          type="checkbox"
-                          aria-label={`Select photo #${r.number}`}
-                          checked={selectedIdSet.has(r.id)}
-                          onChange={() => toggleSelected(r.id)}
-                        />
-                      </td>
-                      <td data-label="Record">#{r.number}</td>
-                      <td data-label="Picture ID">{r.pictureId}{r.sourcePictureId && records.some(item => item.id !== r.id && item.sourcePictureId === r.sourcePictureId) ? ' · Same source photo' : ''}{r.cropNeedsReview ? ' · Crop needs review' : ''}</td>
-                      <td data-label="Photo">
-                        <div className="photo-edit-cell">
-                        <button
-                          className="photo-cell"
-                          onClick={() => openReview(r)}
-                        >
-                          <img src={recordPhoto(r)} />
-                          <span>{r.name}</span>
-                        </button>
-                        </div>
-                      </td>
-
-                      <td data-label="Person">
-                        <select
-                          className="inline-edit person-edit"
-                          aria-label={`Move record #${r.number} to a person`}
-                          value={r.personId || 'unassigned'}
-                          onChange={e => assignPerson(r.id, e.target.value)}
-                        >
-                          {personGroups.map(person => (
-                            <option key={person.id} value={person.id}>
-                              {personName(person)}
-                            </option>
-                          ))}
-                          <option value="unassigned">Unassigned</option>
-                        </select>
-                      </td>
-
-                      <td data-label="Model">
-                        <input
-                          className="inline-edit model-edit"
-                          aria-label={`Model for record ${r.number}`}
-                          value={r.model}
-                          onFocus={e => { e.currentTarget.dataset.before = r.model; }}
-                          onChange={e => {
-                            // Typed by hand: a Samsung code shape (SM-A165F) is accepted; anything else stays marked for review with a hint.
-                            const model = e.target.value, ok = typedModelOk(r, model.trim());
-                            updateRow(r.id, { model, modelNeedsReview: !ok, modelNote: typedModelNote(r, model.trim()) });
-                          }}
-                          onBlur={e => {
-                            // Learn the correction once the edit is finished (never from half-typed codes).
-                            const before = e.currentTarget.dataset.before, after = e.currentTarget.value.trim();
-                            if (before !== undefined && after && after !== before) writeLearned(learnCorrection(readLearned(), before, after));
-                            delete e.currentTarget.dataset.before;
-                          }}
-                        />
-                        <small className="badge-seg" title="Segment (change it in Retail > Catalog or with Bulk edit)">{retailSegLabel(retail, segOfRecord(r))}</small>
-                        {r.modelNeedsReview && <small className="model-cell-name unknown" role="note">{r.modelNote || typedModelNote(r, r.model)}</small>}
-                        {(() => { const info = infoOf(r); return info.series !== 'Unknown phones' && !isGenericName(info.name) ? <small className="model-cell-name"><strong>{info.name}</strong> · {info.series}</small> : <small className="model-cell-name unknown"><b className="badge-unknown">Unknown model</b> {modelCode4(r.model) ? `SM-${modelCode4(r.model)} is not recognised: name it under the Unknown model filter.` : 'Model not read. Type the code, or name it under the Unknown model filter.'}</small>; })()}
-                      </td>
-
-                      <td data-label="IMEI">
-                        <input
-                          className="inline-edit imei-edit"
-                          aria-label={`IMEI 1 for record ${r.number}`}
-                          value={r.imei}
-                          placeholder="Not detected"
-                          maxLength={15}
-                          onChange={e => {
-                            const imei = digits(e.target.value).slice(0, 15);
-
-                            if (imeiTakenElsewhere(imei, r.id, records)) setToast('This IMEI is already in your records. Both are flagged as duplicates.');
-
-                            updateRow(r.id, {
-                              imei,
-                              ...(imei.length === 15 ? { cropNeedsReview: false, imeiNeedsReview: false, brandNeedsReview: false } : {}),
-                              status: imei.length === 15
-                                ? (luhnValid(imei) ? 'Valid' : 'Invalid')
-                                : 'Review'
-                            });
-                          }}
-                        />
-
-                        <button
-                          className="row-action"
-                          title="Copy IMEI"
-                          onClick={() => void copyText(r.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}
-                        >
-                          <Copy size={14} />
-                        </button>
-                      </td>
-
-                      <td data-label="Serial number"><input aria-label={`Serial number for record ${r.number}`} value={recordSerial(r)} onChange={e => updateRow(r.id, {serial:e.target.value,serialNeedsReview:false})} /></td>
-                      <td data-label="Validation">
-                        <span className={`status ${(r.cropNeedsReview || imeiIsFallback(r) ? 'Review' : r.status).toLowerCase()}`}>
-                          {r.status === 'Valid' && !r.cropNeedsReview && !imeiIsFallback(r)
-                            ? <CheckCircle2 size={13} />
-                            : <AlertTriangle size={13} />}
-                          {' '}{reviewStatus(r)}
-                        </span>
-                        {reviewNote(r) && <small className="fallback-note">{reviewNote(r)}</small>}
-                      </td>
-
-                      <td data-label="Duplicate">
-                        {r.duplicate
-                          ? <span className="duplicate"><Copy size={12} /> Duplicate</span>
-                          : <span className="unique">Unique</span>}
-                      </td>
-
-                      <td data-label="Actions">
-                        <button
-                          className="row-action"
-                          title="Download original photo"
-                          onClick={() => {
-                            saveDirectFile(dataUrlBlob(recordPhoto(r)), orderedPhotoName(r));
-                          }}
-                        >
-                          <Download size={16} /> Photo
-                        </button>
-
-                        <button
-                          className="row-action"
-                          title="View photo and OCR text"
-                          onClick={() => openReview(r)}
-                        >
-                          <Eye size={16} />
-                        </button>
-
-                        <button
-                          className="row-action danger"
-                          title="Delete record"
-                          onClick={() => deleteRecord(r)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="phone-list">
+              {pageRows.map(r => {
+                const info = infoOf(r), v = retailVariantOf(retail, { id: r.id, raw: r.raw }), pair = recordImeiPair(r), open = openPhone === r.id, owner = personGroups.find(p => p.id === r.personId);
+                const known = info.series !== 'Unknown phones' && !isGenericName(info.name);
+                const title = [known ? info.name : (r.model || 'Unknown model'), v.storage].filter(Boolean).join(' ');
+                const flag = r.duplicate ? 'bad' : (r.cropNeedsReview || imeiIsFallback(r) || r.status !== 'Valid') ? 'warn' : 'ok';
+                const status = r.status === 'Valid' && !r.cropNeedsReview && !imeiIsFallback(r);
+                return <article key={r.id} className={'phone-row' + (open ? ' open' : '') + (selectedIdSet.has(r.id) ? ' picked' : '')}>
+                  <div className="pr-main">
+                    <input className="selection-check" type="checkbox" hidden={!selectMode} aria-label={'Select photo #' + r.number} checked={selectedIdSet.has(r.id)} onChange={() => toggleSelected(r.id)} />
+                    <button type="button" className="pr-open" aria-expanded={open} aria-label={'Phone ' + title + ', IMEI ' + (r.imei || 'not read')} onClick={() => setOpenPhone(open ? '' : r.id)}>
+                      <span className="pr-text"><strong>{title}</strong><span className="pr-imei">{r.imei ? imeiGrouped(r.imei) : 'IMEI not read'}</span></span>
+                      {!known && <b className="badge-unknown">Unknown model</b>}
+                      <i className={'pr-dot ' + flag} title={r.duplicate ? 'Duplicate' : reviewStatus(r)} />
+                      <span className={'pr-who' + (owner ? '' : ' none')} title={owner ? personName(owner) : 'Unassigned'}>{owner ? personName(owner).slice(0, 1).toUpperCase() : '–'}</span>
+                      <span className="pr-chev" aria-hidden="true">{open ? '▴' : '▾'}</span>
+                    </button>
+                  </div>
+                  <div className="pr-more" hidden={!open}>
+                    <div className="pr-facts">
+                      <div><span>Colour</span>{v.color || '—'}</div><div><span>RAM</span>{v.ram || '—'}</div>
+                      <div><span>IMEI 2</span>{pair.imei2 || '—'}</div><div><span>Segment</span>{retailSegLabel(retail, segOfRecord(r))}</div>
+                      <div><span>Status</span>{reviewStatus(r)}{r.duplicate ? ' · Duplicate' : ''}</div><div><span>Picture</span>{r.pictureId}{r.cropNeedsReview ? ' · crop needs review' : ''}</div>
+                    </div>
+                    {reviewNote(r) && <p className="fallback-note">{reviewNote(r)}</p>}
+                    <label>Person<select className="inline-edit person-edit" aria-label={'Move record #' + r.number + ' to a person'} value={r.personId || 'unassigned'} onChange={e => assignPerson(r.id, e.target.value)}>
+                      {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select></label>
+                    <label>Segment of this model<select aria-label={'Segment of ' + title} value={segOfRecord(r)} onChange={e => changeRetail(retailSetModelSegment(retail, r.model, e.target.value), 'segment')}>
+                      {[...retailSegmentIds(retail), 'other' as RetailSegment].map(sg => <option key={sg} value={sg}>{retailSegLabel(retail, sg)}</option>)}</select></label>
+                    <label>Stock<select aria-label={'Stock status of ' + title} value={retail.recordMeta[r.id]?.status || ''} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { status: e.target.value as never }), '')}>
+                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option></select></label>
+                    <label>Model<input className="inline-edit model-edit" aria-label={'Model for record ' + r.number} value={r.model}
+                      onFocus={e => { e.currentTarget.dataset.before = r.model; }}
+                      onChange={e => { const model = e.target.value, ok = typedModelOk(r, model.trim()); updateRow(r.id, { model, modelNeedsReview: !ok, modelNote: typedModelNote(r, model.trim()) }); }}
+                      onBlur={e => { const before = e.currentTarget.dataset.before, after = e.currentTarget.value.trim(); if (before !== undefined && after && after !== before) writeLearned(learnCorrection(readLearned(), before, after)); delete e.currentTarget.dataset.before; }} /></label>
+                    {r.modelNeedsReview && <small className="model-cell-name unknown" role="note">{r.modelNote || typedModelNote(r, r.model)}</small>}
+                    <label>IMEI 1<input className="inline-edit imei-edit" aria-label={'IMEI 1 for record ' + r.number} value={r.imei} placeholder="Not detected" maxLength={15}
+                      onChange={e => {
+                        const imei = digits(e.target.value).slice(0, 15);
+                        if (imeiTakenElsewhere(imei, r.id, records)) setToast('This IMEI is already in your records. Both are flagged as duplicates.');
+                        updateRow(r.id, { imei, ...(imei.length === 15 ? { cropNeedsReview: false, imeiNeedsReview: false, brandNeedsReview: false } : {}), status: imei.length === 15 ? (luhnValid(imei) ? 'Valid' : 'Invalid') : 'Review' });
+                      }} /></label>
+                    <label>Serial number<input aria-label={'Serial number for record ' + r.number} value={recordSerial(r)} onChange={e => updateRow(r.id, { serial: e.target.value, serialNeedsReview: false })} /></label>
+                    <div className="pr-actions">
+                      <button type="button" className="photo-cell" onClick={() => openReview(r)}><img src={recordPhoto(r)} alt="" /><span>{r.name}</span></button>
+                      <button type="button" className="subtle-btn" onClick={() => void copyText(r.imei).then(copied => setToast(copied ? 'IMEI copied.' : 'Could not copy IMEI.'))}>Copy IMEI</button>
+                      <button type="button" className="subtle-btn" onClick={() => shareRecord(r)}>Share</button>
+                      <button type="button" className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(r)), orderedPhotoName(r))}>Download photo</button>
+                      <button type="button" className="subtle-btn" onClick={() => openReview(r)}>View photo</button>
+                      <button type="button" className="subtle-btn danger" onClick={() => deleteRecord(r)}><Trash2 size={14} /> Delete</button>
+                    </div>
+                  </div>
+                </article>;
+              })}
             </div>
           )}
           {visible.length > pageSize && (
@@ -5821,7 +5749,7 @@ export default function App() {
       </section></div>}
       {showTop && !selected && shareIds.length === 0 && !cameraOpen && <button type="button" className="back-to-top" aria-label="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>↑ Top</button>}
       {!simpleView && <nav className="bottom-nav" aria-label="Sections">
-        {([['scan', 'Scan', ScanLine, 0], ['retail', 'Retail', Store, pendingSubmissions(retail).length], ['records', 'Records', ImageIcon, records.length], ['models', 'Give', Smartphone, giveChanged.length], ['people', 'People', Users, personGroups.length], ['share', 'Share', Share2, 0], ['export', 'Export', Download, 0]] as const).map(([key, label, Icon, badge]) =>
+        {([['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const).map(([key, label, Icon, badge]) =>
           <button key={key} type="button" className={activeView === key ? 'active' : ''} aria-current={activeView === key ? 'page' : undefined} onClick={() => openView(key)}>
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}
