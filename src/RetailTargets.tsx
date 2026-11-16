@@ -9,6 +9,8 @@ import { daysLeft, isMonth, LEVELS, monthOf, SEGMENT_LABEL, type Level, type Seg
 import { itemFor } from './retail/catalog';
 import { num, type RetailCtx } from './retail/ui-helpers';
 
+/** A typed or pasted number: only the digits count. */
+const typed = (value: string) => num(value.replace(/[^\d]/g, ''));
 const ceilTenth = (n: number) => (n <= 0 ? 0 : Math.ceil(n * 10) / 10);
 
 export function TargetsTab(ctx: RetailCtx) {
@@ -32,6 +34,21 @@ export function TargetsTab(ctx: RetailCtx) {
     const exists = base.lines.some(l => l.segment === segment);
     const lines = exists ? base.lines.map(l => l.segment === segment ? { ...l, ...patch } : l) : [...base.lines, { segment, target: 0, achieved: 0, ...patch }];
     ctx.change(putTarget(state, { ...base, lines }), '');
+  };
+  /** One person's target copied to everyone else for this segment. Only the target number: levels and sold stay each person's own. */
+  const copyTargetToEveryone = (fromId: string, segment: Segment) => {
+    const value = lineOf(fromId, segment).target;
+    let next = state, count = 0;
+    for (const p of people) {
+      if (p.id === fromId) continue;
+      const base = next.targets[month]?.[p.id] || emptyTarget(p.id, month, 'manual', new Date().toISOString(), []);
+      const exists = base.lines.some(l => l.segment === segment);
+      const lines = exists ? base.lines.map(l => l.segment === segment ? { ...l, target: value } : l) : [...base.lines, { segment, target: value, achieved: 0 }];
+      next = putTarget(next, { ...base, lines }); count++;
+    }
+    if (!count) { ctx.notify('There is nobody else to copy to. Add people in More > People.'); return; }
+    ctx.change(next, 'copy target');
+    ctx.notify(`Target ${value} copied to ${count} ${count === 1 ? 'person' : 'people'}. Levels and sold were not changed.`);
   };
   const setLevelPieces = (pid: string, segment: Segment, lv: Level, value: string) => {
     const line = lineOf(pid, segment);
@@ -101,14 +118,18 @@ export function TargetsTab(ctx: RetailCtx) {
       {hidden > 0 && <li><button type="button" className="subtle-btn" onClick={() => setShowEmpty(true)}>Show {hidden} empty segment{hidden === 1 ? '' : 's'}</button></li>}</ul>}
 
     {seg && <section className="retail-card"><div className="tg-head"><button type="button" className="subtle-btn" onClick={() => { setOpenSeg(''); setLevelsFor(''); }}>← All segments</button><h3>{segLabel(state, seg)}</h3></div>
-      <p className="settings-help">{days} day{days === 1 ? '' : 's'} left · showing {level}%. Sold is each person’s own count; nothing else changes it.</p>
+      <p className="settings-help">{days} day{days === 1 ? '' : 's'} left · showing {level}%. Type each person’s target and sold count (paste works). Sold is their own count; nothing else changes it.</p>
       {chosen.map(p => { const l = lineOf(p.id, seg), n = needAt(l, level, days), key = `${p.id}|${seg}`; return <div key={p.id} className="tg-person">
-        <div className="tg-top"><strong>{p.name}</strong><label className="tg-small">Target <input aria-label={`Target of ${p.name}`} inputMode="numeric" value={l.target} onChange={e => setLine(p.id, seg, { target: num(e.target.value) })} /></label></div>
-        <div className="tg-sold"><span>Sold</span><span className="tg-step"><button type="button" aria-label={`One less sold for ${p.name}`} onClick={() => setLine(p.id, seg, { achieved: Math.max(0, l.achieved - 1) })}>−</button><b>{l.achieved}</b><button type="button" aria-label={`One more sold for ${p.name}`} onClick={() => setLine(p.id, seg, { achieved: l.achieved + 1 })}>+</button></span></div>
+        <div className="tg-top"><strong>{p.name}</strong></div>
+        <div className="tg-fields">
+          <label>Target<input aria-label={`Target of ${p.name}`} inputMode="numeric" value={l.target} onChange={e => setLine(p.id, seg, { target: typed(e.target.value) })} onFocus={e => e.currentTarget.select()} /></label>
+          <label>Sold<input aria-label={`Sold of ${p.name}`} inputMode="numeric" value={l.achieved} onChange={e => setLine(p.id, seg, { achieved: typed(e.target.value) })} onFocus={e => e.currentTarget.select()} /></label>
+        </div>
         <p className="tg-need">{l.target <= 0 ? 'Set a target first.' : n.remaining <= 0 ? `${level}% reached (${n.needed} needed)` : <>For {level}%: <b>needs {n.remaining} more</b> ({n.needed} in total) · {n.perDay}/day</>}</p>
-        <button type="button" className="link-btn" onClick={() => setLevelsFor(levelsFor === key ? '' : key)}>{levelsFor === key ? 'Hide levels' : 'Edit levels'}</button>
+        <div className="tg-actions"><button type="button" className="link-btn" onClick={() => setLevelsFor(levelsFor === key ? '' : key)}>{levelsFor === key ? 'Hide levels' : 'Edit levels'}</button>
+          {people.length > 1 && <button type="button" className="subtle-btn" aria-label={`Copy the target of ${p.name} to everyone`} disabled={l.target <= 0} onClick={() => copyTargetToEveryone(p.id, seg)}>Copy target to everyone</button>}</div>
         {levelsFor === key && <div className="tg-levels"><p className="settings-help">Pieces needed in total at each level (from the Promoter screen). Blank = target × level.</p>
-          {LEVELS.map(lv => <label key={lv}>{lv}%<input inputMode="numeric" aria-label={`${lv}% pieces for ${p.name}`} placeholder={String(Math.ceil(l.target * lv / 100))} value={l.levels?.[lv] ?? ''} onChange={e => setLevelPieces(p.id, seg, lv, e.target.value)} /></label>)}</div>}
+          {LEVELS.map(lv => <label key={lv}>{lv}%<input inputMode="numeric" aria-label={`${lv}% pieces for ${p.name}`} placeholder={String(Math.ceil(l.target * lv / 100))} value={l.levels?.[lv] ?? ''} onChange={e => setLevelPieces(p.id, seg, lv, e.target.value.replace(/[^\d]/g, ''))} onFocus={e => e.currentTarget.select()} /></label>)}</div>}
       </div>; })}
       {!chosen.length && <p className="settings-help">Add people in the People tab first.</p>}
     </section>}

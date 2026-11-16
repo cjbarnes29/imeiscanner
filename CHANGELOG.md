@@ -2,6 +2,9 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — typed targets (Android and web)
+- **Targets, one segment:** Target and Sold are typed (paste works; only the digits count) instead of − / + buttons, and each person has **Copy target to everyone**, which copies the target number only (levels and sold stay each person's own). The segment screen is covered by the layout test at 320 to 411 px and large text.
+
 ## Unreleased — report popup, scans into the report, Home for everyone (Android and web)
 - **Report line popup:** tapping a line opens a popup (not a card above the list) with Previous / Next, a short "How to fix this line" box, editable labels and colour names, + Add colour / remove, and **Match my scans**. **Save line** marks the line as *checked*: it leaves the to-check count even when it still differs from the scans (a new pasted report starts fresh). Fixed: lines with no stock were drawn 190 px tall.
 - **Scanned phones go into the report by themselves:** phones scanned before pasting are taken as already in it; phones scanned (or taken out of stock, or deleted) after that change the matching line's colour count and stock, a new colour gets its own entry, a model the report does not list gets a new line. Lines say "+N from scans since you pasted". Sold is never touched.

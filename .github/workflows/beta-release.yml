@@ -50,11 +50,10 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
-          - **Report line popup:** tap a line in Report and it opens as a popup with **Previous / Next**, a short "How to fix this line" box, editable labels and colour names, **+ Add colour**, and **Match my scans**. **Save line** marks the line as checked, so it leaves the to-check count even when it still differs from your scans.
-          - **Scanned phones go into the report by themselves:** phones scanned after you paste the report change the matching line (colour count and stock), a new colour or a new model gets its own entry, and lines say "+N from scans since you pasted". A phone taken out of stock lowers the line again. Sold is never touched.
-          - **Home looks at everyone:** an **Everyone** chip (the default) shows the overall percent, what is still needed per segment with all people added up, and who is under 70%. A person chip narrows it to one person.
-          - **+ Person:** make a person with a name on Phones and on Scan, without leaving the screen.
-          - **Fixes:** the bottom bar stays on one row with large text; Home and Targets no longer run past the edge at "Extra large" text; report lines with no stock are no longer drawn as tall empty blocks.
+          - **Targets are typed:** in a segment, **Target** and **Sold** are typed or pasted (only the digits count) instead of − / + buttons. **Copy target to everyone** copies one person's target number to all the others (levels and sold stay each person's own).
+          - **Report line popup:** tap a line in Report and it opens as a popup with Previous / Next, a "How to fix this line" box, editable labels and colour names, **Match my scans**, and Save line marks the line as checked.
+          - **Scanned phones go into the report by themselves**, with "+N from scans since you pasted" on changed lines.
+          - **Home looks at everyone** (the Everyone chip), with who needs help; **+ Person** on Phones and Scan.
           - Earlier in this beta line: colour themes (Settings > Colour), Simple mode as Scan / Phones / Send, colours of each model, the sliding bottom bar and the More sheet.
 
           ### Known limits

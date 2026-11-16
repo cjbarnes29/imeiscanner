@@ -912,3 +912,6 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
 .retail-inline{max-width:100%}.retail-inline>label,.retail-inline>input,.retail-inline>select{flex:1 1 130px;min-width:0;max-width:100%}
 .retail-card input[type=month],.retail-card input[type=date]{min-width:0;width:100%}
 .retail-card{grid-template-columns:minmax(0,1fr)}.lvl-chips{grid-template-columns:repeat(6,minmax(0,1fr))}.lvl-chips button{padding:0 2px}
+
+.tg-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tg-fields input{width:100%;text-align:center;font-size:18px}
+.tg-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}

@@ -185,9 +185,10 @@ try{
   await waitFor(`!!document.querySelector('input[aria-label="Target of Carlou Test"]')`,'segment open');
   await setVal('input[aria-label="Target of Carlou Test"]','5');
   await click('button','80');
-  await run(`document.querySelector('button[aria-label="One more sold for Carlou Test"]').click()`);
+  await setVal('input[aria-label="Sold of Carlou Test"]','1');
   await waitFor(`/For 80%:[\\s\\S]*needs 3 more[\\s\\S]*\\(4 in total\\)/.test(document.querySelector('.retail-targets').innerText)`,'80% needs 3 more');
-  assert.match(await run(`document.querySelector('.tg-person').innerText`),/Sold\s*\n?\s*−\s*1\s*\+/);
+  assert.equal(await run(`document.querySelector('input[aria-label="Sold of Carlou Test"]').value`),'1','Sold is typed');
+  assert.equal(await run(`!!document.querySelector('.tg-step')`),false,'no plus and minus buttons');
   ok('tapping 80 shows 3 more pieces needed for a target of 5 with 1 sold (4 in total), and per day');
   await shot('5-targets-segment');
   await click('button','Edit levels');
@@ -197,10 +198,20 @@ try{
   await click('button','90');
   await waitFor(`/For 90%:[\\s\\S]*needs 4 more/.test(document.querySelector('.retail-targets').innerText)`,'90 uses target x level (4.5 -> 5)');
   ok('a level left blank falls back to target x level, rounded up');
+  // numbers are typed or pasted (only the digits count), and one person's target can be copied to everyone
+  await setVal('input[aria-label="Sold of Carlou Test"]','12 pcs');
+  await waitFor(`document.querySelector('input[aria-label="Sold of Carlou Test"]').value==='12'`,'pasted text keeps its digits');
+  await setVal('input[aria-label="Sold of Carlou Test"]','1');
+  assert.equal(await run(`document.querySelector('input[aria-label="Target of Asha Test"]').value`),'0');
+  await run(`document.querySelector('button[aria-label="Copy the target of Carlou Test to everyone"]').click()`);
+  await waitFor(`document.querySelector('input[aria-label="Target of Asha Test"]').value==='5'`,'the target was copied');
+  assert.equal(await run(`document.querySelector('input[aria-label="Sold of Asha Test"]').value`),'0','sold is not copied');
+  assert.equal(await run(`document.querySelector('input[aria-label="Sold of Carlou Test"]').value`),'1','the person copied from keeps their sold');
+  ok('Sold and target are typed (a pasted "12 pcs" keeps its digits), and "Copy target to everyone" copies the target only');
   await click('button','← All segments');
   await waitFor(`!!document.querySelector('.tg-segs')`,'back to the list');
-  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Sold 1 of 5/);
-  ok('the segment line adds everyone up: sold 1 of 5');
+  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Sold 1 of 10/);
+  ok('the segment line adds everyone up: sold 1 of 10 (two people with a target of 5 each)');
   await shot('4-targets-lines');
 
   // the Records screen shows the person's own segment name
