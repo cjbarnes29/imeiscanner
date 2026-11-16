@@ -40,11 +40,12 @@ function cleanReport(value: unknown): StockReport | undefined {
     if (e.t !== 'item' || !str(e.name)) return null;
     const parts = arr(e.parts).map(obj).map(p => ({ label: str(p.label).slice(0, 30), count: typeof p.count === 'number' && Number.isFinite(p.count) ? Math.max(0, Math.floor(p.count)) : null, raw: str(p.raw).slice(0, 12) }));
     return { t: 'item', id: str(e.id) || `r${Math.random().toString(36).slice(2, 8)}`, name: str(e.name).slice(0, 80), sold: count(e.sold), stock: count(e.stock), soldWidth: Math.min(4, Math.max(1, count(e.soldWidth) || 2)), stockWidth: Math.min(4, Math.max(1, count(e.stockWidth) || 2)),
-      kind: e.kind === 'colour' || e.kind === 'storage' ? e.kind : 'none', parts, sep: str(e.sep, ' ').slice(0, 4), line1: str(e.line1).slice(0, 160), line2: str(e.line2).slice(0, 200) };
+      kind: e.kind === 'colour' || e.kind === 'storage' ? e.kind : 'none', parts, sep: str(e.sep, ' ').slice(0, 4), line1: str(e.line1).slice(0, 160), line2: str(e.line2).slice(0, 200), ...(e.checked === true ? { checked: true } : {}), ...(e.auto === true ? { auto: true } : {}), ...(typeof e.scanAdded === 'number' && Number.isFinite(e.scanAdded) && e.scanAdded !== 0 ? { scanAdded: Math.trunc(e.scanAdded) } : {}) };
   }).filter((e): e is ReportItem | ReportText => !!e).slice(0, 1000);
   if (!entries.length) return undefined;
   const t = obj(v.totalSellout);
-  return { entries, savedAt: str(v.savedAt), dateText: str(v.dateText) || undefined, totalSellout: typeof t.typed === 'number' ? { typed: count(t.typed), acknowledged: t.acknowledged === true, extra: count(t.extra) } : undefined };
+  const scanBase = Object.fromEntries(Object.entries(obj(v.scanBase)).filter(([k, c]) => k.length <= 80 && typeof c === 'number' && c > 0 && c < 1e6).slice(0, 3000).map(([k, c]) => [k, Math.floor(c as number)]));
+  return { entries, savedAt: str(v.savedAt), dateText: str(v.dateText) || undefined, scanBase: v.scanBase ? scanBase : undefined, totalSellout: typeof t.typed === 'number' ? { typed: count(t.typed), acknowledged: t.acknowledged === true, extra: count(t.extra) } : undefined };
 }
 function cleanColours(value: unknown): RetailState['colours'] {
   const out: NonNullable<RetailState['colours']> = {};

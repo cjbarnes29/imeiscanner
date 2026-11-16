@@ -13,8 +13,8 @@ import type { CatalogItem, ReportItem, RetailState, StockReport } from './types'
 
 export type IssueKind = 'unknown-model' | 'unreadable' | 'colours-sum' | 'stock-differs' | 'colour-differs' | 'colour-unmatched' | 'scanned-colour-missing' | 'not-scanned' | 'parts-mismatch';
 export type Issue = { kind: IssueKind; text: string };
-/** 'empty' = no stock in the report and none scanned: nothing to compare, so it is not counted as agreeing. */
-export type Status = 'agree' | 'differ' | 'unknown' | 'info' | 'empty';
+/** 'empty' = no stock in the report and none scanned: nothing to compare, so it is not counted as agreeing. 'checked' = it still differs, but the person looked at it and saved it. */
+export type Status = 'agree' | 'differ' | 'unknown' | 'info' | 'empty' | 'checked';
 export type ScannedColour = { name: string; count: number };
 export type LineResult = {
   id: string; status: Status; code?: string; matchedName?: string; issues: Issue[];
@@ -24,7 +24,7 @@ export type LineResult = {
 };
 export type Reconciliation = {
   lines: LineResult[];
-  summary: { agree: number; differ: number; unknown: number; empty: number; notScanned: number; scannedPhones: number; reportStock: number; listedSold: number; totalTyped?: number; totalDiff?: number };
+  summary: { agree: number; differ: number; unknown: number; empty: number; checked: number; notScanned: number; scannedPhones: number; reportStock: number; listedSold: number; totalTyped?: number; totalDiff?: number };
 };
 
 const plus = (s: string) => s.replace(/\+/g, 'plus');
@@ -46,7 +46,7 @@ export function splitName(name: string): { key: string; ram: string; storage: st
 }
 
 /** Index of catalog names by key, built once per check. */
-function catalogIndex(state: RetailState): Map<string, CatalogItem> {
+export function catalogIndex(state: RetailState): Map<string, CatalogItem> {
   const index = new Map<string, CatalogItem>();
   for (const item of fullCatalog(state)) for (const text of [item.abbreviation, item.name]) { const key = nameKey(text); if (key && !index.has(key)) index.set(key, item); }
   return index;
@@ -117,7 +117,7 @@ export function reconcile(state: RetailState, report: StockReport, records: Stoc
   return {
     lines,
     summary: {
-      agree: lines.filter(l => l.status === 'agree').length, differ: lines.filter(l => l.status === 'differ').length, unknown: lines.filter(l => l.status === 'unknown').length, empty: lines.filter(l => l.status === 'empty').length,
+      agree: lines.filter(l => l.status === 'agree').length, differ: lines.filter(l => l.status === 'differ').length, unknown: lines.filter(l => l.status === 'unknown').length, empty: lines.filter(l => l.status === 'empty').length, checked: lines.filter(l => l.status === 'checked').length,
       notScanned, scannedPhones, reportStock, listedSold: listed, totalTyped: typed, totalDiff: typed === undefined ? undefined : typed - listed
     }
   };
@@ -174,7 +174,8 @@ function checkLine(state: RetailState, index: Map<string, CatalogItem>, byCode: 
 
   const real = issues.filter(i => i.kind !== 'not-scanned' && i.kind !== 'scanned-colour-missing' && i.kind !== 'colour-unmatched');
   const nothing = item.stock === 0 && item.sold === 0 && scans.length === 0 && all.length === 0 && !item.parts.some(p => (p.count ?? 0) > 0);
-  const status: Status = real.length ? 'differ' : issues.length ? 'info' : nothing ? 'empty' : 'agree';
+  let status: Status = real.length ? 'differ' : issues.length ? 'info' : nothing ? 'empty' : 'agree';
+  if (item.checked && (status === 'differ' || status === 'info')) status = 'checked';
   return { id: item.id, status, code: model.code, matchedName: model.name, issues, scanned, partMatch };
 }
 

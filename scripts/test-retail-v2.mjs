@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/dashboard'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -265,5 +265,69 @@ const savedC = D.cleanState(JSON.parse(JSON.stringify(ct)));
 assert.deepEqual(savedC.colours.F776.names, ['Cream', 'Pink', 'Graphite', 'Gray']); assert.equal(savedC.colours.F776.aliases.crm, 'Cream');
 const junkC = D.cleanState({ colours: { F776: { names: ['Ok', 5, ''], aliases: { 'a-b': 'x', ok: 'Fine', bad: '' } }, bad: { names: ['x'] }, A176: 'nope' } });
 assert.deepEqual(junkC.colours, { F776: { names: ['Ok'], aliases: { ok: 'Fine' } } }); assert.equal(D.cleanState({}).colours, undefined);
+
+
+// ---- 7. a line the person checked, scanned phones going into the report, everyone together on Home ------------------------------------------------
+const R = await load('retail/reportsync'), H = await load('retail/dashboard');
+{
+  // checked: the line still differs, but the person looked at it and saved it
+  const rep7 = P.parseReport('A07 64GB : 00/15\n(02,00,13) Vlt,Grn,Blk');
+  const item7 = P.reportItems(rep7)[0];
+  const scans7 = [phone('SM-A075F', '64GB', 'Violet'), phone('SM-A075F', '64GB', 'Violet')];
+  assert.equal(X.reconcile(D.emptyState(), rep7, scans7).lines[0].status, 'differ');
+  const checked7 = P.updateItem(rep7, item7.id, { checked: true });
+  const c7 = X.reconcile(D.emptyState(), checked7, scans7);
+  assert.equal(c7.lines[0].status, 'checked'); assert.ok(c7.lines[0].issues.length > 0, 'the difference is still said'); assert.equal(c7.summary.checked, 1); assert.equal(c7.summary.differ, 0);
+  assert.equal(P.buildReport(checked7), P.buildReport(rep7), 'checking a line never changes the report text');
+  assert.equal(P.reportItems(D.cleanState(JSON.parse(JSON.stringify({ ...D.emptyState(), report: checked7 }))).report)[0].checked, true, 'checked survives saving');
+  assert.equal(X.reconcile(D.emptyState(), P.updateItem(P.parseReport('Zzz 9 : 01/01\n(01) Blk'), 'r0', { checked: true }), []).lines[0].status, 'unknown', 'an unknown model cannot be checked away');
+
+  // scanned phones go into the report by themselves
+  const st7 = D.emptyState();
+  const text7 = 'A07 64GB : 00/15\n(02,00,13) Vlt,Grn,Blk\n\nS26: 00/00\n(00,00) 256GB,512GB\n\nTotal Sellout : 0';
+  const before7 = [phone('SM-A075F', '64GB', 'Violet')];
+  const rep0 = R.withBaseline(st7, P.parseReport(text7), before7);
+  assert.equal(R.syncScans(st7, rep0, before7).report, rep0, 'right after pasting nothing changes (the phones scanned before are taken as already in the report)');
+  const more7 = [...before7, phone('SM-A075F', '64GB', 'Violet'), phone('SM-A075F', '64GB', 'Black')];
+  const r1 = R.syncScans(st7, rep0, more7);
+  assert.equal(r1.added, 2);
+  assert.match(P.buildReport(r1.report), /^A07 64GB : 00\/17\n\(03,00,14\) Vlt,Grn,Blk$/m, 'the colour counts and the stock follow; "Vlt" is the report\'s label for Violet');
+  assert.equal(P.reportItems(r1.report)[0].scanAdded, 2); assert.equal(P.reportItems(r1.report)[0].sold, 0, 'sold is never touched');
+  assert.equal(R.syncScans(st7, r1.report, more7).report, r1.report, 'running it again changes nothing');
+  // a colour the line does not have gets its own entry
+  const more7b = [...more7, phone('SM-A075F', '64GB', 'Mint')];
+  const r2 = R.syncScans(st7, r1.report, more7b);
+  assert.match(P.buildReport(r2.report), /^A07 64GB : 00\/18\n\(03,00,14,01\) Vlt,Grn,Blk,Mint$/m);
+  // a storage line counts storages
+  const r3 = R.syncScans(st7, r2.report, [...more7b, phone('SM-S942B', '256GB', 'Black')]);
+  assert.match(P.buildReport(r3.report), /^S26: 00\/01\n\(01,00\) 256GB,512GB$/m);
+  // a model the report does not list gets a new line, after the last one and before the totals
+  const r4 = R.syncScans(st7, r3.report, [...more7b, phone('SM-S942B', '256GB', 'Black'), phone('SM-A276B/DS', '256GB', 'Black')]);
+  assert.equal(r4.created, 1); assert.equal(P.reportItems(r4.report).at(-1).auto, true);
+  assert.match(P.buildReport(r4.report), /\(01,00\) 256GB,512GB\nA27 5G 256GB : 00\/01\n\(01\) Black\n\nTotal Sellout : 0$/);
+  assert.equal(X.reconcile(st7, r4.report, [...more7b, phone('SM-S942B', '256GB', 'Black'), phone('SM-A276B/DS', '256GB', 'Black')]).lines.at(-1).code, 'A276', 'the new line is a model the app knows');
+  // a phone taken out of stock (marked sold) lowers the line again, never below 0
+  const gone = { ...st7, recordMeta: { [more7[1].id]: { status: 'sold' } } };
+  const r5 = R.syncScans(gone, r1.report, more7);
+  assert.equal(r5.removed, 1); assert.match(P.buildReport(r5.report), /^A07 64GB : 00\/16\n\(02,00,14\) Vlt,Grn,Blk$/m);
+  // a report pasted before this existed has no baseline: the first run only records it
+  const old = R.syncScans(st7, P.parseReport(text7), more7);
+  assert.equal(old.added, 0); assert.ok(old.report.scanBase && Object.keys(old.report.scanBase).length > 0);
+  assert.deepEqual(D.cleanState(JSON.parse(JSON.stringify({ ...st7, report: r2.report }))).report.scanBase, r2.report.scanBase, 'the baseline is saved');
+
+  // everyone together on Home
+  let ov = D.emptyState();
+  const tg = (id, lines) => ({ personId: id, month: '2026-11', lines, source: 'manual', importedAt: '2026-11-01T00:00:00.000Z' });
+  ov = { ...ov, targets: { '2026-11': { p1: tg('p1', [{ segment: 'low', target: 10, achieved: 2 }]), p2: tg('p2', [{ segment: 'low', target: 10, achieved: 9 }, { segment: 'mid', target: 4, achieved: 4 }]) } } };
+  const o = H.overallDashboard(ov, ['p1', 'p2', 'p3'], '2026-11-16');
+  assert.equal(o.people, 2, 'a person with no target is left out'); assert.equal(o.totalTarget, 24); assert.equal(o.totalAchieved, 15); assert.equal(o.totalPct, 62.5);
+  assert.deepEqual(o.lines.map(l => [l.segment, l.remaining, l.perDay]), [['low', 9, 0.6]], 'all people added up: 8 + 1 still needed, 15 days left; "mid" is reached so it is not listed');
+  assert.deepEqual(o.needHelp, [{ personId: 'p1', pct: 20 }], 'only people under 70 %');
+  assert.equal(H.overallDashboard(D.emptyState(), ['p1'], '2026-11-16'), undefined, 'no targets: nothing invented');
+  // a segment of the person's own is named, not "undefined"
+  const own = { ...ov, segments: [{ id: 'low', name: 'Fold 1' }], settings: { ...ov.settings, myPersonId: 'p1' } };
+  assert.equal(H.overallDashboard(own, ['p1'], '2026-11-16').lines[0].label, 'Fold 1');
+  assert.match(H.todayDashboard(own, [], '2026-11-16').priorities[0].message, /Fold 1/);
+}
 
 console.log('retail v2: all checks passed');

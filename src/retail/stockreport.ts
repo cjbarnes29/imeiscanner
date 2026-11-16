@@ -116,12 +116,12 @@ export function acknowledgeTotal(report: StockReport): StockReport {
 }
 
 /** Changes one model line. Editing the colours (or storages) makes the stock their total, so the line always agrees with itself. */
-export function updateItem(report: StockReport, id: string, patch: { name?: string; sold?: number; stock?: number; parts?: ReportPart[] }): StockReport {
+export function updateItem(report: StockReport, id: string, patch: { name?: string; sold?: number; stock?: number; parts?: ReportPart[]; checked?: boolean }): StockReport {
   return {
     ...report,
     entries: report.entries.map(e => {
       if (e.t !== 'item' || e.id !== id) return e;
-      const next = { ...e, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.sold !== undefined ? { sold: Math.max(0, Math.floor(patch.sold)) } : {}), ...(patch.parts ? { parts: patch.parts } : {}) };
+      const next = { ...e, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.sold !== undefined ? { sold: Math.max(0, Math.floor(patch.sold)) } : {}), ...(patch.parts ? { parts: patch.parts } : {}), ...(patch.checked !== undefined ? { checked: patch.checked } : {}) };
       if (patch.parts && e.kind === 'colour') next.stock = patch.parts.reduce((sum, p) => sum + (p.count ?? 0), 0);
       else if (patch.stock !== undefined) next.stock = Math.max(0, Math.floor(patch.stock));
       return next;

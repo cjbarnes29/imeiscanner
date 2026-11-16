@@ -755,7 +755,7 @@ main.scan-first{display:flex;flex-direction:column}main.scan-first>.workspace{or
 /* RetailLens v2: Report, Targets, Segments, Gives */
 .rep-list,.tg-segs{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .rep-row{width:100%;display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:start;text-align:left;padding:11px 12px;border:1px solid #26364b;border-radius:12px;background:#111d2d;color:#e7edf5;font:inherit;cursor:pointer;min-height:48px}
-.rep-row.differ{border-color:#7a5a1d}.rep-row.unknown{border-color:#35508c}
+.rep-row.differ{border-color:#7a5a1d}.rep-row.checked .rep-mark{background:#1c2c52;color:#8ab4ff}.rep-row.st-empty{opacity:.7}.rep-main .rep-checked{color:#8ab4ff}.rep-row.unknown{border-color:#35508c}
 .rep-mark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--g62);color:var(--g24)}
 .rep-row.differ .rep-mark{background:#4a3612;color:#f0bd68}.rep-row.unknown .rep-mark{background:#1c2c52;color:#8ab4ff}.rep-row.info .rep-mark{background:#1f2c3f;color:#9eb0c4}
 .rep-main{display:grid;gap:2px;min-width:0}.rep-main small{color:#9eb0c4;font-size:12px;overflow-wrap:anywhere}.rep-main .rep-issue{color:#f0bd68}.rep-main .rep-ok,.retail-card .rep-ok{color:var(--g24)}
@@ -874,3 +874,41 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
   .more-sheet{width:100%;max-width:none;margin:0;border-radius:24px 24px 0 0;animation:sheetSpring .38s cubic-bezier(.2,.9,.3,1.15) both;padding-bottom:max(18px,env(safe-area-inset-bottom))}
   .more-sheet .sheet-grab{display:block}
 }
+
+/* The report line editor is a popup with Previous / Next (it used to open above the list, out of sight) */
+.rep-modal{width:min(520px,100%);max-height:92dvh;overflow-y:auto;overscroll-behavior:contain;align-content:start}
+.rep-nav{display:flex;align-items:center;gap:8px}.rep-nav .rep-pos{flex:1;text-align:center;color:#9eb0c4;font-size:13px}.rep-nav .iconbtn{width:44px;height:44px}
+.rep-help{background:#101c30;border:1px solid #2b4466;border-radius:12px;padding:10px 12px;display:grid;gap:6px}.rep-help strong{font-size:13px;color:#8ab4ff}.rep-help p{margin:0;font-size:13px;color:#c5d0dd;line-height:1.45}
+.rep-cols-head,.rep-colour{display:grid;grid-template-columns:84px 1fr 74px 44px;gap:8px;align-items:center;margin:0}
+.rep-cols-head{font-size:11px;color:#9eb0c4;padding:0 2px}.rep-cols-head span:nth-child(3){grid-column:3}
+.rep-colour.two{grid-template-columns:1fr 84px 44px}
+.rep-colour input{width:100%;min-width:0;text-align:left;margin:0}.rep-colour .rep-ccount{text-align:center}.rep-colour .iconbtn{width:44px;height:44px;padding:0}
+.rep-colour .rep-cscan{grid-column:1/-1;color:#9eb0c4;font-size:12px;margin:-4px 0 2px 2px}
+.rep-match{display:grid;gap:4px}.rep-match small{color:#9eb0c4;font-size:12px}
+.rep-actions{position:sticky;bottom:-1px;background:#111d2d;padding:10px 0 4px;z-index:2}
+.rep-cname{width:auto;margin-left:0}
+@media(max-width:700px){
+  .modal-backdrop:has(.rep-modal){align-items:flex-end;padding:0}
+  .rep-modal{width:100%;max-height:92dvh;margin:0;border-radius:24px 24px 0 0;animation:sheetSpring .38s cubic-bezier(.2,.9,.3,1.15) both;padding-bottom:max(14px,env(safe-area-inset-bottom))}
+  .rep-modal .sheet-grab{display:block}
+}
+.rep-modal .sheet-grab{display:none}
+
+.chip-add{min-height:44px;padding:6px 16px;border:1px dashed #35506a;border-radius:999px;background:transparent;color:#b3c4d1;font:inherit;font-size:14px;cursor:pointer;margin:6px 0}
+.quick-person{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.quick-person input{flex:1 1 150px;min-width:0;min-height:44px;padding:8px 10px;border:1px solid #30435a;border-radius:9px;background:#091422;color:#e7edf5;font:inherit;font-size:15px}
+.rep-main .rep-auto{color:#8ab4ff}
+
+/* Home: nothing may be wider than the phone, even with large system text */
+.retail-hub,.retail-hub>*,.retail-today>*{min-width:0;max-width:100%}
+.retail-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.retail-stats>div{min-width:0;overflow-wrap:anywhere}
+.retail-priority,.retail-card p,.retail-card li{overflow-wrap:anywhere}
+.retail-priority small{color:#9eb0c4}
+.who-av.c4{background:#f2b84b}
+.retail-hub .subtle-btn,.retail-hub .link-btn{min-height:44px}
+/* The bottom bar is always one row: equal columns, labels shorten before buttons wrap */
+.bottom-nav{grid-template-columns:repeat(var(--n,6),minmax(0,1fr))}
+.bottom-nav button{min-width:0}.bottom-nav button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.retail-inline{max-width:100%}.retail-inline>label,.retail-inline>input,.retail-inline>select{flex:1 1 130px;min-width:0;max-width:100%}
+.retail-card input[type=month],.retail-card input[type=date]{min-width:0;width:100%}
+.retail-card{grid-template-columns:minmax(0,1fr)}.lvl-chips{grid-template-columns:repeat(6,minmax(0,1fr))}.lvl-chips button{padding:0 2px}

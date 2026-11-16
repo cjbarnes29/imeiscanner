@@ -2,6 +2,13 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — report popup, scans into the report, Home for everyone (Android and web)
+- **Report line popup:** tapping a line opens a popup (not a card above the list) with Previous / Next, a short "How to fix this line" box, editable labels and colour names, + Add colour / remove, and **Match my scans**. **Save line** marks the line as *checked*: it leaves the to-check count even when it still differs from the scans (a new pasted report starts fresh). Fixed: lines with no stock were drawn 190 px tall.
+- **Scanned phones go into the report by themselves:** phones scanned before pasting are taken as already in it; phones scanned (or taken out of stock, or deleted) after that change the matching line's colour count and stock, a new colour gets its own entry, a model the report does not list gets a new line. Lines say "+N from scans since you pasted". Sold is never touched.
+- **+ Person:** make a person with a name on Phones (under the person chips) and on Scan, without leaving the screen.
+- **Home looks at everyone:** an Everyone chip (the default) shows the overall percent, what is still needed per segment with all people added up, and who is under 70 %. A person chip narrows it to one person. Segment names of your own are used in these lines.
+- Layout: the bottom bar stays on one row with large text; Home and Targets no longer run past the edge at "Extra large" text. The layout test checks text zoom 1.3 and has data on Home.
+
 ## Unreleased — colour themes and more motion (Android and web)
 - **Colour themes:** Settings > Colour: Mint (as before), Ocean, Violet, Rose. Every green of the stylesheet is now a variable, so one choice recolours buttons, badges, bars and highlights everywhere. Remembered on the phone. The dark look stays.
 - **Motion:** the bottom bar's highlight slides to the new button; list rows (phones, report, targets, More) arrive one after another; the ⋯ More menu is a bottom sheet on phones that springs up and can be dragged down to close.

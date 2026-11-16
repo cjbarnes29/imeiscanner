@@ -84,12 +84,15 @@ try{
   await run(`document.querySelector('.more-sheet [aria-label="Close"]').click()`);
 
   // Home says whose month it is, with a person switcher
-  assert.deepEqual(await run(`[...document.querySelectorAll('.who-chips button')].map(b=>b.textContent.trim())`),['CCarlou Test','AAsha Test']);
-  assert.match(await body(),/Sell first for Carlou Test/);
+  assert.deepEqual(await run(`[...document.querySelectorAll('.who-chips button')].map(b=>b.textContent.trim())`),['★Everyone','CCarlou Test','AAsha Test']);
+  assert.match(await body(),/Sell first: everyone/,'Home looks at everyone first');
+  await click('.who-chips button','CCarlou');
+  await waitFor(`/Sell first for Carlou Test/.test(document.body.innerText)`,'one person');
   await click('.who-chips button','AAsha');
   await waitFor(`/Sell first for Asha Test/.test(document.body.innerText)`,'switch person');
   await shot('7-home');
-  ok('Home has a person switcher and says whose targets "Sell first" is about');
+  await click('.who-chips button','★Everyone');
+  ok('Home looks at everyone together, with a person switcher that narrows it to one person');
   ok('the bottom bar is Home, Scan, Phones, Report, Targets, Export; Gives, Segments, Catalog, People and Backup are under ⋯ More; each screen has its own title');
   await sub('Report');
   await waitFor(`!!document.querySelector('textarea[aria-label="The report"]')`,'paste box');
@@ -115,7 +118,9 @@ try{
   // tap a line: fix the colours (stock follows), save
   const openRow=text=>run(`(()=>{const r=[...document.querySelectorAll('.rep-row')].find(x=>x.innerText.includes(${JSON.stringify(text)}));if(!r)return false;r.click();return true;})()`);
   assert.equal(await openRow('S26U 256GB'),true);
-  await waitFor(`!!document.querySelector('.rep-sheet')`,'line sheet');
+  await waitFor(`!!document.querySelector('.modal-backdrop .rep-sheet')`,'the line opens as a popup');
+  assert.equal(await run(`!!document.querySelector('.rep-sheet [aria-label="Previous line"]')&&!!document.querySelector('.rep-sheet [aria-label="Next line"]')`),true,'Previous and Next are in the popup');
+  assert.match(await run(`document.querySelector('.rep-sheet .rep-help')?.innerText||''`),/How to fix this line/,'the popup says how to fix the line');
   assert.match(await run(`document.querySelector('.rep-sheet').innerText`),/Matches[\s\S]*Galaxy S26 Ultra/);
   assert.equal(await run(`document.querySelector('.rep-sheet input[aria-label="Blk is"]').value`),'Black','the report colour "Blk" is matched to the scanned colour Black, and can be changed');
   await setVal('.rep-sheet input[aria-label="Blk count"]','1');
@@ -135,6 +140,22 @@ try{
   await click('.rep-sheet button','Save line');
   await waitFor(`!document.querySelector('.rep-sheet')&&/0 unknown/.test(document.querySelector('.rep-chips').innerText)`,'alias saved');
   ok('an unknown report name is matched to a catalog model by search, and remembered');
+  // saving a line marks it as checked: it leaves "to check" even though it still differs from the scans
+  const chipsNow=await run(`document.querySelector('.rep-chips').innerText`);
+  assert.match(chipsNow,/1 checked by you/,'the saved line counts as checked: '+chipsNow); assert.match(chipsNow,/0 differ/);
+  assert.ok(await run(`[...document.querySelectorAll('.rep-row')].some(r=>/You checked this line/.test(r.innerText))`),'the line says it was checked');
+  ok('Save line marks the line as checked: it leaves the "to check" count even though it still differs from the scans');
+  // Previous / Next move along the report without going back to the list
+  assert.equal(await openRow('A17 5G 6/128GB'),true);
+  await waitFor(`!!document.querySelector('.rep-sheet')`,'popup for A17');
+  const titleBefore=await run(`document.querySelector('.rep-sheet h3').innerText`);
+  await run(`document.querySelector('.rep-sheet [aria-label="Next line"]').click()`);
+  await waitFor(`document.querySelector('.rep-sheet h3').innerText!==${JSON.stringify(titleBefore)}`,'the next line');
+  await run(`document.querySelector('.rep-sheet [aria-label="Previous line"]').click()`);
+  await waitFor(`document.querySelector('.rep-sheet h3').innerText===${JSON.stringify(titleBefore)}`,'back to the first line');
+  await run(`document.querySelector('.rep-sheet [aria-label="Close"]').click()`);
+  await waitFor(`!document.querySelector('.rep-sheet')`,'popup closed');
+  ok('the line popup has Previous and Next');
   await click('button','Copy report');
   ok('Copy report works on the edited report');
 
@@ -216,6 +237,13 @@ try{
   await setVal('select[aria-label="Colour of Galaxy A17 5G 128GB"]','Blue',0);
   await waitFor(`/Colour\\s*\\n?\\s*Blue/.test(document.querySelector('.phone-row .pr-facts').innerText)`,'colour saved');
   ok('each phone has a colour dropdown limited to the colours of its model');
+  // a person can be made right where people are chosen
+  await click('.chip-add','+ Person');
+  await waitFor(`!!document.querySelector('input[aria-label="New person name"]')`,'name box');
+  await setVal('input[aria-label="New person name"]','Zed Test');
+  await click('.quick-person button','Add');
+  await waitFor(`/Zed Test/.test(document.querySelector('.person-filters').innerText)`,'the new person is a chip');
+  ok('"+ Person" on Phones makes a person with a name, right there');
   await nav('Scan');
   await waitFor(`!!document.querySelector('select[aria-label="New scans go to"]')`,'new scans go to');
   ok('"New scans go to" is on the Scan screen');
@@ -265,6 +293,9 @@ try{
   await waitFor(`/Scanned in the app \\(in stock\\): 8/.test(document.body.innerText)`,'8 in stock');
   assert.ok(await run(`[...document.querySelectorAll('.rep-row')].some(r=>r.innerText.includes('A17 5G 6/128GB')&&/scanned 3/.test(r.innerText))`),'the A17 line now says scanned 3');
   ok('a phone marked sold leaves the stock: the report check counts 8 and the A17 line differs');
+  // a phone taken out of stock lowers the matching report line by itself ("from scans since you pasted")
+  assert.ok(await run(`[...document.querySelectorAll('.rep-row')].some(r=>r.innerText.includes('A17 5G 6/128GB')&&/-1 from scans since you pasted/.test(r.innerText))`),'the A17 line follows the scans');
+  ok('a phone taken out of stock lowers the matching report line by itself, and the line says so');
 
   // ---------- Reload: everything persists, scan records untouched ----------
   await send('Page.navigate',{url:'http://localhost:4196/'});

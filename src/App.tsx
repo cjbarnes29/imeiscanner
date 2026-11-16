@@ -1,6 +1,8 @@
 import { activeIssue, issueTextFor } from './label-issue';
 import { RetailHub, type RetailRecord, type RetailSub } from './RetailHub';
 import { SheetHandle } from './SheetHandle';
+import { QuickPerson } from './QuickPerson';
+import { syncScans } from './retail/reportsync';
 import { reconcile as reconcileReport } from './retail/reconcile';
 import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
@@ -3017,6 +3019,14 @@ export default function App() {
   const colourSeen = useMemo(() => { const out: Record<string, string[]> = {}; for (const r of retailRecords) { const code = modelCode4(r.model); const c = retailCanonColour(retailVariantOf(retail, r).color); if (code && c) (out[code] ||= []).push(c); } return out; }, [retail, retailRecords]);
   /** Report lines that need a look (shown as the badge on the Report button). */
   const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
+  // Phones scanned after the report was pasted go into the report by themselves (see retail/reportsync.ts)
+  useEffect(() => {
+    if (!retailLoaded || !inventoryLoaded || !retail.report) return;
+    const result = syncScans(retail, retail.report, retailRecords);
+    if (result.report === retail.report) return;
+    changeRetail({ ...retail, report: result.report }, '');
+    if (result.added + result.removed > 0) setToast(`${result.added ? `${result.added} scanned phone${result.added === 1 ? '' : 's'} added to the report` : ''}${result.added && result.removed ? ', ' : ''}${result.removed ? `${result.removed} taken out` : ''}${result.created ? ` (${result.created} new line${result.created === 1 ? '' : 's'})` : ''}.`);
+  }, [retail, retailRecords, retailLoaded, inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
   const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;
   function assignOwners(changes: { id: string; personId: string }[]) {
@@ -3270,6 +3280,17 @@ export default function App() {
     return count;
   }
 
+  /** A person made right where people are chosen: it has its name from the start and nothing else changes on screen. */
+  function addPersonNamed(name: string): boolean {
+    const clean = name.trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!clean) return false;
+    if (personGroups.some(item => personName(item).toLowerCase() === clean.toLowerCase())) { setToast('There is already a person with that name.'); return false; }
+    const person = { id: `person-${newId()}`, label: `Person ${nextPersonNumber(personGroups.map(item => item.label))}`, name: clean };
+    setPersonGroups(old => [...old, person]);
+    setActivePersonId(person.id);
+    setToast(`${clean} added.`);
+    return true;
+  }
   function addPersonGroup() {
     const next = nextPersonNumber(personGroups.map(item => item.label));
     const person = {
@@ -4818,6 +4839,7 @@ export default function App() {
                 {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
               </select>
             </label>}
+            <QuickPerson onAdd={addPersonNamed} label="+ New person" />
 
 {!simpleView && (<>
             {androidBridge && <div className="android-scan">
@@ -5257,6 +5279,7 @@ export default function App() {
               ))}
               {(records.some(r => r.personId === UNASSIGNED) || personFilter === UNASSIGNED_FILTER) && <button className={personFilter === UNASSIGNED_FILTER ? 'active' : ''} onClick={() => setPersonFilter(UNASSIGNED_FILTER)}>Unassigned <b>{records.filter(r => r.personId === UNASSIGNED).length}</b></button>}
             </div>
+            <QuickPerson onAdd={addPersonNamed} />
             {personFilter !== 'All' && <div className="person-actions" role="group" aria-label="This person's IMEIs">
               <strong>{personFilter === UNASSIGNED_FILTER ? 'Unassigned' : personNameOf(personFilter)}: {visible.length} IMEI{visible.length === 1 ? '' : 's'}</strong>
               <span>{isPersonView(personFilter) ? 'Delete here moves phones to Everyone as unassigned.' : 'Delete here removes phones permanently, after you confirm.'}</span>

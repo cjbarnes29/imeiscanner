@@ -16,6 +16,11 @@ const PX='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA
 const phone=(id,model,personId,raw)=>({id,number:Number(id.slice(1)),name:id+'.jpg',dataUrl:PX,originalDataUrl:PX,model,imei:imei(),status:'Valid',personId,raw,pictureId:'PIC-'+id,sourcePictureId:'PIC-'+id,duplicate:false,createdAt:new Date().toISOString()});
 const seed=[phone('r1','SM-A176B','me','6GB | 128GB\nColour: Black'),phone('r2','SM-A176B','me','6GB | 128GB\nColour: Black'),phone('r3','SM-A576B','me','8GB | 256GB\nColour: Gray'),phone('r4','SM-S948B','me','12GB | 256GB\nColour: Black'),
   phone('r5','SM-A176B','','6GB | 128GB\nColour: Blue'),phone('r6','SM-A176B','','6GB | 128GB\nColour: Black'),phone('r7','SM-A576B','','8GB | 256GB\nColour: Gray'),phone('r8','SM-S942B','','12GB | 256GB\nColour: Black'),phone('r9','SM-A576B','asha','8GB | 256GB\nColour: Navy')];
+const monthKey=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+const retailSeed={version:1,settings:{myPersonId:'me',myThreshold:100,lowStock:2,reportAuthor:''},
+  targets:{[monthKey]:{me:{personId:'me',month:monthKey,source:'manual',importedAt:'2026-01-01T00:00:00.000Z',lines:[{segment:'low',target:108,achieved:2},{segment:'mid',target:41,achieved:0},{segment:'flagship2',target:19,achieved:0},{segment:'flagship3',target:9,achieved:0},{segment:'flagship1',target:3,achieved:0}]},
+    asha:{personId:'asha',month:monthKey,source:'manual',importedAt:'2026-01-01T00:00:00.000Z',lines:[{segment:'low',target:60,achieved:30},{segment:'mid',target:20,achieved:10}]}}},
+  report:{savedAt:'2026-11-16T07:56:00.000Z',entries:[{t:'item',id:'r0',name:'A17 5G 6/128GB',sold:0,stock:4,soldWidth:2,stockWidth:2,kind:'colour',parts:[{label:'Gry',count:0,raw:'00'},{label:'Blu',count:1,raw:'01'},{label:'Blk',count:3,raw:'03'}],sep:' ',line1:'A17 5G 6/128GB : 00/04',line2:'(00,01,03) Gry,Blu,Blk'},{t:'item',id:'r1',name:'Z Fold8 Ultra 256GB',sold:0,stock:0,soldWidth:2,stockWidth:2,kind:'colour',parts:[{label:'GRPH',count:0,raw:'00'}],sep:' ',line1:'Z Fold8 Ultra 256GB : 00/00',line2:'(00) GRPH'}]}};
 const before=JSON.stringify(seed.map(r=>[r.id,r.imei,r.model,r.dataUrl,r.originalDataUrl,r.name,r.raw]));
 const people=[{id:'me',label:'Person 1',name:'Carlou Test'},{id:'asha',label:'Person 2',name:'Asha Test'}];
 const now=new Date();const monthName=now.toLocaleString('en-US',{month:'long'});
@@ -59,10 +64,12 @@ try{
   await send('Emulation.setDeviceMetricsOverride',{width:Number(process.env.WIDTH||411),height:900,deviceScaleFactor:2.2,mobile:true});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`if(!localStorage.getItem('e2e-seeded')){localStorage.setItem('imei-lens-simple-view','${process.env.SIMPLE?'true':'false'}');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('e2e-seeded','1');}`});
   // the Android app's scanner bridge (a stand-in that does nothing): it makes the page draw the blocks only the phone shows
+  // large system text: the app's own Text size setting zooms the whole page (ZOOM=1.3 is "Extra large")
+  if(process.env.ZOOM)await send('Page.addScriptToEvaluateOnNewDocument',{source:`document.addEventListener('DOMContentLoaded',()=>{document.documentElement.style.zoom='${process.env.ZOOM}'})`});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.AndroidScanner={status:()=>JSON.stringify({status:'idle',count:0,completed:0,failed:0,photos:[],records:[]}),choosePhotos(){},takePhoto(){},setScanOptions(){},queueStatus(){},queueStopRequested:()=>false,scanReport:()=>'',rescanNeeded:()=>0,cameraWaiting:()=>0,takeSharedText:()=>'',image:()=>'',sourceImage:()=>'',stop(){},sendCapabilities(){},resetScans(){}};`});
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'load');
-  await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');for(const r of ${JSON.stringify(seed)})tx.objectStore('inventory').put(r,'record:'+r.id);tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
+  await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');for(const r of ${JSON.stringify(seed)})tx.objectStore('inventory').put(r,'record:'+r.id);tx.objectStore('inventory').put(${JSON.stringify(retailSeed)},'retail:state');tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'reload');
   await sleep(1500);
@@ -72,7 +79,7 @@ try{
   ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
 
   const MEASURE=`(()=>{const w=document.documentElement.clientWidth;const skip='.table-wrap,.retail-tabs,.who-chips,.chips,.filter-chips,.person-filters,.bottom-nav,.top-actions';
-    const bad=[...document.querySelectorAll('body *')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.right>w+2&&getComputedStyle(e).position!=='fixed'&&!e.closest(skip)&&e.offsetParent!==null}).slice(0,6).map(e=>e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' right='+Math.round(e.getBoundingClientRect().right));
+    const bad=[...document.querySelectorAll('body *')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.right>w+2&&getComputedStyle(e).position!=='fixed'&&!e.closest(skip)&&e.offsetParent!==null}).slice(0,6).map(e=>e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' left='+Math.round(e.getBoundingClientRect().left)+' right='+Math.round(e.getBoundingClientRect().right)+' w='+Math.round(e.getBoundingClientRect().width));
     const small=[...document.querySelectorAll('button,select,input:not([type=checkbox]):not([type=file]):not([hidden]),summary')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.height<36&&e.offsetParent!==null&&!e.closest('.bottom-nav')&&!e.hidden}).slice(0,8).map(e=>(e.getAttribute('aria-label')||e.textContent||e.className).trim().slice(0,28)+' h='+Math.round(e.getBoundingClientRect().height));
     const lastNav=document.querySelector('.bottom-nav button:last-child');const navRight=lastNav?Math.round(lastNav.getBoundingClientRect().right):w;
     return {w,sw:document.documentElement.scrollWidth,bad,small,navRight};})()`;

@@ -6,7 +6,8 @@ import { inStock, stockAlerts, stockRows, type StockAlert, type StockSource } fr
 import { liveSales, pendingSubmissions } from './sales';
 import { segmentOf } from './catalog';
 import { summarizeTarget, type TargetSummary } from './targets';
-import { SEGMENT_LABEL, monthOf, type DateKey, type RetailState, type Sale, type Segment } from './types';
+import { segLabel } from './segments';
+import { daysLeft, monthOf, type DateKey, type RetailState, type Sale, type Segment } from './types';
 
 export type Priority = { segment: Segment; label: string; remaining: number; perDay: number; holding: number; shortBy: number; message: string };
 export type ChecklistItem = { id: string; text: string; done: boolean; auto: boolean };
@@ -41,9 +42,9 @@ export function todayDashboard(state: RetailState, records: StockSource[], date:
     const at = line.at[state.settings.myThreshold];
     const holding = mine.filter(r => segmentOf(state, r.model, month, state.recordMeta[r.id]) === line.segment).length;
     const shortBy = Math.max(0, at.remaining - holding);
-    const message = at.remaining <= 0 ? `${SEGMENT_LABEL[line.segment]}: ${state.settings.myThreshold}% reached` :
-      `Sell ${at.perDay}/day of ${SEGMENT_LABEL[line.segment]}: ${at.remaining} more for ${state.settings.myThreshold}%${shortBy ? ` (you hold ${holding}, ${shortBy} short)` : ''}`;
-    return { segment: line.segment, label: SEGMENT_LABEL[line.segment], remaining: at.remaining, perDay: at.perDay, holding, shortBy, message };
+    const message = at.remaining <= 0 ? `${segLabel(state, line.segment)}: ${state.settings.myThreshold}% reached` :
+      `Sell ${at.perDay}/day of ${segLabel(state, line.segment)}: ${at.remaining} more for ${state.settings.myThreshold}%${shortBy ? ` (you hold ${holding}, ${shortBy} short)` : ''}`;
+    return { segment: line.segment, label: segLabel(state, line.segment), remaining: at.remaining, perDay: at.perDay, holding, shortBy, message };
   }).filter(p => p.remaining > 0).sort((a, b) => b.perDay - a.perDay || b.remaining - a.remaining);
   const waiting = pendingSubmissions(state, me || undefined);
   const alerts = stockAlerts(state, stockRows(state, records, date), date);
@@ -59,4 +60,32 @@ export function todayDashboard(state: RetailState, records: StockSource[], date:
     ...(day?.custom || []).map(item => ({ id: item.id, text: item.text, done: item.done, auto: false }))
   ];
   return { date, month, summary, priorities, pending: { count: waiting.length, oldestDays: waiting.length ? daysBetween(waiting[0].date, date) : 0, sales: waiting }, alerts, checklist, soldToday: state.sales.filter(s => !s.voided && s.date === date).length };
+}
+
+export type OverallLine = { segment: Segment; label: string; target: number; achieved: number; remaining: number; perDay: number };
+/** Everyone together: what is still needed per segment (all people's targets added up), the overall percent, and who is under 70 %. */
+export type Overall = { people: number; totalTarget: number; totalAchieved: number; totalPct: number; daysLeft: number; threshold: number; lines: OverallLine[]; needHelp: { personId: string; pct: number }[] };
+
+export function overallDashboard(state: RetailState, personIds: string[], date: DateKey): Overall | undefined {
+  const month = monthOf(date), threshold = state.settings.myThreshold, days = daysLeft(month, date);
+  const bySegment = new Map<Segment, { target: number; achieved: number; remaining: number }>();
+  const needHelp: Overall['needHelp'] = [];
+  let people = 0, totalTarget = 0, totalAchieved = 0;
+  for (const id of personIds) {
+    const target = state.targets[month]?.[id];
+    if (!target) continue;
+    const summary = summarizeTarget(target, pendingBySegment(state, id), date, state.rates, submittedSince(state, id, target));
+    if (!summary.lines.length) continue;
+    people++; totalTarget += summary.totalTarget; totalAchieved += summary.totalAchieved;
+    if (summary.totalPct < 70) needHelp.push({ personId: id, pct: summary.totalPct });
+    for (const line of summary.lines) {
+      const row = bySegment.get(line.segment) || { target: 0, achieved: 0, remaining: 0 };
+      row.target += line.target; row.achieved += line.achieved; row.remaining += line.at[threshold].remaining;
+      bySegment.set(line.segment, row);
+    }
+  }
+  if (!people) return undefined;
+  const lines = [...bySegment.entries()].map(([segment, r]) => ({ segment, label: segLabel(state, segment), ...r, perDay: r.remaining <= 0 ? 0 : days <= 0 ? r.remaining : Math.ceil(r.remaining / days * 10) / 10 }))
+    .filter(l => l.remaining > 0).sort((a, b) => b.perDay - a.perDay || b.remaining - a.remaining);
+  return { people, totalTarget, totalAchieved, totalPct: totalTarget > 0 ? Math.round(totalAchieved / totalTarget * 1000) / 10 : 0, daysLeft: days, threshold, lines, needHelp: needHelp.sort((a, b) => a.pct - b.pct) };
 }

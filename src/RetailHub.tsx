@@ -8,7 +8,7 @@ import { reconcile } from './retail/reconcile';
 import { canonColour, coloursText as colourBox, parseColoursText, setModelColours } from './retail/colours';
 import { segLabel, segmentIds } from './retail/segments';
 import { reportItems } from './retail/stockreport';
-import { todayDashboard } from './retail/dashboard';
+import { overallDashboard, todayDashboard } from './retail/dashboard';
 import { daysInMonth, localDay, monthOf, type CatalogItem, type Segment } from './retail/types';
 import { GivesTab, DataTab } from './RetailHub2';
 import { ReportTab } from './RetailReport';
@@ -38,11 +38,13 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
   const { state, records, today } = ctx;
   const [custom, setCustom] = useState('');
   const people = ctx.people;
-  const [pick, setPick] = useState('');
-  // whose month this is: the person chosen here, else me, else the first person
+  const [pick, setPick] = useState('all');
+  // Home looks at everyone together by default; a person chip narrows it to that person
   const me = state.settings.myPersonId;
   const who = people.some(p => p.id === pick) ? pick : people.some(p => p.id === me) ? me : people[0]?.id || '';
+  const everyone = pick === 'all' || !who;
   const whoName = people.find(p => p.id === who)?.name || '';
+  const overall = useMemo(() => overallDashboard(state, people.map(p => p.id), today), [state, people, today]);
   const forWho = useMemo(() => ({ ...state, settings: { ...state.settings, myPersonId: who } }), [state, who]);
   const dash = useMemo(() => todayDashboard(forWho, records, today, ctx.counts), [forWho, records, today, ctx.counts]);
   const check = useMemo(() => (state.report ? reconcile(state, state.report, records).summary : null), [state, records]);
@@ -55,19 +57,29 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
   }, [records]);
   const unassigned = records.filter(r => !r.personId).length;
   return <div className="retail-today">
-    {people.length > 0 && <div className="who-chips" role="group" aria-label="Whose month">{people.map((p, k) => <button key={p.id} type="button" aria-pressed={who === p.id} className={who === p.id ? 'on' : ''} onClick={() => setPick(p.id)}><i className={`who-av c${k % 4}`}>{p.name.slice(0, 1).toUpperCase()}</i>{p.name}</button>)}</div>}
+    {people.length > 0 && <div className="who-chips" role="group" aria-label="Whose month"><button type="button" aria-pressed={everyone} className={everyone ? 'on' : ''} onClick={() => setPick('all')}><i className="who-av c4">★</i>Everyone</button>{people.map((p, k) => <button key={p.id} type="button" aria-pressed={!everyone && who === p.id} className={!everyone && who === p.id ? 'on' : ''} onClick={() => setPick(p.id)}><i className={`who-av c${k % 4}`}>{p.name.slice(0, 1).toUpperCase()}</i>{p.name}</button>)}</div>}
     <div className="retail-stats">
       <div><span>Report lines to check</span><strong className={check && check.differ + check.unknown ? 'amber' : ''}>{check ? check.differ + check.unknown : '—'}</strong></div>
       <div><span>Phones scanned</span><strong>{check ? check.scannedPhones : records.length}</strong></div>
-      <div><span>{whoName ? `${whoName}’s target` : 'Target'}</span><strong>{dash.summary ? `${dash.summary.totalPct}%` : '—'}</strong></div>
-      <div><span>Days left</span><strong>{dash.summary ? dash.summary.daysLeft : daysInMonth(monthOf(today)) - Number(today.slice(8)) + 1}</strong></div>
+      <div><span>{everyone ? 'Everyone’s target' : `${whoName}’s target`}</span><strong>{everyone ? (overall ? `${overall.totalPct}%` : '—') : dash.summary ? `${dash.summary.totalPct}%` : '—'}</strong></div>
+      <div><span>Days left</span><strong>{(everyone ? overall?.daysLeft : dash.summary?.daysLeft) ?? daysInMonth(monthOf(today)) - Number(today.slice(8)) + 1}</strong></div>
     </div>
-    <section className="retail-card"><h3>Sell first{whoName ? ` for ${whoName}` : ''}</h3>
+    {everyone ? <>
+      <section className="retail-card"><h3>Sell first: everyone</h3>
+        {!people.length && <p className="settings-help">Add people in More, then People, to see what everyone has to sell.</p>}
+        {people.length > 0 && !overall && <p className="settings-help">No targets for this month yet. Set them in Targets.</p>}
+        {overall && overall.lines.map(l => <p key={l.segment} className="retail-priority">Sell {l.perDay}/day of {l.label}: {l.remaining} more for {overall.threshold}% <small>(sold {l.achieved} of {l.target})</small></p>)}
+        {overall && !overall.lines.length && <p className="settings-help">Everyone’s {overall.threshold}% target is reached in every segment.</p>}
+      </section>
+      {overall && overall.needHelp.length > 0 && <section className="retail-card"><h3>Who needs help</h3>
+        <ul className="retail-list">{overall.needHelp.map(h => <li key={h.personId}><button type="button" className="link-btn" onClick={() => setPick(h.personId)}>{people.find(p => p.id === h.personId)?.name || 'Someone'}</button><span className="amber">{h.pct}% of target</span></li>)}</ul>
+      </section>}
+    </> : <section className="retail-card"><h3>Sell first for {whoName}</h3>
       {!who && <p className="settings-help">Add people in More, then People, to see their selling priorities.</p>}
       {who && !dash.summary && <p className="settings-help">No target for {whoName} this month yet. Set it in Targets.</p>}
       {dash.priorities.map(p => <p key={p.segment} className="retail-priority">{p.message}</p>)}
       {dash.summary && !dash.priorities.length && <p className="settings-help">{whoName}’s {state.settings.myThreshold}% target is reached in every segment.</p>}
-    </section>
+    </section>}
     <section className="retail-card"><h3>Report</h3>
       {!state.report && <p className="settings-help">No report yet. Paste your WhatsApp report in Report: it is checked against the phones you scanned.</p>}
       {state.report && check && <p className="settings-help">Last saved {state.report.savedAt.slice(0, 16).replace('T', ' ')} · {check.agree} agree · {check.differ} differ · {check.unknown} unknown.</p>}

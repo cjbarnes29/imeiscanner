@@ -98,6 +98,10 @@ export type ReportPart = { label: string; count: number | null; raw: string };
 export type ReportItem = {
   t: 'item'; id: string; name: string; sold: number; stock: number; soldWidth: number; stockWidth: number;
   kind: 'colour' | 'storage' | 'none'; parts: ReportPart[]; sep: string; line1: string; line2: string;
+  /** The person looked at this line and says it is settled, even if it still differs from the scanned phones. A new pasted report starts without it. */
+  checked?: boolean;
+  /** Made by the app from scanned phones (the model was not in the report), and how many scanned phones were added to this line since the report was pasted (negative = taken out). */
+  auto?: boolean; scanAdded?: number;
 };
 /** Anything else in the report (header, ---- lines, totals, other brands, shifts) is kept as typed. */
 export type ReportText = { t: 'text'; text: string };
@@ -107,6 +111,8 @@ export type StockReport = {
   totalSellout?: { typed: number; acknowledged: boolean; extra: number };
   savedAt: string;
   dateText?: string;
+  /** The scanned phones in stock when the report was pasted (model | storage | colour -> count): phones scanned after that are added to the report. */
+  scanBase?: Record<string, number>;
 };
 
 /** What the person typed or taught for one model: its colour names, and what a report abbreviation means (key = letters of the abbreviation, lower case). */
