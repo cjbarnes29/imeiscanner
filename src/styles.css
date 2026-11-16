@@ -751,3 +751,30 @@ main.scan-first{display:flex;flex-direction:column}main.scan-first>.workspace{or
 .badge-seg{display:inline-block;margin-top:3px;padding:1px 6px;border-radius:6px;background:#17323a;border:1px solid #2f6b66;color:#8ff0cd;font-size:10px;font-weight:700}
 .seg-filter{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9eb0c4}.seg-filter select{min-height:40px;padding:4px 8px;border:1px solid #30435a;border-radius:8px;background:#091422;color:#e7edf5;font:inherit}
 @media(max-width:600px){.retail-stats{grid-template-columns:repeat(2,1fr)}.retail-card{padding:12px}.retail-table{font-size:11px}.retail-table input{width:54px}.retail-table th:nth-child(n+6),.retail-table td:nth-child(n+6){white-space:nowrap}.retail-card:has(.retail-table){overflow-x:auto}}
+
+/* RetailLens v2: Report, Targets, Segments, Gives */
+.rep-list,.tg-segs{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.rep-row{width:100%;display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:start;text-align:left;padding:11px 12px;border:1px solid #26364b;border-radius:12px;background:#111d2d;color:#e7edf5;font:inherit;cursor:pointer;min-height:48px}
+.rep-row.differ{border-color:#7a5a1d}.rep-row.unknown{border-color:#35508c}
+.rep-mark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:#17382c;color:#5bd9ad}
+.rep-row.differ .rep-mark{background:#4a3612;color:#f0bd68}.rep-row.unknown .rep-mark{background:#1c2c52;color:#8ab4ff}.rep-row.info .rep-mark{background:#1f2c3f;color:#9eb0c4}
+.rep-main{display:grid;gap:2px;min-width:0}.rep-main small{color:#9eb0c4;font-size:12px;overflow-wrap:anywhere}.rep-main .rep-issue{color:#f0bd68}.rep-main .rep-ok,.retail-card .rep-ok{color:#5bd9ad}
+.rep-nums{font-size:12px;color:#c5d0dd;text-align:right;white-space:nowrap}
+.rep-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0}
+.rep-chip{display:inline-block;border:1px solid #30435a;border-radius:999px;padding:3px 10px;font-size:12px;color:#b3c4d1}.rep-chip.ok{color:#5bd9ad;border-color:#2c6b53}.rep-chip.w{color:#f0bd68;border-color:#7a5a1d}.rep-chip.q{color:#8ab4ff;border-color:#35508c}
+.rep-sheet{border-color:#58d7b0}.rep-colour{display:flex;justify-content:space-between;align-items:center;gap:8px}.rep-colour input{width:84px;text-align:center}
+.rep-rest{white-space:pre-wrap;font:12px 'DM Mono',monospace;color:#9eb0c4;margin:8px 0 0}
+.retail-card .check-row{display:flex;flex-direction:row;align-items:center;gap:8px}
+.lvl-chips{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}.lvl-chips button{min-height:44px;border:1px solid #30435a;border-radius:10px;background:#121f31;color:#b3c4d1;font:inherit;font-weight:700;font-size:15px;cursor:pointer}.lvl-chips button.on{background:#50d2a8;border-color:#50d2a8;color:#08231f}
+.tg-seg{width:100%;display:grid;gap:6px;text-align:left;padding:13px 14px;border:1px solid #26364b;border-radius:14px;background:#111d2d;color:#e7edf5;font:inherit;cursor:pointer;min-height:44px}
+.tg-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.tg-top small{color:#9eb0c4}
+.tg-bar{height:7px;background:#1a2640;border-radius:5px;overflow:hidden}.tg-bar i{display:block;height:100%;background:#58d7b0}
+.tg-need{font-size:13px;color:#b3c4d1;margin:0}.tg-need b{color:#6ae5bc}
+.tg-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tg-person{border-top:1px solid #1f2f44;padding-top:10px;display:grid;gap:8px}
+.retail-card .tg-small{display:flex;flex-direction:row;align-items:center;gap:6px}.tg-small input{width:68px;text-align:center}
+.tg-sold{display:flex;justify-content:space-between;align-items:center}.tg-step{display:inline-flex;align-items:center;gap:10px}.tg-step button{width:44px;height:44px;border-radius:10px;border:1px solid #30435a;background:#121f31;color:#e7edf5;font-size:20px;cursor:pointer}.tg-step b{min-width:28px;text-align:center;font-size:18px}
+.tg-levels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tg-levels .settings-help{grid-column:1/-1}.tg-levels input{width:100%;text-align:center}
+.tg-draft{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #1f2f44;padding-top:8px}.tg-draft strong,.tg-draft select{grid-column:1/-1}
+.tg-edit{border-color:#58d7b0}.tg-models{max-height:260px;overflow:auto}
+.gv-item{align-items:flex-start!important}.gv-main{display:grid;gap:2px;flex:1 1 200px}.gv-act{display:flex;gap:8px}

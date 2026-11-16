@@ -14,8 +14,8 @@ export type StockRow = { key: string; code: string; name: string; abbreviation: 
 
 export const validImei = (value: string) => /^\d{15}$/.test(value);
 
-/** Records that count as stock: scanned, valid, not duplicate, not sold. */
-export const inStock = (state: RetailState, records: StockSource[]) => records.filter(r => validImei(r.imei) && !r.duplicate && !isSold(state, r.id, r.imei));
+/** Records that count as stock: scanned, valid, not duplicate, not sold, and not marked sold / given by the person. */
+export const inStock = (state: RetailState, records: StockSource[]) => records.filter(r => validImei(r.imei) && !r.duplicate && !state.recordMeta[r.id]?.status && !isSold(state, r.id, r.imei));
 
 export function variantOf(state: Pick<RetailState, 'recordMeta'>, record: Pick<StockSource, 'id' | 'raw'>): { storage: string; color: string; ram: string } {
   const meta = state.recordMeta[record.id] || {};

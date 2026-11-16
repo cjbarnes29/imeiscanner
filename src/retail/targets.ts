@@ -3,7 +3,7 @@
  * deliberately tolerant (OCR slips, different wording) and says what it could not read instead of guessing. Part 2 does the arithmetic: achieved,
  * remaining units, units needed per day and estimated incentives at 70 %, 100 % and 120 %.
  */
-import { daysLeft, isMonth, type DateKey, type IncentiveRates, type Month, type PersonTarget, type Segment, type TargetLine, SEGMENTS } from './types';
+import { daysLeft, isMonth, LEVELS, type DateKey, type IncentiveRates, type Level, type Month, type PersonTarget, type Segment, type TargetLine, SEGMENTS } from './types';
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -93,7 +93,7 @@ export const THRESHOLDS: Threshold[] = [70, 100, 120];
 export type LineSummary = {
   /** achieved = the screenshot's figure plus sales submitted since it was imported (fromApp). */
   segment: Segment; target: number; achieved: number; fromApp: number; pending: number; projected: number; pct: number;
-  at: Record<Threshold, { needed: number; remaining: number; perDay: number }>;
+  at: Record<Level, { needed: number; remaining: number; perDay: number }>;
 };
 export type TargetSummary = {
   lines: LineSummary[]; daysLeft: number; totalTarget: number; totalAchieved: number; totalPct: number;
@@ -116,8 +116,10 @@ export function summarizeTarget(target: PersonTarget, pending: Partial<Record<Se
   const lines: LineSummary[] = target.lines.filter(l => l.target > 0 || l.achieved > 0).map(l => {
     const extra = pending[l.segment] || 0, fromApp = since[l.segment] || 0, achieved = l.achieved + fromApp;
     const at = {} as LineSummary['at'];
-    for (const t of THRESHOLDS) {
-      const needed = Math.ceil(l.target * t / 100);
+    for (const t of LEVELS) {
+      // the pieces typed from the Promoter screen win; blank = target x level, rounded up
+      const typed = l.levels?.[t];
+      const needed = typeof typed === 'number' && typed >= 0 ? typed : Math.ceil(l.target * t / 100);
       const remaining = Math.max(0, needed - achieved - extra);
       at[t] = { needed, remaining, perDay: perDay(remaining, days) };
     }
@@ -138,8 +140,16 @@ export const overallPct = (target?: PersonTarget) => {
   return t > 0 ? (target!.lines.reduce((s, l) => s + l.achieved, 0) / t) * 100 : 100;
 };
 
-export const emptyTarget = (personId: string, month: Month, source: PersonTarget['source'] = 'manual', at = new Date().toISOString()): PersonTarget =>
-  ({ personId, month, lines: SEGMENTS.map(segment => ({ segment, target: 0, achieved: 0 })), source, importedAt: at });
+export const emptyTarget = (personId: string, month: Month, source: PersonTarget['source'] = 'manual', at = new Date().toISOString(), segments: Segment[] = SEGMENTS): PersonTarget =>
+  ({ personId, month, lines: segments.map(segment => ({ segment, target: 0, achieved: 0 })), source, importedAt: at });
+
+/** Pieces still needed at a level for one line of a target (sold counted), and per day for the days left. */
+export function needAt(line: TargetLine, level: Level, days: number): { needed: number; remaining: number; perDay: number } {
+  const typed = line.levels?.[level];
+  const needed = typeof typed === 'number' && typed >= 0 ? typed : Math.ceil(line.target * level / 100);
+  const remaining = Math.max(0, needed - line.achieved);
+  return { needed, remaining, perDay: perDay(remaining, days) };
+}
 
 /** Saves a target for a person and month; refuses a bad month. Replacing keeps nothing of the old lines (the screenshot is the truth at that time). */
 export function putTarget<S extends { targets: Record<Month, Record<string, PersonTarget>> }>(state: S, target: PersonTarget): S {

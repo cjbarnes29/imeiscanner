@@ -34,6 +34,8 @@ export function recommend(input: {
   const { state, month, people, records, pending } = input;
   const notes: string[] = [];
   const usable = records.filter(r => eligible(state, r));
+  // the person's own segments (Fold 1, Fold 2…), or the starting list
+  const segs: Segment[] = state.segments?.length ? state.segments.map(x => x.id) : SEGMENTS;
   const pool: Record<string, string[]> = {};
   for (const r of usable) if (r.personId === UNASSIGNED && r.segment !== 'other') (pool[r.segment] ||= []).push(r.id);
   const unclassified = usable.filter(r => r.personId === UNASSIGNED && r.segment === 'other').length;
@@ -51,17 +53,17 @@ export function recommend(input: {
   const me = state.settings.myPersonId;
   const myThreshold: Threshold = state.settings.myThreshold;
   if (me && targetOf(me)) {
-    for (const segment of SEGMENTS) give(me, segment, gap(targetOf(me), segment, myThreshold, holdings(me, segment), pending[me]?.[segment] || 0), 'mine', `Protects your ${myThreshold}% target`);
+    for (const segment of segs) give(me, segment, gap(targetOf(me), segment, myThreshold, holdings(me, segment), pending[me]?.[segment] || 0), 'mine', `Protects your ${myThreshold}% target`);
   } else if (me) notes.push('Your own target is not set for this month, so nothing could be reserved for you.');
   const others = people.filter(p => p.id !== me && targetOf(p.id));
   const ranked = [...others].sort((a, b) => overallPct(targetOf(a.id)) - overallPct(targetOf(b.id)) || a.name.localeCompare(b.name));
   for (const person of ranked.filter(p => overallPct(targetOf(p.id)) < 70)) {
     const percent = Math.round(overallPct(targetOf(person.id)));
-    for (const segment of SEGMENTS) give(person.id, segment, gap(targetOf(person.id), segment, 70, holdings(person.id, segment), pending[person.id]?.[segment] || 0), 'below70', `Below 70% (${percent}%): units to reach 70%`);
+    for (const segment of segs) give(person.id, segment, gap(targetOf(person.id), segment, 70, holdings(person.id, segment), pending[person.id]?.[segment] || 0), 'below70', `Below 70% (${percent}%): units to reach 70%`);
   }
   for (const person of ranked) {
     const percent = Math.round(overallPct(targetOf(person.id)));
-    for (const segment of SEGMENTS) {
+    for (const segment of segs) {
       const already = proposals.filter(p => p.personId === person.id && p.segment === segment).reduce((s, p) => s + p.recordIds.length, 0);
       give(person.id, segment, gap(targetOf(person.id), segment, 100, holdings(person.id, segment) + already, pending[person.id]?.[segment] || 0), 'toward100', `At ${percent}%: units toward 100%`);
     }

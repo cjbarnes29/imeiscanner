@@ -1,8 +1,7 @@
-// RetailLens end to end in headless Edge/Chrome (not part of `npm test`; run `npm run build` first):  node scripts/e2e-retail.mjs
-// SYNTHETIC data only. Seeds 9 phones and 2 people, then drives the real screens: scanned phones get segments, a Promoter screenshot (a picture made here,
-// read offline by the page's own OCR) fills the targets, a sale lowers stock and counts toward the target, submissions, a recommended allocation that
-// protects my selected target and lifts the person below 70 % (approve, history, undo), the WhatsApp report in a pasted layout, backup / restore /
-// go back, reload persistence, and that the scan records themselves were never changed.
+// RetailLens plan v2 end to end in headless Edge/Chrome (not part of `npm test`; run `npm run build` first):  node scripts/e2e-retail.mjs
+// SYNTHETIC data only. Seeds 9 coloured phones and 2 people, then drives the real screens: a pasted report is checked against the scanned phones, a line is
+// fixed and an unknown name is taught, the person's own segment is made and filled, targets show levels 70-120 (typed pieces win), Gives only suggests until
+// approved (and Undo), a phone marked sold leaves the stock, reload persistence, and the scan records themselves were never changed.
 import assert from 'node:assert/strict';
 import {readFile,mkdtemp} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -17,8 +16,8 @@ const luhn=d=>{let s=0;for(let i=0;i<d.length;i++){let n=+d[d.length-1-i];if(i%2
 let seq=700000;const imei=()=>{const b='49015420'+String(seq++).padStart(6,'0');return b+luhn(b);};
 const PX='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const phone=(id,model,personId,raw)=>({id,number:Number(id.slice(1)),name:id+'.jpg',dataUrl:PX,originalDataUrl:PX,model,imei:imei(),status:'Valid',personId,raw,pictureId:'PIC-'+id,sourcePictureId:'PIC-'+id,duplicate:false,createdAt:new Date().toISOString()});
-const seed=[phone('r1','SM-A176B','me','6GB | 128GB'),phone('r2','SM-A176B','me','6GB | 128GB'),phone('r3','SM-A576B','me','8GB | 256GB'),phone('r4','SM-S948B','me','12GB | 256GB'),
-  phone('r5','SM-A176B','','6GB | 128GB'),phone('r6','SM-A176B','','6GB | 128GB'),phone('r7','SM-A576B','','8GB | 256GB'),phone('r8','SM-S942B','','12GB | 256GB'),phone('r9','SM-A576B','asha','8GB | 256GB')];
+const seed=[phone('r1','SM-A176B','me','6GB | 128GB\nColour: Black'),phone('r2','SM-A176B','me','6GB | 128GB\nColour: Black'),phone('r3','SM-A576B','me','8GB | 256GB\nColour: Gray'),phone('r4','SM-S948B','me','12GB | 256GB\nColour: Black'),
+  phone('r5','SM-A176B','','6GB | 128GB\nColour: Blue'),phone('r6','SM-A176B','','6GB | 128GB\nColour: Black'),phone('r7','SM-A576B','','8GB | 256GB\nColour: Gray'),phone('r8','SM-S942B','','12GB | 256GB\nColour: Black'),phone('r9','SM-A576B','asha','8GB | 256GB\nColour: Navy')];
 const before=JSON.stringify(seed.map(r=>[r.id,r.imei,r.model,r.dataUrl,r.originalDataUrl,r.name,r.raw]));
 const people=[{id:'me',label:'Person 1',name:'Carlou Test'},{id:'asha',label:'Person 2',name:'Asha Test'}];
 const now=new Date();const monthName=now.toLocaleString('en-US',{month:'long'});
@@ -52,6 +51,7 @@ const readDb=key=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1
 const owners=async()=>Object.fromEntries((await readDb('record:')).map(r=>[r.id,r.personId]));
 const nav=label=>click('.bottom-nav button',label);
 const sub=label=>click('.retail-tabs button',label);
+const shot=async name=>{if(!process.env.SHOTS)return;await sleep(400);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});(await import('node:fs')).writeFileSync(join(process.env.SHOTS,name+'.png'),Buffer.from(r.result.data,'base64'));};
 const results=[];const ok=n=>{results.push(n);console.log('PASS:',n);};
 try{
   await send('Page.enable');
@@ -68,224 +68,149 @@ try{
   assert.match(await run(`document.querySelector('.brand')?.innerText||''`),/RETAILLENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./);
   assert.match(await run(`document.title`),/RetailLens/);
   ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`),['Scan','Retail','Records','Give','People','Share','Export']);
-  ok('the bottom bar has the Retail tab next to Scan');
 
-  // ---------- Records: automatic segments, filter, badge ----------
-  await nav('Records');
-  await waitFor(`!!document.querySelector('.filter-chips')`,'records filters');
-  assert.ok(await run(`!!document.querySelector('[aria-label="Segment filter"]')`));
-  await setVal('[aria-label="Segment filter"]','seg:flagship2');
-  await waitFor(`document.querySelectorAll('.results tbody tr').length===1`,'one Flagship 2 phone');
-  assert.match(await run(`document.querySelector('.results tbody tr').innerText`),/Flagship 2/);
-  ok('Records classify phones by segment on their own: the S26 is Flagship 2 (filter and badge)');
-  await setVal('[aria-label="Segment filter"]','seg:flagship1');await waitFor(`document.querySelectorAll('.results tbody tr').length===1`,'one Flagship 1');
-  await setVal('[aria-label="Segment filter"]','seg:low');await waitFor(`document.querySelectorAll('.results tbody tr').length===4`,'four Low phones');
-  await setVal('[aria-label="Segment filter"]','');
-
-  // ---------- Gives: who I am ----------
+  // ---------- Report: paste a synthetic report, see it checked against the scanned phones ----------
   await nav('Retail');
   await waitFor(`!!document.querySelector('.retail-tabs')`,'retail tabs');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.retail-tabs button')].map(b=>b.childNodes[0].textContent.trim())`),['Today','Catalog','Targets','Gives','Stock','Reports','Data']);
-  ok('Retail has Today, Catalog, Targets, Gives, Stock, Reports and Data');
-  await sub('Gives');
-  await setLabelVal('I am','me');await setLabelVal('Protect my','70');
-  await waitFor(`document.querySelector('.retail-card select')?.value==='me'`,'my person set');
-  ok('I choose who I am and which target to protect (70%)');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.retail-tabs button')].map(b=>b.textContent.replace(/\\d+$/,'').trim())`),['Today','Report','Targets','Gives','Segments','Catalog','Data'],'the retail tabs');
+  ok('Retail has Today, Report, Targets, Gives, Segments, Catalog and Data (no Stock tab)');
+  await sub('Report');
+  await waitFor(`!!document.querySelector('textarea[aria-label="The report"]')`,'paste box');
+  const REPORT=['Location: DEMO','Date: Nov 11, 2026','','A17 5G 6/128GB : 00/04','(00,01,03) Gry,Blu,Blk','','A57 5G 8/256GB : 01/03','(02,01,00) GRY,NVY,LiLc','',
+    'S26U 256GB : 00/02','(02) Blk','','Note 17 : 01/01','(01) Blk','','Total Sellout : 3','Apple : 2'].join(String.fromCharCode(10));
+  await setVal('textarea[aria-label="The report"]',REPORT);
+  await click('button','Read the report');
+  await waitFor(`!!document.querySelector('.rep-chips')`,'summary chips');
+  const chips=await run(`document.querySelector('.rep-chips').innerText`);
+  assert.match(chips,/2 agree/); assert.match(chips,/1 differ/); assert.match(chips,/1 unknown/);
+  assert.match(await body(),/Scanned in the app \(in stock\): 9/);
+  ok('the pasted report is checked against the 9 scanned phones: 2 lines agree, 1 differs, 1 is unknown');
+  const rows=await run(`[...document.querySelectorAll('.rep-row')].map(r=>r.innerText.replace(/\\s+/g,' '))`);
+  assert.match(rows[0],/Note 17/, 'problems come first (the unknown one on top)');
+  assert.ok(rows.some(r=>/S26U 256GB/.test(r)&&/report 2, scanned 1|Report stock 2, scanned 1/i.test(r)),'the difference is said in words: '+JSON.stringify(rows));
+  ok('every problem is described in words, worst first');
+  await shot('1-report');
+  assert.match(await body(),/Sellout in the list: 2 · the report says 3/);
+  await click('button','Includes phones not listed');
+  await waitFor(`/includes 1 phone not in the list/.test(document.body.innerText)`,'total acknowledged');
+  ok('a total that is higher than the list can be marked as including phones that are not listed');
 
-  // ---------- Targets: the Promoter screenshot ----------
+  // tap a line: fix the colours (stock follows), save
+  const openRow=text=>run(`(()=>{const r=[...document.querySelectorAll('.rep-row')].find(x=>x.innerText.includes(${JSON.stringify(text)}));if(!r)return false;r.click();return true;})()`);
+  assert.equal(await openRow('S26U 256GB'),true);
+  await waitFor(`!!document.querySelector('.rep-sheet')`,'line sheet');
+  assert.match(await run(`document.querySelector('.rep-sheet').innerText`),/Matches[\s\S]*Galaxy S26 Ultra/);
+  await setVal('.rep-sheet input[aria-label="Blk count"]','1');
+  assert.equal(await run(`document.querySelector('.rep-sheet input[disabled]')?.value`),'1','the stock follows the colours');
+  await shot('2-line-sheet');
+  await click('.rep-sheet button','Save line');
+  await waitFor(`!document.querySelector('.rep-sheet')&&/3 agree/.test(document.querySelector('.rep-chips').innerText)`,'line saved');
+  ok('fixing the colour count of a line makes it agree (stock follows the colours) and saves it');
+
+  // an unknown name: say what it means once, it is remembered
+  assert.equal(await openRow('Note 17'),true);
+  await waitFor(`!!document.querySelector('.rep-sheet input[type=search]')`,'search');
+  await setVal('.rep-sheet input[type=search]','a57 5g');
+  await waitFor(`[...document.querySelectorAll('.rep-sheet .retail-list li')].some(l=>/A57 5G/.test(l.innerText))`,'search result');
+  await run(`(()=>{const li=[...document.querySelectorAll('.rep-sheet .retail-list li')].find(l=>/A57 5G/.test(l.innerText));li.querySelector('button').click();return true;})()`);
+  await waitFor(`/Matches/.test(document.querySelector('.rep-sheet').innerText)`,'model chosen');
+  await click('.rep-sheet button','Save line');
+  await waitFor(`!document.querySelector('.rep-sheet')&&/0 unknown/.test(document.querySelector('.rep-chips').innerText)`,'alias saved');
+  ok('an unknown report name is matched to a catalog model by search, and remembered');
+  await click('button','Copy report');
+  ok('Copy report works on the edited report');
+
+  // ---------- Segments: the person's own ----------
+  await sub('Segments');
+  await waitFor(`!!document.querySelector('input[aria-label="New segment name"]')`,'segments');
+  await setVal('input[aria-label="New segment name"]','Fold 1');
+  await click('button','+ New segment');
+  await waitFor(`!!document.querySelector('.tg-edit input[type=search]')`,'new segment is open for editing');
+  await shot('3-segments');
+  await setVal('.tg-edit input[type=search]','s26');
+  await waitFor(`!!document.querySelector('.tg-edit input[aria-label="Galaxy S26 Ultra in Fold 1"]')`,'S26 Ultra listed');
+  const tick=label=>run(`(()=>{const c=document.querySelector('input[aria-label=${JSON.stringify(label)}]');if(!c)return false;if(!c.checked)c.click();return true;})()`);
+  assert.equal(await tick('Galaxy S26 Ultra in Fold 1'),true); assert.equal(await tick('Galaxy S26 in Fold 1'),true);
+  await waitFor(`document.querySelector('input[aria-label="Galaxy S26 Ultra in Fold 1"]').checked`,'ticked');
+  await setVal('input[aria-label="New segment name"]','fold 1');
+  await click('button','+ New segment');
+  await waitFor(`/already a segment with that name/.test(document.body.innerText)`,'duplicate refused');
+  ok('a segment is made, models are ticked into it, and a second one with the same name is refused');
+
+  // ---------- Targets: level chips and one line per segment ----------
   await sub('Targets');
-  await run(`(()=>{const b=binary=>Uint8Array.from(atob(binary),c=>c.charCodeAt(0));const input=document.querySelector('.retail-targets input[type=file]');const dt=new DataTransfer();dt.items.add(new File([b(${JSON.stringify(screenshot)})],'promoter.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  await waitFor(`!!document.querySelector('[aria-label="Check the imported targets"]')`,'the screenshot was read',180000);
-  const draft=await run(`[...document.querySelectorAll('[aria-label="Check the imported targets"] tbody tr')].map(r=>[r.children[0].textContent,...[...r.querySelectorAll('input')].map(i=>i.value)])`);
-  assert.deepEqual(draft.slice(0,2),[['Flagship 1','2','1'],['Flagship 2','4','1']],'read: '+JSON.stringify(draft));
-  assert.deepEqual(draft.find(r=>r[0]==='Mid'),['Mid','4','2']);assert.deepEqual(draft.find(r=>r[0]==='Low'),['Low','10','6']);
-  assert.equal(await run(`document.querySelector('[aria-label="Check the imported targets"] select').value`),'me','the name on the screen matched my person');
-  ok('the Promoter screenshot was read offline: 4 segments, the month and the person (Carlou Test)');
-  await click('[aria-label="Check the imported targets"] button','Save targets');
-  await waitFor(`!document.querySelector('[aria-label="Check the imported targets"]')`,'draft saved');
-  await waitFor(`/Overall 50%/.test(document.querySelector('.retail-incentive')?.innerText||'')`,'summary');
-  const sum=await run(`document.querySelector('.retail-incentive').innerText`);
-  assert.match(sum,/below 70%/);assert.match(sum,/Estimated incentive if every segment reaches: 70% .*100% .*120%/);
-  const tbl=await run(`[...document.querySelectorAll('.retail-card:last-child .retail-table tbody tr')].map(r=>r.innerText.replace(/\\s+/g,' '))`);
-  assert.ok(tbl.some(r=>/^Flagship 2 .*25%/.test(r)),JSON.stringify(tbl));
-  ok('targets show achievement %, units left to 70/100/120 with units per day, and estimated incentives');
-  // Asha (below 70%) by hand
-  await setLabelVal('Person','asha');
-  await waitFor(`!!document.querySelector('[aria-label="Low target for Asha Test"]')`,'asha table');
-  await setVal('[aria-label="Low target for Asha Test"]','10');await setVal('[aria-label="Low achieved for Asha Test"]','2');
-  await setVal('[aria-label="Mid target for Asha Test"]','5');
-  ok('a second person gets a target by hand');
+  await waitFor(`!!document.querySelector('.lvl-chips')`,'level chips');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.lvl-chips button')].map(b=>b.textContent)`),['70','80','90','100','110','120']);
+  assert.ok(await run(`[...document.querySelectorAll('.tg-seg')].some(b=>b.innerText.includes('Fold 1'))`),'Fold 1 is a line');
+  await run(`(()=>{[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).click();return true;})()`);
+  await waitFor(`!!document.querySelector('input[aria-label="Target of Carlou Test"]')`,'segment open');
+  await setVal('input[aria-label="Target of Carlou Test"]','5');
+  await click('button','80');
+  await run(`document.querySelector('button[aria-label="One more sold for Carlou Test"]').click()`);
+  await waitFor(`/For 80%:[\\s\\S]*needs 3 more[\\s\\S]*\\(4 in total\\)/.test(document.querySelector('.retail-targets').innerText)`,'80% needs 3 more');
+  assert.match(await run(`document.querySelector('.tg-person').innerText`),/Sold\s*\n?\s*−\s*1\s*\+/);
+  ok('tapping 80 shows 3 more pieces needed for a target of 5 with 1 sold (4 in total), and per day');
+  await shot('5-targets-segment');
+  await click('button','Edit levels');
+  await setVal('input[aria-label="80% pieces for Carlou Test"]','5');
+  await waitFor(`/needs 4 more[\\s\\S]*\\(5 in total\\)/.test(document.querySelector('.retail-targets').innerText)`,'typed level wins');
+  ok('the pieces typed for a level (from the Promoter screen) win over target x level');
+  await click('button','90');
+  await waitFor(`/For 90%:[\\s\\S]*needs 4 more/.test(document.querySelector('.retail-targets').innerText)`,'90 uses target x level (4.5 -> 5)');
+  ok('a level left blank falls back to target x level, rounded up');
+  await click('button','← All segments');
+  await waitFor(`!!document.querySelector('.tg-segs')`,'back to the list');
+  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Sold 1 of 5/);
+  ok('the segment line adds everyone up: sold 1 of 5');
+  await shot('4-targets-lines');
 
-  // ---------- Today ----------
-  await sub('Today');
-  await waitFor(`/Sell [\\d.]+\\/day of/.test(document.body.innerText)`,'priorities');
-  const pri=await run(`[...document.querySelectorAll('.retail-priority')].map(p=>p.innerText)`);
-  assert.ok(pri.length>=3&&pri.some(p=>/Flagship 2/.test(p)),JSON.stringify(pri));
-  assert.equal(await stat('My target'),'50%');
-  ok(`Today shows what to sell first for my target (${pri.length} priorities) and my percent`);
-  // the photos are listed by the day they were uploaded, and a day opens in Records
-  assert.match(await body(),new RegExp(today+'[\\s\\S]*9 phones? · 9 read'));
-  await click('.retail-list button',today);
-  await waitFor(`/Uploaded ${today}/.test(document.body.innerText)&&document.querySelectorAll('.results tbody tr').length===9`,'the day opens in Records');
-  ok('uploads are listed by day (9 phones, 9 read) and tapping a day opens exactly those phones in Records');
-  await nav('Retail');await waitFor(`!!document.querySelector('.retail-tabs')`,'back to retail');await sub('Today');
-  // sell: R1 (mine); stock and counts move
-  const r1=seed[0];
-  await setVal('[aria-label="Find a phone to sell"]',r1.imei.slice(-6));
-  await waitFor(`!![...document.querySelectorAll('.retail-card button.primary')].find(b=>b.textContent==='Sell')`,'sell button');
-  await click('.retail-card button.primary','Sell');
-  await waitFor(`/Sale confirmed/.test(document.body.innerText)`,'sale confirmed');
-  assert.equal(await stat('Sold today'),'1');assert.equal(await stat('Pending submission'),'1');
-  ok('a sale is confirmed (it belongs to the phone\'s owner); Sold today 1, Pending submission 1');
-  await click('.retail-undo button','Undo');
-  await waitFor(`document.querySelector('.retail-stats strong')?.textContent==='0'`,'sale undone');
-  assert.equal(await stat('Pending submission'),'0');
-  await setVal('[aria-label="Find a phone to sell"]',r1.imei.slice(-6));
-  await waitFor(`!![...document.querySelectorAll('.retail-card button.primary')].find(b=>b.textContent==='Sell')`,'sell again');
-  await click('.retail-card button.primary','Sell');
-  await waitFor(`/Sale confirmed/.test(document.body.innerText)`,'sold again');
-  ok('Undo takes the sale back (the phone is sellable again); it is sold again for the rest of the test');
-  // a phone nobody owns cannot be sold
-  await setVal('[aria-label="Find a phone to sell"]',seed[4].imei.slice(-6));await sleep(400);
-  assert.ok(!await run(`!![...document.querySelectorAll('.retail-card button.primary')].find(b=>b.textContent==='Sell')`),'an unassigned phone offers no Sell button');
-  ok('a phone that belongs to nobody cannot be sold (no unauthorized attribution)');
-
-  // ---------- Stock ----------
-  await sub('Stock');
-  await waitFor(`/Stock \\(8\\)/.test(document.body.innerText)`,'stock 8 after the sale');
-  assert.match(await body(),/A17 5G[\s\S]*128GB/);
-  ok('stock fell from 9 to 8 by itself after the confirmed sale, listed by model and storage');
-  await setVal('[aria-label="Model"]','A176');await setVal('[aria-label="Storage"]','128GB');await setVal('[aria-label="Colour"]','Green');await setVal('[aria-label="Change"]','3');
-  await click('.retail-card button','Add line');
-  await waitFor(`/Stock \\(11\\)/.test(document.body.innerText)`,'stock 11');
-  assert.match(await body(),/Green/);
-  ok('a manual stock line (+3 Green) is added and explained');
-  // sales today: Undo needs a reason
-  await click('.retail-list button','Undo sale');
-  await click('[aria-label="Correct a sale"] button','Undo this sale');
-  await sleep(300);
-  assert.match(await run(`document.querySelector('.toast')?.innerText||''`),/reason/i);
-  await click('[aria-label="Correct a sale"] button','Cancel');
-  ok('undoing or moving a sale needs a written reason');
-
-  // ---------- Submissions ----------
-  await sub('Today');
-  await waitFor(`/Pending submissions \\(1\\)/.test(document.body.innerText)`,'pending 1');
-  await click('.retail-card button','Tick all');
-  await click('.retail-card button','Mark 1 submitted');
-  await waitFor(`/Pending submissions \\(0\\)/.test(document.body.innerText)`,'submitted');
-  ok('the sale is marked submitted; pending is 0');
-  await sub('Targets');
-  await waitFor(`!!document.querySelector('.retail-incentive')`,'targets again');
-  await setLabelVal('Person','me');
-  await waitFor(`/Overall 55%/.test(document.querySelector('.retail-incentive')?.innerText||'')`,'the submitted sale counts as achieved',20000);
-  ok('a sale submitted after the screenshot counts as achieved (50% -> 55%)');
-
-  // ---------- Gives: recommend, approve, undo ----------
-  await sub('Gives');
-  await click('.retail-card button','Recommend allocation');
-  await waitFor(`!!document.querySelector('[aria-label="Proposed allocation"]')`,'proposals');
-  const props=await run(`[...document.querySelectorAll('[aria-label="Proposed allocation"] li')].map(l=>l.innerText.replace(/\\s+/g,' '))`);
-  assert.ok(/Flagship 2/.test(props[0])&&/Carlou Test/.test(props[0])&&/Protects your 70% target/.test(props[0]),'my own need comes first: '+JSON.stringify(props));
-  assert.ok(props.some(p=>/Low/.test(p)&&/Asha Test/.test(p)&&/Below 70%/.test(p)),JSON.stringify(props));
-  assert.ok(props.some(p=>/Mid/.test(p)&&/Asha Test/.test(p)),JSON.stringify(props));
-  ok('the recommendation reserves my Flagship 2 unit first, then gives Asha (below 70%) the low and mid units she needs');
-  assert.deepEqual(await owners(),Object.fromEntries(seed.map(r=>[r.id,r.personId])),'nothing moved before approval');
-  ok('nothing moves until I approve');
-  await click('[aria-label="Proposed allocation"] button','Approve');
-  await waitFor(`/Allocation history[\\s\\S]*phone/.test(document.body.innerText)&&!document.querySelector('[aria-label="Proposed allocation"]')`,'approved');
-  await sleep(1500); // the records are saved a moment after the change
-  const after=await owners();
-  assert.deepEqual([after.r8,after.r5,after.r6,after.r7,after.r1],['me','asha','asha','asha','me'],JSON.stringify(after));
-  ok('approved: the S26 is mine, two low and one mid go to Asha; the history lists it');
-  await click('.retail-gives .retail-list button','Undo');
-  await waitFor(`/undone/.test(document.body.innerText)`,'undone');
-  await sleep(1500);
-  const undone=await owners();
-  assert.deepEqual([undone.r8,undone.r5,undone.r6,undone.r7],['','','',''],JSON.stringify(undone));
-  ok('Undo returns every phone to where it was');
-
-  // ---------- Reports ----------
-  await sub('Reports');
-  await setLabelVal('Activations','3');
-  await setLabelVal('Your example (optional)',`*Daily Report 01/01/2026*\nStore: Test Hub\n*Sellout*\n- A17 5G 6/128 Blue - 9\nTotal sellout: 9\nActivations: 1\nThanks team`);
-  await click('.retail-card button','Write the report');
-  await waitFor(`!!document.querySelector('[aria-label="The report"]')`,'report');
-  const rep=await run(`document.querySelector('[aria-label="The report"]').value`);
-  assert.ok(rep.startsWith(`*Daily Report ${todayDMY}*`),rep);
-  assert.match(rep,/Store: Test Hub/);assert.match(rep,/Total sellout: 1/);assert.match(rep,/Activations: 3/);assert.match(rep,/Thanks team/);assert.match(rep,/- A17 5G 6\/128 - 1/);
-  ok('the report follows my pasted layout: new date, my one sale, activations 3, my own lines kept');
-  await click('.retail-card button','Save this layout');
-
-  // ---------- Data: backup, restore, go back ----------
-  await sub('Data');
-  await waitFor(`/Go back to an earlier state/.test(document.body.innerText)`,'data tab');
-  const stateNow=await readDb('retail:state');
-  assert.equal(stateNow.sales.filter(s=>!s.voided).length,1);assert.ok(stateNow.template,'the layout was saved');
-  const backup={app:'RetailLens',version:1,createdAt:new Date().toISOString(),state:{...stateNow,sales:[]},ledger:[]};
-  await run(`(()=>{const input=document.querySelector('.retail-data input[type=file]');const dt=new DataTransfer();dt.items.add(new File([${JSON.stringify(JSON.stringify(backup))}],'backup.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  await waitFor(`!!document.querySelector('[aria-label="Restore this backup"]')`,'restore offered');
-  await click('[aria-label="Restore this backup"] button','Restore');
-  await sleep(800);
-  assert.equal((await readDb('retail:state')).sales.length,0);
-  ok('a backup was restored (its sales replaced mine)');
-  await waitFor(`!![...document.querySelectorAll('.retail-data button')].find(b=>b.textContent==='Go back to this')`,'snapshot offered');
-  await run(`(()=>{const b=[...document.querySelectorAll('.retail-data button')].find(b=>b.textContent==='Go back to this');b.click();})()`);
-  await sleep(800);
-  assert.equal((await readDb('retail:state')).sales.filter(s=>!s.voided).length,1);
-  ok('Go back brings the data from before the restore back');
-  await run(`(()=>{const input=document.querySelector('.retail-data input[type=file]');const dt=new DataTransfer();dt.items.add(new File(['{"not":"a backup"}'],'x.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  await waitFor(`/not a RetailLens backup/.test(document.body.innerText)`,'a wrong file is refused');
-  ok('a file that is not a RetailLens backup is refused');
-
-  // ---------- Catalog: edit and remember ----------
-  await sub('Catalog');
-  await setVal('[aria-label="Search models"]','A17 5G');
-  await waitFor(`!!document.querySelector('[aria-label="Segment of Galaxy A17 5G"]')`,'model row');
-  await setVal('[aria-label="Segment of Galaxy A17 5G"]','mid');
-  await sleep(600);
-  const st2=await readDb('retail:state');
-  assert.equal(st2.corrections.A176,'mid');assert.ok(st2.catalog.some(c=>c.code==='A176'&&c.segment==='mid'));
-  ok('changing a model\'s segment is remembered as a verified correction');
-  await click('.retail-list button','Edit');
-  await waitFor(`!!document.querySelector('[aria-label="Edit model"]')`,'edit form');
-  await setLabelVal('Report abbreviation','A17 Five');
-  await setLabelVal('Variants, one per line','SM-A176BZKGINU | 6GB | 128GB | Black, Blue');
-  await click('[aria-label="Edit model"] button','Save');
-  await sleep(500);
-  const st3=await readDb('retail:state');const item=st3.catalog.find(c=>c.code==='A176');
-  assert.equal(item.abbreviation,'A17 Five');assert.deepEqual(item.variants[0],{sku:'SM-A176BZKGINU',ram:'6GB',storage:'128GB',colors:['Black','Blue']});
-  ok('catalog edits (abbreviation, SKU, RAM, storage, colours) are saved');
-  // bulk segment edit of selected phones (Catalog)
-  await run(`document.querySelector('[aria-label="Select r5.jpg"]')?.click()`);
-  await waitFor(`!!document.querySelector('[aria-label="Bulk edit selected phones"]')`,'bulk bar');
-  await setVal('[aria-label="Bulk edit selected phones"] select','tablet');
-  await click('[aria-label="Bulk edit selected phones"] button','Apply to these phones');
-  await sleep(700);
-  assert.equal((await readDb('retail:state')).recordMeta.r5.segment,'tablet');
-  ok('bulk editing: the selected phone is now a Tablet (its own choice, other phones of the model unchanged)');
-  // bulk edit from the Records tab (segment field of the existing Bulk edit window)
+  // the Records screen shows the person's own segment name
   await nav('Records');
-  await waitFor(`document.querySelectorAll('.results tbody tr').length>=1`,'records list');
-  await run(`document.querySelector('.results tbody tr input.selection-check').click()`);
-  await run(`document.querySelector('.more-actions summary').click()`);
-  await click('.more-actions button','Bulk edit');
-  await waitFor(`[...document.querySelectorAll('.modal label')].some(l=>(l.childNodes[0]?.textContent||'').trim()==='Segment')`,'bulk edit window has Segment');
-  await run(`(()=>{const el=[...document.querySelectorAll('.modal label')].find(l=>(l.childNodes[0]?.textContent||'').trim()==='Segment').querySelector('select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,'wearable');el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-  await click('.modal button','Apply to');
-  await sleep(800);
-  assert.ok(Object.values((await readDb('retail:state')).recordMeta).some(m=>m.segment==='wearable'));
-  ok('the Records Bulk edit window can set a segment for the ticked phones');
+  await waitFor(`!!document.querySelector('.badge-seg')`,'segment badges');
+  assert.ok(await run(`[...document.querySelectorAll('.badge-seg')].some(b=>b.textContent.trim()==='Fold 1')`),'S26 phones show Fold 1');
+  ok('Records shows "Fold 1" on the phones of the models placed in it');
+
+  // ---------- Gives: suggestions only ----------
+  await nav('Retail'); await sub('Gives');
+  await waitFor(`!!document.querySelector('.retail-gives')`,'gives');
+  await run(`(()=>{const d=document.querySelector('.retail-gives details');d.open=true;return true;})()`);
+  await setVal('.retail-gives details select',  'me');
+  await waitFor(`/Suggested \\(1\\)/.test(document.querySelector('.retail-gives').innerText)`,'one suggestion');
+  assert.match(await run(`document.querySelector('.gv-item').innerText`),/1 × Fold 1 → Carlou Test/);
+  assert.equal((await owners()).r8,'','nothing is given until approved');
+  await shot('6-gives');
+  ok('Gives suggests the unassigned Fold 1 phone to me (my target first) and changes nothing until approved');
+  await click('button','Approve');
+  for(let i=0;i<40;i++){if((await owners()).r8==='me')break;await sleep(250);}
+  assert.equal((await owners()).r8,'me');
+  ok('Approve gives the phone to the person (shown in the history, undoable)');
+  await run(`(()=>{const d=[...document.querySelectorAll('.retail-gives details')].find(x=>/History/.test(x.innerText));d.open=true;return true;})()`);
+  await click('.retail-gives button','Undo');
+  for(let i=0;i<40;i++){if((await owners()).r8==='')break;await sleep(250);}
+  assert.equal((await owners()).r8,'');
+  ok('Undo puts the phone back');
+
+  // ---------- Catalog: a phone marked sold is no longer in stock for the report ----------
+  await sub('Catalog');
+  await waitFor(`!!document.querySelector('input[aria-label="Select r1.jpg"]')`,'phone list');
+  await run(`document.querySelector('input[aria-label="Select r1.jpg"]').click()`);
+  await waitFor(`!!document.querySelector('select[aria-label="Stock status"]')`,'bulk bar');
+  await setVal('select[aria-label="Stock status"]','sold');
+  await click('button','Apply to these phones');
+  await sub('Report');
+  await waitFor(`/Scanned in the app \\(in stock\\): 8/.test(document.body.innerText)`,'8 in stock');
+  assert.ok(await run(`[...document.querySelectorAll('.rep-row')].some(r=>r.innerText.includes('A17 5G 6/128GB')&&/scanned 3/.test(r.innerText))`),'the A17 line now says scanned 3');
+  ok('a phone marked sold leaves the stock: the report check counts 8 and the A17 line differs');
 
   // ---------- Reload: everything persists, scan records untouched ----------
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'reload 2');
   await waitFor(`!!document.querySelector('.bottom-nav')`,'bottom nav after reload');
-  await nav('Retail');
-  await waitFor(`!!document.querySelector('.retail-stats')`,'retail after reload');
-  assert.equal(await stat('Sold today'),'1');
-  ok('after a reload the sale, targets and settings are still there');
+  await nav('Retail'); await sub('Report');
+  await waitFor(`!!document.querySelector('.rep-chips')&&document.querySelectorAll('.rep-row').length===4`,'report after reload');
+  await sub('Segments');
+  await waitFor(`/Fold 1/.test(document.body.innerText)`,'segment after reload');
+  ok('after a reload the report, the segment and its models are still there');
   const final=await readDb('record:');
   assert.equal(JSON.stringify(seed.map(r=>{const f=final.find(x=>x.id===r.id);return [f.id,f.imei,f.model,f.dataUrl,f.originalDataUrl,f.name,f.raw];})),before);
   assert.equal(final.length,9);

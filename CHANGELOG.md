@@ -2,7 +2,16 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
-## Unreleased — RetailLens (Android and web)
+## Unreleased — RetailLens, version 2 (Android and web)
+**Retail redone around one pasted report.** Tabs: Today, Report, Targets, Gives, Segments, Catalog, Data. The Stock tab, the Reports writer and the Sold automation are gone.
+- **Report:** paste the store's WhatsApp report (`Model : sold/stock` and `(colour counts) names`). It is checked against the phones you scanned (model, storage, RAM, colour; phones marked sold or given do not count): every difference is described in words, abbreviations are resolved from the scanned phones, and an unknown name is matched once and remembered. Tap a line to fix the name, segment, sold, stock and colour counts (stock follows the colours). Copy it back out in your own layout with today's date; New day resets sold. Header, totals, other brands and shifts are kept as typed.
+- **Segments:** your own list (Fold 1, Fold 2…): add, rename, reorder, delete, and tick the models in each. Records, Gives and Targets use it.
+- **Targets:** tap a level (70, 80, 90, 100, 110, 120) and every segment line says how many pieces are still needed and per day; open a segment for each person (target, own sold count with +/−, pieces typed from the Promoter screen per level).
+- **Gives:** one list of suggestions with Approve and Skip; history and Undo stay.
+- **Catalog:** mark phones In stock / Sold / Given (only in-stock phones are compared with the report).
+- Data written by version 1 is kept and still loads.
+
+## Earlier — RetailLens version 1 (Android and web)
 **IMEI Lens became RetailLens — "Scan. Sell. Track. Achieve."** IMEI Lens stays the scanning engine; the package id, signing and every saved record, picture and person are unchanged. New **Retail** tab (Detailed mode), seven sections:
 - **Today:** what to sell first for my target (units per day, how many I hold, how many short), confirm a sale by searching an IMEI, sales waiting to be submitted to Samsung, stock alerts, a daily checklist (with your own items) and the uploads of the last days. A report shared to the app as text opens Reports.
 - **Catalog:** editable models (name, report abbreviation, SKU / RAM / storage / colours, segment, a different segment for one month). A segment you change is remembered as a verified correction. Phones are sorted into **Flagship 1, 2, 3, Mid, Low, Tablet, Wearables** automatically (Records now has a Segment filter and badge; Bulk edit can set a segment, storage and colour).

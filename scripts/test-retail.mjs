@@ -350,8 +350,8 @@ assert.equal(B.todayDashboard(D.emptyState(), mine, '2026-11-15').priorities.len
 // ---- data safety: damaged input, history, backup, restore, undo ----------------------------------------------------------------------
 const clean = D.cleanState({ catalog: [{ code: 'bad' }, { code: 'A999', name: 5, segment: 'nope' }], sales: [{ id: 's', imei: '123', date: '2026-11-01' }, { id: 's2', imei: phoneA.imei, date: 'x' }, 7, null],
   targets: { '2026-11': { me: { personId: 'me', lines: [{ segment: 'low', target: -5, achieved: 'x' }, { segment: 'bogus', target: 1, achieved: 1 }] } }, 'nope': {} }, rates: { perUnit: { low: -9 }, currency: 12345 }, settings: { myThreshold: 55 } });
-assert.equal(clean.catalog.length, 1); assert.equal(clean.catalog[0].segment, 'other'); assert.equal(clean.sales.length, 0);
-assert.deepEqual(clean.targets['2026-11'].me.lines, [{ segment: 'low', target: 0, achieved: 0 }], 'bad lines are cleaned or dropped');
+assert.equal(clean.catalog.length, 1); assert.equal(C.segmentOf(clean, 'A999', '2026-11'), 'other', 'a segment id nobody has reads as "No segment"'); assert.equal(clean.sales.length, 0);
+assert.deepEqual(clean.targets['2026-11'].me.lines, [{ segment: 'low', target: 0, achieved: 0 }, { segment: 'bogus', target: 1, achieved: 1 }], 'bad numbers are cleaned; a line for a segment that is not in the list is kept (it just does not show)');
 assert.equal(clean.targets['nope'], undefined); assert.equal(clean.rates.perUnit.low, 0); assert.equal(clean.settings.myThreshold, 100);
 for (const bad of [null, undefined, 5, 'x', [], {}]) assert.equal(D.cleanState(bad).version, 1, 'any junk gives a valid empty state');
 // month history: closing a month summarises it and never deletes it

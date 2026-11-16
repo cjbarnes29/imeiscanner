@@ -6,7 +6,7 @@
 import { SAMSUNG_MODELS } from '../samsung-models';
 import { modelCode4, phoneInfo } from '../phone-names';
 import { monthOf, type CatalogItem, type Month, type RecordMeta, type RetailState, type Segment, type Variant } from './types';
-import { isSegment } from './types';
+import { isSegment, SEGMENTS } from './types';
 
 /** The segment a model name suggests, before anyone corrects it. Samsung numbering: A3x/A5x/A7x are mid, A0x-A2x (and M0x-M2x) are low. */
 export function guessSegment(name: string, code = ''): Segment {
@@ -55,7 +55,13 @@ export function itemFor(state: Pick<RetailState, 'catalog'>, model: string): Cat
 }
 
 /** The segment of a model in a month: this record's own choice, the model's monthly segment, a remembered correction, the catalog default, then the guess. */
-export function segmentOf(state: Pick<RetailState, 'catalog' | 'corrections'>, model: string, month: Month, meta?: RecordMeta): Segment {
+export function segmentOf(state: Pick<RetailState, 'catalog' | 'corrections'> & { segments?: RetailState['segments'] }, model: string, month: Month, meta?: RecordMeta): Segment {
+  const found = rawSegmentOf(state, model, month, meta);
+  // the person's own list wins: a segment that is not in it (deleted, or a starting name they replaced) reads as "not placed"
+  const known: string[] = state.segments?.length ? state.segments.map(s => s.id) : SEGMENTS;
+  return found !== 'other' && !known.includes(found) ? 'other' : found;
+}
+function rawSegmentOf(state: Pick<RetailState, 'catalog' | 'corrections'>, model: string, month: Month, meta?: RecordMeta): Segment {
   if (meta?.segment && isSegment(meta.segment)) return meta.segment;
   const item = itemFor(state, model);
   const code = item?.code || modelCode4(model);

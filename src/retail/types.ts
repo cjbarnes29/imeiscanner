@@ -2,13 +2,20 @@
  * RetailLens data model. IMEI Lens stays the scanning engine (records, photos, people); everything here is kept apart from the scan records, under its
  * own "retail:" keys, and refers to records only by id / IMEI. Nothing in this folder touches a picture or changes a scan record.
  */
-export type Segment = 'flagship1' | 'flagship2' | 'flagship3' | 'mid' | 'low' | 'tablet' | 'wearable' | 'other';
-/** The segments a target can be set for ('other' = not classified yet: it is shown for review and counts toward no target). */
+/** A segment id. The built-in ones below are only the starting list: the person makes their own (Fold 1, Fold 2…) in Retail > Segments. */
+export type Segment = string;
+/** The segments a new install starts with ('other' = not classified yet: it is shown for review and counts toward no target). */
 export const SEGMENTS: Segment[] = ['flagship1', 'flagship2', 'flagship3', 'mid', 'low', 'tablet', 'wearable'];
 export const SEGMENT_LABEL: Record<Segment, string> = {
   flagship1: 'Flagship 1', flagship2: 'Flagship 2', flagship3: 'Flagship 3', mid: 'Mid', low: 'Low', tablet: 'Tablet', wearable: 'Wearables', other: 'Unclassified'
 };
-export const isSegment = (value: unknown): value is Segment => typeof value === 'string' && (value === 'other' || (SEGMENTS as string[]).includes(value));
+export const isSegment = (value: unknown): value is Segment => typeof value === 'string' && value.length > 0 && value.length <= 40;
+/** A segment the person made or renamed (the starting ones keep their built-in name unless renamed). */
+export type SegmentDef = { id: Segment; name: string };
+
+/** The levels of a target the person can look at: how many pieces are needed to reach each one. */
+export type Level = 70 | 80 | 90 | 100 | 110 | 120;
+export const LEVELS: Level[] = [70, 80, 90, 100, 110, 120];
 
 /** 'YYYY-MM' and 'YYYY-MM-DD' in the phone's own time (a sale made at 23:50 belongs to that day). */
 export type Month = string;
@@ -43,7 +50,8 @@ export type CatalogItem = {
   custom: boolean;
 };
 
-export type RecordMeta = { segment?: Segment; ram?: string; storage?: string; color?: string };
+/** `status`: a phone the person marked as no longer in stock ('sold' / 'given'). Without it a scanned phone counts as in stock. */
+export type RecordMeta = { segment?: Segment; ram?: string; storage?: string; color?: string; status?: 'sold' | 'given' };
 
 /** A confirmed sale. A sale is attributed to the person who owned the phone when it was confirmed; see sales.ts for the rules. */
 export type Sale = {
@@ -55,7 +63,8 @@ export type Sale = {
   voided?: boolean; voidedAt?: string; createdAt: string;
 };
 
-export type TargetLine = { segment: Segment; target: number; achieved: number };
+/** `achieved` is the person's own sold count; `levels` = the pieces needed IN TOTAL at each level, typed from the Promoter screen (blank = target x level, rounded up). */
+export type TargetLine = { segment: Segment; target: number; achieved: number; levels?: Partial<Record<Level, number>> };
 export type PersonTarget = { personId: string; month: Month; lines: TargetLine[]; source: 'screenshot' | 'manual'; importedAt: string; note?: string };
 
 export type IncentiveRates = { perUnit: Record<Segment, number>; multiplier: { 70: number; 100: number; 120: number }; currency: string };
@@ -83,9 +92,32 @@ export type ReportTemplate = {
 
 export type Audit = { at: string; what: string; detail: string };
 
+/** One colour or storage count of a report line: "Vlt" with 2. count null = the number could not be read ("0p"). */
+export type ReportPart = { label: string; count: number | null; raw: string };
+/** A model line of the pasted report ("A07 64GB : 04/15") with the line under it ("(02,00,13) Vlt,Grn,Blk"). */
+export type ReportItem = {
+  t: 'item'; id: string; name: string; sold: number; stock: number; soldWidth: number; stockWidth: number;
+  kind: 'colour' | 'storage' | 'none'; parts: ReportPart[]; sep: string; line1: string; line2: string;
+};
+/** Anything else in the report (header, ---- lines, totals, other brands, shifts) is kept as typed. */
+export type ReportText = { t: 'text'; text: string };
+export type StockReport = {
+  entries: (ReportItem | ReportText)[];
+  /** The "Total Sellout" the report states, and whether the person said it includes phones that are not in the list (extra = the difference). */
+  totalSellout?: { typed: number; acknowledged: boolean; extra: number };
+  savedAt: string;
+  dateText?: string;
+};
+
 export type RetailState = {
   version: 1;
   catalog: CatalogItem[];
+  /** The person's own segments (Fold 1, Fold 2…). Missing = the starting list. */
+  segments?: SegmentDef[];
+  /** What the report calls a model: normalised report name -> catalog model code. Learned when a line is saved ("remember"). */
+  aliases: Record<string, string>;
+  /** The last saved pasted report (stock and sold of the store). The one before it is in the Undo snapshots. */
+  report?: StockReport;
   /** Verified corrections to remember: model code -> segment (a person changed it, so the app learns it). */
   corrections: Record<string, Segment>;
   recordMeta: Record<string, RecordMeta>;

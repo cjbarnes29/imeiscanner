@@ -2,7 +2,7 @@
  * RetailLens state: defaults, loading anything stored safely, month history, backup and restore (with undo). Pure functions: the storage itself
  * is retail-store.ts. Whatever is read from disk or from a backup file is treated as untrusted and cleaned, so a damaged file cannot break the app.
  */
-import { isDateKey, isMonth, isSegment, SEGMENTS, type DayLog, type IncentiveRates, type Month, type PersonTarget, type RetailState, type Sale, type TargetLine } from './types';
+import { isDateKey, isMonth, isSegment, LEVELS, SEGMENTS, type DayLog, type IncentiveRates, type Level, type Month, type PersonTarget, type ReportItem, type ReportText, type RetailState, type Sale, type SegmentDef, type StockReport, type TargetLine } from './types';
 
 /** EXAMPLE incentive scheme (edit it in Targets > Incentives): the real scheme is the person's own, the app only multiplies. */
 export const DEFAULT_RATES: IncentiveRates = {
@@ -14,7 +14,7 @@ export const emptyDay = (): DayLog => ({ activations: 0, scPlus: 0, competitor: 
 
 export function emptyState(): RetailState {
   return {
-    version: 1, catalog: [], corrections: {}, recordMeta: {}, sales: [], targets: {}, rates: DEFAULT_RATES, allocations: [], days: {}, stockAdjust: [],
+    version: 1, catalog: [], aliases: {}, corrections: {}, recordMeta: {}, sales: [], targets: {}, rates: DEFAULT_RATES, allocations: [], days: {}, stockAdjust: [],
     settings: { myPersonId: '', myThreshold: 100, lowStock: 2, reportAuthor: '' }, history: {}, audit: []
   };
 }
@@ -27,7 +27,28 @@ const count = (value: unknown): number => Math.max(0, Math.floor(num(value)));
 
 function cleanLine(value: unknown): TargetLine | null {
   const v = obj(value);
-  return isSegment(v.segment) ? { segment: v.segment, target: count(v.target), achieved: count(v.achieved) } : null;
+  if (!isSegment(v.segment)) return null;
+  const levels: Partial<Record<Level, number>> = {};
+  const given = obj(v.levels);
+  for (const level of LEVELS) if (typeof given[level] === 'number' && Number.isFinite(given[level] as number) && (given[level] as number) >= 0) levels[level] = Math.floor(given[level] as number);
+  return { segment: v.segment, target: count(v.target), achieved: count(v.achieved), ...(Object.keys(levels).length ? { levels } : {}) };
+}
+function cleanReport(value: unknown): StockReport | undefined {
+  const v = obj(value);
+  const entries = arr(v.entries).map(obj).map((e): ReportItem | ReportText | null => {
+    if (e.t === 'text') return { t: 'text', text: str(e.text).slice(0, 400) };
+    if (e.t !== 'item' || !str(e.name)) return null;
+    const parts = arr(e.parts).map(obj).map(p => ({ label: str(p.label).slice(0, 30), count: typeof p.count === 'number' && Number.isFinite(p.count) ? Math.max(0, Math.floor(p.count)) : null, raw: str(p.raw).slice(0, 12) }));
+    return { t: 'item', id: str(e.id) || `r${Math.random().toString(36).slice(2, 8)}`, name: str(e.name).slice(0, 80), sold: count(e.sold), stock: count(e.stock), soldWidth: Math.min(4, Math.max(1, count(e.soldWidth) || 2)), stockWidth: Math.min(4, Math.max(1, count(e.stockWidth) || 2)),
+      kind: e.kind === 'colour' || e.kind === 'storage' ? e.kind : 'none', parts, sep: str(e.sep, ' ').slice(0, 4), line1: str(e.line1).slice(0, 160), line2: str(e.line2).slice(0, 200) };
+  }).filter((e): e is ReportItem | ReportText => !!e).slice(0, 1000);
+  if (!entries.length) return undefined;
+  const t = obj(v.totalSellout);
+  return { entries, savedAt: str(v.savedAt), dateText: str(v.dateText) || undefined, totalSellout: typeof t.typed === 'number' ? { typed: count(t.typed), acknowledged: t.acknowledged === true, extra: count(t.extra) } : undefined };
+}
+function cleanSegments(value: unknown): SegmentDef[] | undefined {
+  const list = arr(value).map(obj).filter(s => isSegment(s.id) && str(s.name)).map(s => ({ id: str(s.id), name: str(s.name).slice(0, 30) }));
+  return list.length ? list : undefined;
 }
 function cleanTarget(value: unknown, month: Month): PersonTarget | null {
   const v = obj(value);
@@ -70,15 +91,17 @@ export function cleanState(raw: unknown): RetailState {
   const corrections: RetailState['corrections'] = {};
   for (const [code, segment] of Object.entries(obj(v.corrections))) if (isSegment(segment)) corrections[code] = segment;
   const settings = obj(v.settings);
+  const aliases = Object.fromEntries(Object.entries(obj(v.aliases)).filter(([k, code]) => k.length <= 60 && /^[A-Z0-9]{3,6}$/.test(str(code))).map(([k, code]) => [k, str(code)]));
   return {
     ...base,
+    segments: cleanSegments(v.segments), aliases, report: cleanReport(v.report),
     catalog: arr(v.catalog).map(obj).filter(c => /^[A-Z0-9]{3,6}$/.test(str(c.code))).map(c => ({
       code: str(c.code), name: str(c.name) || str(c.code), abbreviation: str(c.abbreviation) || str(c.name), segment: isSegment(c.segment) ? c.segment : 'other',
       monthly: Object.fromEntries(Object.entries(obj(c.monthly)).filter(([m, s]) => isMonth(m) && isSegment(s))) as Record<Month, never>,
       variants: arr(c.variants).map(obj).map(x => ({ sku: str(x.sku), ram: str(x.ram), storage: str(x.storage), colors: arr(x.colors).map(y => str(y)).filter(Boolean) })), custom: true
     })),
     corrections,
-    recordMeta: Object.fromEntries(Object.entries(obj(v.recordMeta)).map(([id, m]) => { const o = obj(m); return [id, { ...(isSegment(o.segment) ? { segment: o.segment } : {}), ...(str(o.ram) ? { ram: str(o.ram) } : {}), ...(str(o.storage) ? { storage: str(o.storage) } : {}), ...(str(o.color) ? { color: str(o.color) } : {}) }]; })),
+    recordMeta: Object.fromEntries(Object.entries(obj(v.recordMeta)).map(([id, m]) => { const o = obj(m); return [id, { ...(isSegment(o.segment) ? { segment: o.segment } : {}), ...(str(o.ram) ? { ram: str(o.ram) } : {}), ...(str(o.storage) ? { storage: str(o.storage) } : {}), ...(str(o.color) ? { color: str(o.color) } : {}), ...(o.status === 'sold' || o.status === 'given' ? { status: o.status } : {}) }]; })),
     sales: arr(v.sales).map(cleanSale).filter((s): s is Sale => !!s),
     targets,
     rates: {

@@ -4,7 +4,8 @@ import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
 import { segmentOf as retailSegmentOf, setRecordMeta as retailSetMeta } from './retail/catalog';
 import { pendingSubmissions } from './retail/sales';
-import { SEGMENTS as RETAIL_SEGMENTS, SEGMENT_LABEL as RETAIL_SEGMENT_LABEL, dateKey, localDay, monthOf as retailMonth, type RetailState, type Segment as RetailSegment } from './retail/types';
+import { dateKey, localDay, monthOf as retailMonth, type RetailState, type Segment as RetailSegment } from './retail/types';
+import { segLabel as retailSegLabel, segmentIds as retailSegmentIds } from './retail/segments';
 import { failReasonShort, failReasonText } from './fail-reason';
 import { planReplacements, type PairRecord } from './rescan-pair';
 import { typedModelNote, typedModelOk } from './brands';
@@ -5150,7 +5151,7 @@ export default function App() {
               <button className={filter === 'Valid' ? 'active' : ''} onClick={() => setFilter('Valid')}>Valid IMEI <b>{validCount}</b></button>
               {(unknownCount > 0 || filter === 'Unknown') && <button className={filter === 'Unknown' ? 'active' : ''} onClick={() => setFilter('Unknown')}>Unknown model <b>{unknownCount}</b></button>}
               {filter.startsWith('day:') && <button className="active" onClick={() => setFilter('All')}>Uploaded {filter.slice(4)} ✕</button>}
-              <label className="seg-filter">Segment <select aria-label="Segment filter" value={filter.startsWith('seg:') ? filter : ''} onChange={event => setFilter(event.target.value || 'All')}><option value="">All</option>{[...RETAIL_SEGMENTS, 'other' as RetailSegment].map(s => <option key={s} value={`seg:${s}`}>{RETAIL_SEGMENT_LABEL[s]}</option>)}</select></label>
+              <label className="seg-filter">Segment <select aria-label="Segment filter" value={filter.startsWith('seg:') ? filter : ''} onChange={event => setFilter(event.target.value || 'All')}><option value="">All</option>{[...retailSegmentIds(retail), 'other' as RetailSegment].map(s => <option key={s} value={`seg:${s}`}>{retailSegLabel(retail, s)}</option>)}</select></label>
               {records.some(r => r.duplicate) && <button className={filter === 'Duplicates' ? 'active' : ''} onClick={() => setFilter('Duplicates')}>Duplicates <b>{records.filter(r => r.duplicate).length}</b></button>}
               {records.some(r => r.duplicate) && <button className="subtle-btn" onClick={() => removeDuplicates(duplicateRemovalIds(records))}>Archive duplicates</button>}
             </div>
@@ -5368,7 +5369,7 @@ export default function App() {
                             delete e.currentTarget.dataset.before;
                           }}
                         />
-                        <small className="badge-seg" title="Segment (change it in Retail > Catalog or with Bulk edit)">{RETAIL_SEGMENT_LABEL[segOfRecord(r)]}</small>
+                        <small className="badge-seg" title="Segment (change it in Retail > Catalog or with Bulk edit)">{retailSegLabel(retail, segOfRecord(r))}</small>
                         {r.modelNeedsReview && <small className="model-cell-name unknown" role="note">{r.modelNote || typedModelNote(r, r.model)}</small>}
                         {(() => { const info = infoOf(r); return info.series !== 'Unknown phones' && !isGenericName(info.name) ? <small className="model-cell-name"><strong>{info.name}</strong> · {info.series}</small> : <small className="model-cell-name unknown"><b className="badge-unknown">Unknown model</b> {modelCode4(r.model) ? `SM-${modelCode4(r.model)} is not recognised: name it under the Unknown model filter.` : 'Model not read. Type the code, or name it under the Unknown model filter.'}</small>; })()}
                       </td>
@@ -5772,7 +5773,7 @@ export default function App() {
         <p className="copy-hint">Changes {selectedRows.length ? `${selectedRows.length} ticked phone${selectedRows.length === 1 ? '' : 's'}` : `all ${visible.length} phones shown`}. Leave a field empty to keep it as it is.</p>
         <label>Phone model code<input value={bulkEditModel} placeholder="for example SM-S938B" onChange={event => setBulkEditModel(event.target.value)} /></label>
         <label>Move to person<select value={bulkEditPerson} onChange={event => setBulkEditPerson(event.target.value)}><option value="">Keep as it is</option>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select></label>
-        <label>Segment<select value={bulkEditSegment} onChange={event => setBulkEditSegment(event.target.value)}><option value="">Keep as it is</option>{[...RETAIL_SEGMENTS, 'other' as RetailSegment].map(s => <option key={s} value={s}>{RETAIL_SEGMENT_LABEL[s]}</option>)}</select></label>
+        <label>Segment<select value={bulkEditSegment} onChange={event => setBulkEditSegment(event.target.value)}><option value="">Keep as it is</option>{[...retailSegmentIds(retail), 'other' as RetailSegment].map(s => <option key={s} value={s}>{retailSegLabel(retail, s)}</option>)}</select></label>
         <label className="check-row"><input type="checkbox" checked={bulkEditChecked} onChange={event => setBulkEditChecked(event.target.checked)} /> Mark as checked (clears the review flags)</label>
         <div className="share-toolbar"><button className="primary" onClick={applyBulkEdit}>Apply to {selectedRows.length || visible.length}</button><button className="subtle-btn" onClick={() => setBulkEditOpen(false)}>Cancel</button></div>
       </section></div>}
