@@ -50,14 +50,16 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
-          - **RetailLens** (IMEI Lens stays the scanning engine). The **Retail** tab (Detailed mode) has Today, Catalog, Targets, Gives, Stock, Reports and Data, all offline. Phones are sorted into segments, targets come from Promoter screenshots, allocations are proposed and need your approval, stock follows confirmed sales, and your WhatsApp report format is learned and rewritten for you. Share a WhatsApp report as text to the app to open it in Reports.
-          - **Automatic retry:** a photo a scan could not read is tried once more by itself. IMEI 1 can be recovered from the barcode under strict checks. Only what is still unread goes to Review, with the reason in words, and the scan report shows the counts.
-          - **Photo editor:** Fix It is inside Crop / Edit Photo. Bulk Edit has Previous, Next, Delete and progress. Delete removes a photo from the app only, never from the phone gallery.
-          - **People tab** (add, edit, delete, search, devices, counts, export). The Unknown tab is replaced by a filter and badge.
+          - **Report:** paste your WhatsApp report (`Model : sold/stock` and the colour counts). It is read on the phone and checked against the phones you scanned: every difference is said in words, and abbreviations are matched from your scans. Tap a line to fix the name, segment, sold, stock and colours. Copy it back out in your own layout with today's date; **New day** resets sold.
+          - **Segments:** make your own (Fold 1, Fold 2…) and tick the models in each.
+          - **Targets:** tap a level (70 to 120) and every segment says how many pieces are still needed and per day. Open a segment to see each person: target, their own sold count, and the pieces needed per level (typed from the Promoter screen).
+          - **Gives:** suggestions only, with Approve and Skip. **Catalog:** mark phones In stock, Sold or Given.
+          - Earlier in RetailLens: automatic retry of unread photos, bulk photo editor, People tab, WhatsApp report text share.
+          - The Stock tab and the old Reports writer are gone.
 
           ### Known limits
           - Debug-signed test build. Tested on the emulator and in automated tests; **not yet verified on a real phone**. Some emulator flows were unstable because the emulator itself was slow.
-          - Not tested with real Promoter screenshots or real WhatsApp reports. The incentive rates are examples: set your own.
+          - Not tested with your real report or a real Promoter screenshot (colour abbreviations are matched by a rule; if one does not match, the line says so and you fix it). The Promoter screenshot import still reads the old segment names and asks you to choose your segment per line.
           - The WhatsApp media-folder watcher is not built (shared photos work). Glare and blur retake guidance is not included yet.
           NOTES
           gh release create "${GITHUB_REF_NAME}" out/*.apk out/*.sha256 \
