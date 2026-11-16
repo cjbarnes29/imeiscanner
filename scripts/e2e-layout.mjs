@@ -57,7 +57,7 @@ try{
   await send('Page.enable');
   // a phone: 411 px wide (about 900 px at 2.2x), like the screenshot from the Android app
   await send('Emulation.setDeviceMetricsOverride',{width:Number(process.env.WIDTH||411),height:900,deviceScaleFactor:2.2,mobile:true});
-  await send('Page.addScriptToEvaluateOnNewDocument',{source:`if(!localStorage.getItem('e2e-seeded')){localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('e2e-seeded','1');}`});
+  await send('Page.addScriptToEvaluateOnNewDocument',{source:`if(!localStorage.getItem('e2e-seeded')){localStorage.setItem('imei-lens-simple-view','${process.env.SIMPLE?'true':'false'}');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('e2e-seeded','1');}`});
   // the Android app's scanner bridge (a stand-in that does nothing): it makes the page draw the blocks only the phone shows
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.AndroidScanner={status:()=>JSON.stringify({status:'idle',count:0,completed:0,failed:0,photos:[],records:[]}),choosePhotos(){},takePhoto(){},setScanOptions(){},queueStatus(){},queueStopRequested:()=>false,scanReport:()=>'',rescanNeeded:()=>0,cameraWaiting:()=>0,takeSharedText:()=>'',image:()=>'',sourceImage:()=>'',stop(){},sendCapabilities(){},resetScans(){}};`});
   await send('Page.navigate',{url:'http://localhost:4196/'});
@@ -74,12 +74,13 @@ try{
   const MEASURE=`(()=>{const w=document.documentElement.clientWidth;const skip='.table-wrap,.retail-tabs,.who-chips,.chips,.filter-chips,.person-filters,.bottom-nav,.top-actions';
     const bad=[...document.querySelectorAll('body *')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.right>w+2&&getComputedStyle(e).position!=='fixed'&&!e.closest(skip)&&e.offsetParent!==null}).slice(0,6).map(e=>e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' right='+Math.round(e.getBoundingClientRect().right));
     const small=[...document.querySelectorAll('button,select,input:not([type=checkbox]):not([type=file]):not([hidden]),summary')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.height<36&&e.offsetParent!==null&&!e.closest('.bottom-nav')&&!e.hidden}).slice(0,8).map(e=>(e.getAttribute('aria-label')||e.textContent||e.className).trim().slice(0,28)+' h='+Math.round(e.getBoundingClientRect().height));
-    return {w,sw:document.documentElement.scrollWidth,bad,small};})()`;
-  const screens=[['Home',()=>nav('Home')],['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Export',()=>nav('Export')],['Targets',()=>nav('Targets')],['Report',()=>nav('Report')]];
+    const lastNav=document.querySelector('.bottom-nav button:last-child');const navRight=lastNav?Math.round(lastNav.getBoundingClientRect().right):w;
+    return {w,sw:document.documentElement.scrollWidth,bad,small,navRight};})()`;
+  const screens=process.env.SIMPLE?[['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Send',()=>nav('Send')]]:[['Home',()=>nav('Home')],['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Export',()=>nav('Export')],['Targets',()=>nav('Targets')],['Report',()=>nav('Report')]];
   const issues=[];
-  for(const [name,go] of screens){await go();await sleep(700);const r=await run(MEASURE);if(name==='Scan')console.log('Android block drawn:',await run(`/Scan on this phone in the background/.test(document.body.innerText)`));console.log(name,JSON.stringify(r));if(r.sw>r.w+1||r.bad.length)issues.push(name+': runs past the edge '+JSON.stringify(r.bad));if(r.small.length)issues.push(name+': buttons too small to tap (under 30 px): '+r.small.join(' | '));}
-  await run(`document.querySelector('button[aria-label="More"]').click()`);await sleep(500);
-  const m=await run(MEASURE);console.log('More',JSON.stringify(m));if(m.sw>m.w+1||m.bad.length)issues.push('More: '+JSON.stringify(m.bad));
+  for(const [name,go] of screens){await go();await sleep(700);const r=await run(MEASURE);if(name==='Scan')console.log('Android block drawn:',await run(`/Scan on this phone in the background/.test(document.body.innerText)`));console.log(name,JSON.stringify(r));if(r.sw>r.w+1||r.bad.length)issues.push(name+': runs past the edge '+JSON.stringify(r.bad));if(r.small.length)issues.push(name+': buttons too small to tap (under 30 px): '+r.small.join(' | '));if(r.navRight<r.w-14)issues.push(name+': the bottom bar does not fill the width (last button ends at '+r.navRight+' of '+r.w+')');}
+  if(!process.env.SIMPLE){await run(`document.querySelector('button[aria-label="More"]').click()`);await sleep(500);
+  const m=await run(MEASURE);console.log('More',JSON.stringify(m));if(m.sw>m.w+1||m.bad.length)issues.push('More: '+JSON.stringify(m.bad));}
   assert.deepEqual(issues,[],'screens wider than the phone');
   ok('every screen fits the phone width');
 }catch(error){

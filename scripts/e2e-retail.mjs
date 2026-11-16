@@ -75,7 +75,7 @@ try{
   await nav('Home');
   await waitFor(`!!document.querySelector('.retail-hub')`,'retail home');
   assert.deepEqual(await run(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`),['Home','Scan','Phones','Report','Targets','Export'],'the bottom bar');
-  assert.equal(await run(`document.querySelector('.view-head h2').innerText`),'Home','each screen has its own title');
+  assert.equal(await run(`document.querySelector('.results .view-head h2').innerText`),'Home','each screen has its own title');
   assert.ok(!/Scanned records/.test(await run(`document.querySelector('.results').innerText`)),'no "Scanned records" header on Home');
   await run(`document.querySelector('button[aria-label="More"]').click()`);
   await waitFor(`!!document.querySelector('.more-list')`,'More menu');
@@ -185,7 +185,7 @@ try{
   // the Records screen shows the person's own segment name
   await nav('Phones');
   await waitFor(`!!document.querySelector('.phone-row')`,'phone rows');
-  assert.equal(await run(`document.querySelector('.view-head h2').innerText.replace(/\\d+$/,'')`),'Phones');
+  assert.equal(await run(`document.querySelector('.results .view-head h2').innerText.replace(/\\d+$/,'')`),'Phones');
   assert.ok(await run(`[...document.querySelectorAll('.phone-row .pr-facts')].some(f=>/Segment\\s*Fold 1/.test(f.innerText||f.textContent))`),'S26 phones show Fold 1');
   ok('Phones shows "Fold 1" on the phones of the models placed in it');
 

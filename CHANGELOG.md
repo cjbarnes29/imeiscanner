@@ -2,6 +2,19 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — less noise, a little motion (Android and web)
+- Removed the "STEP 01 / BULK UPLOAD" and "STEP 02 / EXPORT OPTIONS" decoration: Scan and Export have one title and a short line, like every other screen. Shorter help texts (background scanning, camera series) and a one-line footer.
+- Short, quiet animations: a screen or a sheet eases in, a phone's details slide open, a pressed button gives a little, the active bottom button pops, progress bars grow. All off when the phone asks for reduced motion.
+- The bottom bar spreads its buttons across the width in both modes. The layout test checks that too.
+
+## Unreleased — Simple mode redesigned (Android and web)
+**Simple mode is now three screens, like Detailed mode.** Bottom bar: **Scan, Phones, Send**.
+- **Scan:** the upload controls and "New phones go to". When a scan finishes, Phones opens by itself.
+- **Phones:** the same short list as Detailed mode (model and IMEI in groups, tap to open and edit; tick boxes and the selection bar only after **Select**). No retail extras.
+- **Send:** Export Excel, Share phones, Send numbers, Download pictures, and Fix photos when some need it.
+- No more "STEP 03 Scanned records" page with panels stacked on top of each other. People are still managed in the People panel at the top of Phones.
+- New tests: `scripts/e2e-simple.mjs`, emulator scenario 22, and the layout test also runs in Simple mode (`SIMPLE=1 node scripts/e2e-layout.mjs`).
+
 ## Unreleased — RetailLens, version 3: a new interface (Android and web)
 **Fewer places to go, one title per screen.** The bottom bar is **Home, Scan, Phones, Report, Targets, Export**; People, Gives, Segments, Catalog, Assign by model, Share, Backup and Settings are under the **⋯ More** button in the top bar.
 - **One title per screen** (no repeated "Scanned records" card): Home, Phones, Report… each with a short status line.

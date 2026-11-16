@@ -826,3 +826,29 @@ main.scan-first{display:flex;flex-direction:column}main.scan-first>.workspace{or
 .scan-owner select{width:auto;min-width:120px}
 .retail-card .subtle-btn,.retail-card .link-btn,.retail-list .link-btn{min-height:44px;display:inline-flex;align-items:center}
 .top-actions .settings-btn{min-width:40px;min-height:40px}
+
+/* Simple mode: three screens (Scan, Phones, Send) */
+.send-list{display:grid;gap:10px;margin:12px 0}
+.send-list .big{min-height:56px;justify-content:center;font-size:16px;display:flex;align-items:center;gap:10px}
+.pr-flag{color:#f2b84b;font-size:12px}
+.simple-mode .people-setup>.people-panel,.simple-mode .people-panel{margin-bottom:8px}
+.people-panel button,.people-tab button,.people-panel summary{min-height:44px}
+.model-tag{min-height:40px}
+.person-models button.model-tag{min-height:40px}
+.bottom-nav:has(>button:nth-child(3):last-child){justify-content:space-around}.bottom-nav:has(>button:nth-child(3):last-child) button{flex:1;max-width:none}
+
+/* Motion: short and quiet. A screen or a sheet eases in, a pressed button gives a little, progress bars grow. Off when the phone asks for less motion. */
+@keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes sheetUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{transform:scale(.85)}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+.nav-mode .panel:not([hidden]),.nav-mode .results:not([hidden]),.retail-hub>*,.pr-more:not([hidden]),.rep-sheet,.tg-levels,.action-bar.show,.unknown-tab,.people-tab{animation:viewIn .22s ease-out both}
+.modal-backdrop{animation:fadeIn .18s ease-out both}.modal{animation:sheetUp .22s ease-out both}
+.toast{animation:sheetUp .22s ease-out both}
+.primary,.subtle-btn,.bottom-nav button,.lvl-chips button,.who-chips button,.filter-chips button,.tg-step button,.more-list button,.rep-row,.tg-seg,.pr-open,.model-tag,.iconbtn,.settings-btn{transition:background-color .15s,border-color .15s,color .15s,transform .08s}
+.primary:active:not(:disabled),.subtle-btn:active:not(:disabled),.bottom-nav button:active,.lvl-chips button:active,.who-chips button:active,.tg-step button:active,.more-list button:active,.rep-row:active,.tg-seg:active,.model-tag:active{transform:scale(.97)}
+.bottom-nav button.active svg{animation:pop .25s ease-out}
+.tg-bar i,.progressbar i{transition:width .4s ease}
+footer{text-align:center;justify-content:center;padding:14px 3px 18px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+.bottom-nav{grid-template-columns:repeat(auto-fit,minmax(44px,1fr))}

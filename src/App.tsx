@@ -2075,7 +2075,7 @@ export default function App() {
   useEffect(() => { if (inventoryLoaded && !records.length) setMainView('scan'); }, [inventoryLoaded]);
   useEffect(() => {
     if (busy && !wasBusy.current) startCount.current = records.length;
-    if (!busy && wasBusy.current && records.length > startCount.current && !simpleView) { setMainView('results'); setRecordsTab('records'); window.scrollTo({ top: 0 }); }
+    if (!busy && wasBusy.current && records.length > startCount.current) { setMainView('results'); setRecordsTab('records'); window.scrollTo({ top: 0 }); }
     wasBusy.current = busy;
   }, [busy]);
   // The old minimize buttons are gone in Detailed mode, so nothing may stay collapsed.
@@ -4703,7 +4703,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app${!simpleView ? ' has-bottom-nav' : ''}`}>
+    <div className="app has-bottom-nav">
       <header className="topbar">
         <div className="brand">
           <div className="brandmark">
@@ -4752,7 +4752,7 @@ export default function App() {
         </ul>
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
-      <main className={`${collapsedPanels.length ? 'compact-page' : ''}${!simpleView ? ' nav-mode' : ''}${!simpleView && mainView === 'scan' ? ' scan-first' : ''}`}>
+      <main className={`${collapsedPanels.length ? 'compact-page' : ''}${' nav-mode'}${mainView === 'scan' ? ' scan-first' : ''}${simpleView ? ' simple-mode' : ''}`}>
         {!bulkOpen && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button> <button type="button" className="subtle-btn" onClick={openPhotoEdit}>Bulk edit photos</button></div>}
         {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
@@ -4807,15 +4807,9 @@ export default function App() {
 </>)}
 
         <section className="workspace">
-          <div id="upload" hidden={!simpleView && mainView !== 'scan'} className={`panel upload-panel ${collapsedPanels.includes('upload') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('upload')} onClick={() => togglePanel('upload')}>{collapsedPanels.includes('upload') ? '▸' : '▾'} Upload photos {collapsedPanels.includes('upload') ? '— expand' : '— minimize'}</button>
-            <div className="section-head">
-              <div>
-                <div className="eyebrow">STEP 01</div>
-                <h2>Upload photos</h2>
-              </div>
-              <span className="tag">BULK UPLOAD</span>
-            </div>
-            {!simpleView && personGroups.length > 0 && <label className="scan-owner">New phones go to
+          <div id="upload" hidden={mainView !== 'scan'} className={`panel upload-panel ${collapsedPanels.includes('upload') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('upload')} onClick={() => togglePanel('upload')}>{collapsedPanels.includes('upload') ? '▸' : '▾'} Upload photos {collapsedPanels.includes('upload') ? '— expand' : '— minimize'}</button>
+            <div className="view-head"><h2>Scan</h2><p className="view-sub">Photos are read on this phone and stay on it.</p></div>
+            {personGroups.length > 0 && <label className="scan-owner">New phones go to
               <select aria-label="New scans go to" value={activePersonId} onChange={e => setActivePersonId(e.target.value)}>
                 {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}
               </select>
@@ -4823,8 +4817,7 @@ export default function App() {
 
 {!simpleView && (<>
             {androidBridge && <div className="android-scan">
-              <strong>Scan on this phone in the background</strong>
-              <p>Choose photos here. Android keeps scanning with a progress notification when you minimize or close this screen. Your photos and results stay on this phone.</p>
+              <p>Scanning carries on in the background, with a notification, if you leave this screen.</p>
               <button type="button" className="primary" disabled={androidJob?.status === 'queued' || androidJob?.status === 'processing'} onClick={() => androidBridge.choosePhotos(activePersonId)}>
                 <ScanLine size={17} /> Choose photos and scan
               </button>
@@ -5001,17 +4994,7 @@ export default function App() {
 
 {!simpleView && (<>
           <div id="export" hidden={!simpleView && mainView !== 'export'} className={`panel export-panel ${collapsedPanels.includes('export') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('export')} onClick={() => togglePanel('export')}>{collapsedPanels.includes('export') ? '▸' : '▾'} Export inventory {collapsedPanels.includes('export') ? '— expand' : '— minimize'}</button>
-            <div className="section-head">
-              <div>
-                <div className="eyebrow">STEP 02</div>
-                <h2>Export inventory</h2>
-              </div>
-            <span className="tag">EXPORT OPTIONS</span>
-            </div>
-
-            <p className="muted">
-              Choose the records and format to download. Import the Excel file into Google Sheets if needed.
-            </p>
+            <div className="view-head"><h2>Export</h2><p className="view-sub">Pick what to include, then download. The Excel file opens in Google Sheets too.</p></div>
 
             <label className="auto-download-toggle">
               <input
@@ -5163,14 +5146,20 @@ export default function App() {
 </>)}
         </section>
 
-        <section id="records" hidden={!simpleView && mainView !== 'results'} className={`results panel ${collapsedPanels.includes('records') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('records')} onClick={() => togglePanel('records')}>{collapsedPanels.includes('records') ? '▸' : '▾'} Scanned records {collapsedPanels.includes('records') ? '— expand' : '— minimize'}</button>
+        {simpleView && <section id="send" hidden={mainView !== 'export'} className="panel send-panel">
+          <div className="view-head"><h2>Send</h2><p className="view-sub">{records.length ? `${records.length} phone${records.length === 1 ? '' : 's'} · choose how to get the numbers out` : 'Nothing to send yet. Scan some phones first.'}</p></div>
+          <div className="send-list">
+            <button type="button" className="primary big" disabled={syncing || !records.length} onClick={exportSimple}>{syncing ? <LoaderCircle className="spin" size={18} /> : <Download size={18} />} Export Excel ({selectedRows.length || records.length})</button>
+            <button type="button" className="subtle-btn big" disabled={!records.length} onClick={() => openSharing((selectedRows.length ? selectedRows : records).map(row => row.id))}><Share2 size={18} /> Share phones ({selectedRows.length || records.length})</button>
+            <button type="button" className="subtle-btn big" disabled={!records.length} onClick={() => void sendNumbers()}>Send numbers ({selectedRows.length || records.length})</button>
+            <button type="button" className="subtle-btn big" disabled={!records.length || bulkBusy} onClick={bulkDownloadPictures}><Download size={18} /> {bulkBusy ? 'Saving pictures…' : 'Download pictures'}</button>
+            {records.some(needsCropping) && <button type="button" className="subtle-btn big" onClick={() => setBulkCropOpen(true)}>Fix photos ({records.filter(needsCropping).length})</button>}
+          </div>
+          <p className="settings-help">Only some phones? Tick them in Phones first (Select), then come back here.</p>
+        </section>}
+        <section id="records" hidden={mainView !== 'results'} className={`results panel ${collapsedPanels.includes('records') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('records')} onClick={() => togglePanel('records')}>{collapsedPanels.includes('records') ? '▸' : '▾'} Scanned records {collapsedPanels.includes('records') ? '— expand' : '— minimize'}</button>
           <div className="results-top">
-            {simpleView ? <div>
-              <div className="eyebrow">STEP 03</div>
-              <h2>
-                Scanned records <span className="count">{records.length}</span>
-              </h2>
-            </div> : <div className="view-head">
+            {<div className="view-head">
               {viewInfo.back && <button type="button" className="subtle-btn back-more" onClick={() => setMoreOpen(true)}><ChevronLeft size={14} /> More</button>}
               <h2>{viewInfo.title}{recordsTab === 'records' && <span className="count">{records.length}</span>}</h2>
               {viewInfo.sub && <p className="view-sub">{viewInfo.sub}</p>}
@@ -5226,19 +5215,17 @@ export default function App() {
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
 
-              {!simpleView && <div className="select-toggle"><button type="button" className="subtle-btn" aria-pressed={selectMode} onClick={() => { if (selectMode) { setSelectOn(false); setSelectedIds([]); } else setSelectOn(true); }}>{selectMode ? `Done${selectedRows.length ? ` (${selectedRows.length} selected)` : ''}` : 'Select'}</button></div>}
-              <div className={`action-bar${simpleView || selectMode ? ' show' : ''}`} role="group" aria-label="Actions for selected phones">
+              {<div className="select-toggle"><button type="button" className="subtle-btn" aria-pressed={selectMode} onClick={() => { if (selectMode) { setSelectOn(false); setSelectedIds([]); } else setSelectOn(true); }}>{selectMode ? `Done${selectedRows.length ? ` (${selectedRows.length} selected)` : ''}` : 'Select'}</button></div>}
+              <div className={`action-bar${selectMode ? ' show' : ''}`} role="group" aria-label="Actions for selected phones">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
                 {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
               </button>
               <button className="subtle-btn" disabled={!selectedRows.length} onClick={()=>{openSharing(selectedRows.map(row=>row.id));}}>Share selected ({selectedRows.length})</button>
-              {simpleView && <button className="primary share-all-btn" disabled={syncing || !records.length} onClick={exportSimple}>{syncing ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />} Export Excel ({selectedRows.length || records.length})</button>}
-              {simpleView && records.some(needsCropping) && <button className="subtle-btn share-all-btn" onClick={() => setBulkCropOpen(true)}>Fix photos ({records.filter(needsCropping).length})</button>}
               <button className="subtle-btn delete-selected" disabled={!selectedRows.length} onClick={deleteSelected}>
                 <Trash2 size={14} /> Delete selected ({selectedRows.length})
               </button>
               </div>
-              <details className={`more-actions${simpleView || selectMode ? ' show' : ''}`}>
+              <details className={`more-actions${selectMode ? ' show' : ''}`}>
                 <summary>More actions</summary>
                 <div className="more-actions-body">
                   <button className="subtle-btn" disabled={!visible.length} onClick={() => void sendNumbers()}>Send numbers ({selectedRows.length || visible.length})</button>
@@ -5297,38 +5284,6 @@ export default function App() {
                   : 'Upload phone label photos to begin extracting IMEI.'}
               </span>
             </div>
-          ) : simpleView ? (
-            <div className="simple-record-list">
-              {pageGroups.map(([series, rows]) => <div key={series} className="series-group">
-                <h3>{series} <span>{rows.length}</span></h3>
-                {rows.map(record => { const info = infoOf(record), pair = recordImeiPair(record), serial = recordSerial(record); return <article className="simple-record" key={record.id}>
-                  <input className="selection-check" type="checkbox" aria-label={`Select ${info.name}`} checked={selectedIdSet.has(record.id)} onChange={() => toggleSelected(record.id)} />
-                  <button className="simple-record-photo" onClick={() => openReview(record)} aria-label={`Open photo of ${info.name}`}><img src={recordPhoto(record)} alt="" /></button>
-                  <div className="simple-record-info">
-                    <strong className="phone-name">{info.name}</strong>
-                    <div className="value-row"><span>IMEI</span><b>{pair.imei1 || '—'}</b><button className="subtle-btn" disabled={!pair.imei1} onClick={() => void copyText(pair.imei1).then(ok => setToast(ok ? 'IMEI copied.' : 'Copy failed.'))}>Copy</button></div>
-                    {pair.imei2 && <div className="value-row"><span>IMEI 2</span><b>{pair.imei2}</b><button className="subtle-btn" onClick={() => void copyText(pair.imei2).then(ok => setToast(ok ? 'IMEI 2 copied.' : 'Copy failed.'))}>Copy</button></div>}
-                    <div className="value-row"><span>Serial</span><b>{serial || '—'}</b><button className="subtle-btn" disabled={!serial} onClick={() => void copyText(serial).then(ok => setToast(ok ? 'Serial copied.' : 'Copy failed.'))}>Copy</button></div>
-                    {reviewStatus(record) !== 'Valid' && reviewStatus(record) !== 'Serial only' && <button className="check-flag" onClick={() => openReview(record)}>{reviewStatus(record)}{imeiIsFallback(record) ? ' (IMEI 2 shown, IMEI 1 not read)' : ''} — tap to check</button>}
-                  </div>
-                  <div className="simple-record-actions">
-                    <select aria-label={`Move ${info.name} to`} value={record.personId || 'unassigned'} onChange={event => assignPerson(record.id, event.target.value)}>{personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select>
-                    <button className="subtle-btn" onClick={() => openReview(record)}>Open</button>
-                    <button className="subtle-btn danger" aria-label={`Delete ${info.name}`} onClick={() => deleteRecord(record)}><Trash2 size={16} /></button>
-                  </div>
-                  <details className="row-more"><summary>More for this phone</summary><div className="row-more-grid">
-                    <label>IMEI <input aria-label={`IMEI for ${info.name}`} inputMode="numeric" value={record.imei} onChange={event => { const imei = digits(event.target.value).slice(0, 15); updateRow(record.id, { imei, ...(imei.length === 15 ? { imeiNeedsReview: false, brandNeedsReview: false } : {}), status: imei ? luhnValid(imei) ? 'Valid' : 'Invalid' : 'Review' }); }} /></label>
-                    <label>Serial <input aria-label={`Serial for ${info.name}`} value={serial} onChange={event => updateRow(record.id, { serial: event.target.value, serialNeedsReview: false })} /></label>
-                    <label>Model code <input aria-label={`Model code for ${info.name}`} value={exportModel(record.model)} onChange={event => { const model = event.target.value; updateRow(record.id, { model, modelNeedsReview: !typedModelOk(record, model.trim()), modelNote: typedModelNote(record, model.trim()) }); }} /></label>{record.modelNeedsReview && <small className="field-hint">{record.modelNote || typedModelNote(record, record.model)}</small>}
-                    <button className="subtle-btn" disabled={!exportModel(record.model)} onClick={() => void copyText(exportModel(record.model)).then(ok => setToast(ok ? 'Model code copied.' : 'Copy failed.'))}>Copy model code</button>
-                    <button className="subtle-btn" onClick={() => void copyText(`Model: ${exportModel(record.model)}\nIMEI: ${record.imei}\nSerial number: ${serial}`).then(ok => setToast(ok ? 'Record copied.' : 'Copy failed.'))}>Copy whole record</button>
-                    <button className="subtle-btn" onClick={() => saveDirectFile(dataUrlBlob(recordPhoto(record)), orderedPhotoName(record))}>Download photo</button>
-                    <button className="subtle-btn" onClick={() => shareRecord(record)}>Share photo + number</button>
-                    <button className="subtle-btn" onClick={() => openCropReview(record)}>Edit or crop photo</button>
-                  </div></details>
-                </article>; })}
-              </div>)}
-            </div>
           ) : (
             <div className="phone-list">
               {pageRows.map(r => {
@@ -5342,6 +5297,7 @@ export default function App() {
                     <input className="selection-check" type="checkbox" hidden={!selectMode} aria-label={'Select photo #' + r.number} checked={selectedIdSet.has(r.id)} onChange={() => toggleSelected(r.id)} />
                     <button type="button" className="pr-open" aria-expanded={open} aria-label={'Phone ' + title + ', IMEI ' + (r.imei || 'not read')} onClick={() => setOpenPhone(open ? '' : r.id)}>
                       <span className="pr-text"><strong>{title}</strong><span className="pr-imei">{r.imei ? imeiGrouped(r.imei) : 'IMEI not read'}</span></span>
+                      {flag !== 'ok' && <small className="pr-flag">{r.duplicate ? 'Duplicate' : reviewStatus(r)}</small>}
                       {!known && <b className="badge-unknown">Unknown model</b>}
                       <i className={'pr-dot ' + flag} title={r.duplicate ? 'Duplicate' : reviewStatus(r)} />
                       <span className={'pr-who' + (owner ? '' : ' none')} title={owner ? personName(owner) : 'Unassigned'}>{owner ? personName(owner).slice(0, 1).toUpperCase() : '–'}</span>
@@ -5351,18 +5307,18 @@ export default function App() {
                   <div className="pr-more" hidden={!open}>
                     <div className="pr-facts">
                       <div><span>Colour</span>{v.color || '—'}</div><div><span>RAM</span>{v.ram || '—'}</div>
-                      <div><span>IMEI 2</span>{pair.imei2 || '—'}</div><div><span>Segment</span>{retailSegLabel(retail, segOfRecord(r))}</div>
+                      <div><span>IMEI 2</span>{pair.imei2 || '—'}</div>{!simpleView && <div><span>Segment</span>{retailSegLabel(retail, segOfRecord(r))}</div>}
                       <div><span>Status</span>{reviewStatus(r)}{r.duplicate ? ' · Duplicate' : ''}</div><div><span>Picture</span>{r.pictureId}{r.cropNeedsReview ? ' · crop needs review' : ''}</div>
                     </div>
                     {reviewNote(r) && <p className="fallback-note">{reviewNote(r)}</p>}
                     <label>Person<select className="inline-edit person-edit" aria-label={'Move record #' + r.number + ' to a person'} value={r.personId || 'unassigned'} onChange={e => assignPerson(r.id, e.target.value)}>
                       {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select></label>
-                    <label>Colour<select aria-label={'Colour of ' + title} value={retailCanonColour(v.color)} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { color: e.target.value }), '')}>
+                    {!simpleView && <><label>Colour<select aria-label={'Colour of ' + title} value={retailCanonColour(v.color)} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { color: e.target.value }), '')}>
                       <option value="">Not set</option>{[...new Set([...retailModelColours(retail, modelCode4(r.model), colourSeen[modelCode4(r.model)] || []), retailCanonColour(v.color)].filter(Boolean))].sort().map(n => <option key={n} value={n}>{n}</option>)}</select></label>
                     <label>Segment of this model<select aria-label={'Segment of ' + title} value={segOfRecord(r)} onChange={e => changeRetail(retailSetModelSegment(retail, r.model, e.target.value), 'segment')}>
                       {[...retailSegmentIds(retail), 'other' as RetailSegment].map(sg => <option key={sg} value={sg}>{retailSegLabel(retail, sg)}</option>)}</select></label>
                     <label>Stock<select aria-label={'Stock status of ' + title} value={retail.recordMeta[r.id]?.status || ''} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { status: e.target.value as never }), '')}>
-                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option></select></label>
+                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option></select></label></>}
                     <label>Model<input className="inline-edit model-edit" aria-label={'Model for record ' + r.number} value={r.model}
                       onFocus={e => { e.currentTarget.dataset.before = r.model; }}
                       onChange={e => { const model = e.target.value, ok = typedModelOk(r, model.trim()); updateRow(r.id, { model, modelNeedsReview: !ok, modelNote: typedModelNote(r, model.trim()) }); }}
@@ -5399,10 +5355,7 @@ export default function App() {
         </section>
 
         <footer>
-          <span>RETAILLENS <i>•</i> scanning by IMEI Lens <i>•</i> by Carlou Joseph Barnes</span>
-          <span>
-            IMEI extraction is automated; always verify results against the device label.
-          </span>
+          <span>RetailLens <i>•</i> by Carlou Joseph Barnes <i>•</i> always check the numbers against the label</span>
         </footer>
       </main>
 
@@ -5753,6 +5706,12 @@ export default function App() {
         </> : <p>This picture is saved in the browser that scanned it. Open the Excel link on that phone in the same browser (Chrome) where you scanned, or use the picture file saved next to the Excel file.</p>}
       </section></div>}
       {showTop && !selected && shareIds.length === 0 && !cameraOpen && <button type="button" className="back-to-top" aria-label="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>↑ Top</button>}
+      {simpleView && <nav className="bottom-nav" aria-label="Sections">
+        {([['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const).map(([key, label, Icon]) =>
+          <button key={key} type="button" className={activeView === key ? 'active' : ''} aria-current={activeView === key ? 'page' : undefined} onClick={() => openView(key)}>
+            <Icon size={20} /><span>{label}</span>{key === 'records' && records.length > 0 && <b>{records.length > 99 ? '99+' : records.length}</b>}
+          </button>)}
+      </nav>}
       {!simpleView && <nav className="bottom-nav" aria-label="Sections">
         {([['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const).map(([key, label, Icon, badge]) =>
           <button key={key} type="button" className={activeView === key ? 'active' : ''} aria-current={activeView === key ? 'page' : undefined} onClick={() => openView(key)}>

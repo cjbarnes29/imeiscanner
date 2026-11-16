@@ -4,7 +4,7 @@ appId: com.imeilens.scanner.phonetest
 - runFlow: _common/clean-start.yaml
 - takeScreenshot: 00-first-launch
 # WebView: web text is visible and tappable
-- assertVisible: "Upload photos"
+- assertVisible: "Photos are read on this phone.*"
 - tapOn: "Phones.*"
 - assertVisible: ".*Phones.*"
 - takeScreenshot: 01-records-empty

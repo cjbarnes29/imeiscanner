@@ -25,7 +25,7 @@ await eval_(`(()=>{[...document.querySelectorAll('.bottom-nav button')].find(b=>
 await waitJs(`!!document.querySelector('.retail-hub')`, 'RetailLens Home');
 const bar = await eval_(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`);
 check(results, 'the bottom bar is Home, Scan, Phones, Report, Targets, Export', JSON.stringify(bar) === JSON.stringify(['Home', 'Scan', 'Phones', 'Report', 'Targets', 'Export']), JSON.stringify(bar));
-check(results, 'every screen has its own title (no repeated Scanned records)', await eval_(`document.querySelector('.view-head h2').innerText==='Home'`));
+check(results, 'every screen has its own title (no repeated Scanned records)', await eval_(`document.querySelector('.results .view-head h2').innerText==='Home'`));
 
 const tab = async name => { if (name === 'Report' || name === 'Targets') return eval_(`(()=>{const b=[...document.querySelectorAll('.bottom-nav button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(name)}));if(!b)return false;b.click();return true;})()`); await eval_(`document.querySelector('button[aria-label="More"]').click();true`); await sleep(700); return eval_(`(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(name)}));if(!b)return false;b.click();return true;})()`); };
 await tab('Report');
