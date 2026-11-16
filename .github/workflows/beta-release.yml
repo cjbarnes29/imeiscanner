@@ -50,11 +50,12 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
-          - **A new, simpler layout.** The bottom bar is **Home, Scan, Phones, Report, Targets, Export**. People, Gives, Segments, Catalog, Share and Backup are under the **⋯** button at the top. Every screen has its own title (no more repeated "Scanned records" card).
-          - **Phones:** a short list. Each phone shows its model and IMEI; tap it to open colour, RAM, IMEI 2, segment, stock status and the edit fields. Tick boxes and the action bar only appear after **Select**. "New scans go to" is now on the Scan screen.
-          - **Home:** pick a person, and "Sell first for <name>" shows whose targets they are.
-          - **Report:** paste your WhatsApp report; it is checked against your scanned phones (lines with no stock are counted as "no stock", not as matching). **Segments:** your own (Fold 1…). **Targets:** tap a level 70 to 120 for the pieces still needed. **Gives:** suggestions only.
-          - Earlier in RetailLens: automatic retry of unread photos, bulk photo editor, People tab, WhatsApp report text share.
+          - **Colour themes:** Settings (gear icon) > **Colour**: Mint (as before), Ocean, Violet or Rose. One choice recolours buttons, badges, bars and highlights everywhere.
+          - **Simple mode is now three screens:** **Scan, Phones, Send**. Phones is the same short list as Detailed mode (model and IMEI, tap to open and edit). Send has Export Excel, Share, Send numbers and Download pictures.
+          - **Colours of each model:** type them once in Catalog (`Cream = CRM`), pick a colour for a phone, and name an unmatched report colour once; it is remembered.
+          - **Motion:** the bottom bar highlight slides, list rows arrive one after another, and the ⋯ More menu is a bottom sheet you can drag down to close. All off if the phone asks for reduced motion.
+          - **Fixes:** the Scan screen no longer runs past the right edge with large system text; small buttons are bigger; less on-screen text.
+          - Earlier in RetailLens: the new Home / Scan / Phones / Report / Targets / Export layout, Report checked against scanned phones, your own Segments, level targets 70 to 120, automatic retry of unread photos, bulk photo editor.
 
           ### Known limits
           - Debug-signed test build. Tested on the emulator and in automated tests; **not yet verified on a real phone**. Some emulator flows were unstable because the emulator itself was slow.
