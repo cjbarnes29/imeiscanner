@@ -4,6 +4,8 @@ import { SheetHandle } from './SheetHandle';
 import { QuickPerson } from './QuickPerson';
 import { syncScans } from './retail/reportsync';
 import { syncSold } from './retail/soldsync';
+import { SoldOffer, type SoldGroup } from './SoldOffer';
+import { useBackNav } from './backnav';
 import { reconcile as reconcileReport } from './retail/reconcile';
 import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
@@ -2039,6 +2041,8 @@ export default function App() {
   const [moreOpen, setMoreOpen] = useState(false);
   type View = 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export' | 'home' | 'report' | 'targets';
   const activeView: View = mainView !== 'results' ? mainView : recordsTab === 'retail' ? (retailSub === 'today' ? 'home' : retailSub === 'report' ? 'report' : retailSub === 'targets' ? 'targets' : 'retail') : recordsTab;
+  // The phone's Back button goes to the screen before, and closes a popup first (see backnav.ts).
+  useBackNav(`${mainView}|${recordsTab}|${retailSub}`, key => { const [m, r, sub] = key.split('|'); setMainView(m as typeof mainView); setRecordsTab(r as typeof recordsTab); setRetailSub(sub as RetailSub); window.scrollTo({ top: 0 }); });
   function openView(view: View) {
     if (view === 'scan' || view === 'export') setMainView(view);
     else if (view === 'home' || view === 'report' || view === 'targets') { setMainView('results'); setRecordsTab('retail'); setRetailSub(view === 'home' ? 'today' : view); }
@@ -2555,6 +2559,8 @@ export default function App() {
   const [waSend, setWaSend] = useState<{ id: string; name: string; rows: RecordItem[] } | null>(null);
   /** Records already sent to WhatsApp for this person (remembered between visits). */
   const [waSent, setWaSent] = useState<string[]>([]);
+  /** After a send: "Mark them as Sold?" (ids of the phones that went out; done = they were marked, Undo is offered). */
+  const [soldOffer, setSoldOffer] = useState<{ ids: string[]; done: boolean } | null>(null);
   /** A send that was just opened: which pictures it carried, and how many the user says arrived. */
   const [waAttempt, setWaAttempt] = useState<{ ids: string[]; arrived: number; channel: 'whatsapp' | 'bluetooth' } | null>(null);
   /** What this phone can send with (from the Android app): WhatsApp installed, Bluetooth present and on. */
@@ -2666,8 +2672,40 @@ export default function App() {
       setWaProblem(message);
       setWarning(`${message} Send the rest by Bluetooth instead, or continue in WhatsApp.`);
     } else setWaProblem('');
+    offerSold(waAttempt.ids.slice(0, waAttempt.arrived));
     setWaAttempt(null);
     setToast(waAttempt.arrived ? `Saved: ${waAttempt.arrived} picture${waAttempt.arrived === 1 ? '' : 's'} sent. The app remembers where you stopped.` : 'Nothing saved as sent. You can send them again.');
+  }
+  /** After a send: offer to mark the phones that went out as Sold (never automatic: a send can also be a transfer or a check). */
+  function offerSold(ids: string[]) {
+    if (localStorage.getItem('imeilens.askSoldAfterSend') === 'off') return;
+    const open = ids.filter(id => records.some(row => row.id === id) && retailRef.current.recordMeta[id]?.status !== 'sold');
+    if (open.length) setSoldOffer({ ids: open, done: false });
+  }
+  function soldOfferGroups(ids: string[]): { groups: SoldGroup[]; noOwner: number } {
+    const map = new Map<string, { model: string; owner: string; colours: Map<string, number> }>();
+    let noOwner = 0;
+    for (const id of ids) {
+      const row = records.find(r => r.id === id); if (!row) continue;
+      const v = retailVariantOf(retailRef.current, row), owner = personGroups.find(p => p.id === row.personId);
+      if (!owner) noOwner++;
+      const model = [infoOf(row).name, v.storage].filter(Boolean).join(' '), who = owner ? personName(owner) : 'Unassigned', key = model + '|' + who;
+      const g = map.get(key) || { model, owner: who, colours: new Map<string, number>() };
+      const colour = retailCanonColour(v.color) || 'No colour';
+      g.colours.set(colour, (g.colours.get(colour) || 0) + 1); map.set(key, g);
+    }
+    return { groups: [...map.values()].map(g => ({ model: g.model, owner: g.owner, colours: [...g.colours].map(([name, count]) => ({ name, count })) })), noOwner };
+  }
+  function markOfferSold() {
+    if (!soldOffer) return;
+    changeRetail(retailSetMeta(retailRef.current, soldOffer.ids, { status: 'sold' as never }), 'sold after sending');
+    setSoldOffer({ ...soldOffer, done: true });
+  }
+  function undoOfferSold() {
+    if (!soldOffer) return;
+    changeRetail(retailSetMeta(retailRef.current, soldOffer.ids, { status: '' as never }), 'sold undone');
+    setSoldOffer(null);
+    setToast('Back in stock. Report and targets are back as they were.');
   }
   /** One line per phone for the caption: "#3  IMEI 1  IMEI 2  S/N …". */
   function captionLine(row: RecordItem, position: number) {
@@ -2894,7 +2932,7 @@ export default function App() {
     {personId !== UNASSIGNED_FILTER && <>
       <button type="button" className="subtle-btn" disabled={!count} aria-label={`Send the phones of ${label} by WhatsApp or the share menu`} onClick={() => startWhatsApp({ id: personId, name: label })}>Send</button>
       <button type="button" className="subtle-btn" disabled={!count} aria-label={`Send the phones of ${label} by Bluetooth or nearby`} onClick={() => startWhatsApp({ id: personId, name: label }, true)}>Bluetooth</button>
-      <button type="button" className="subtle-btn" disabled={!count} aria-label={`Share the numbers of ${label}`} onClick={() => void shareOrCopyText(phonesOf(personId).map(row => { const pair = recordImeiPair(row); return [pair.imei1, pair.imei2].filter(Boolean).join(String.fromCharCode(10)); }).filter(Boolean).join(String.fromCharCode(10)), `${label}'s numbers`)}>Numbers</button>
+      <button type="button" className="subtle-btn" disabled={!count} aria-label={`Share the numbers of ${label}`} onClick={() => void shareOrCopyText(phonesOf(personId).map(row => { const pair = recordImeiPair(row); return [pair.imei1, pair.imei2].filter(Boolean).join(String.fromCharCode(10)); }).filter(Boolean).join(String.fromCharCode(10)), `${label}'s numbers`).then(ok => { if (ok) offerSold(phonesOf(personId).map(row => row.id)); })}>Numbers</button>
     </>}
   </div>; };
   const peoplePanel = (
@@ -3148,14 +3186,16 @@ export default function App() {
       </>}
     </div>
   );
-  async function shareOrCopyText(text: string, what: string) {
-    if (!text) return;
-    if (androidBridge?.shareText) { androidBridge.shareText(what, text); setToast(`${what} sent to the share menu. Choose WhatsApp.`); return; }
+  async function shareOrCopyText(text: string, what: string): Promise<boolean> {
+    if (!text) return false;
+    if (androidBridge?.shareText) { androidBridge.shareText(what, text); setToast(`${what} sent to the share menu. Choose WhatsApp.`); return true; }
     if (typeof navigator.share === 'function') {
-      try { await navigator.share({ text }); setToast(`${what} sent to the share menu.`); return; }
-      catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
+      try { await navigator.share({ text }); setToast(`${what} sent to the share menu.`); return true; }
+      catch (error) { if ((error as DOMException)?.name === 'AbortError') return false; }
     }
-    setToast((await copyText(text)) ? `${what} copied. Paste it into your chat.` : 'Could not share or copy the list.');
+    const copied = await copyText(text);
+    setToast(copied ? `${what} copied. Paste it into your chat.` : 'Could not share or copy the list.');
+    return copied;
   }
 
   const todayKey = dateKey();
@@ -3343,10 +3383,12 @@ export default function App() {
     if (!rows.length) return;
     const text = rows.map((row, index) => { const pair = recordImeiPair(row), serial = recordSerial(row); return `${[pair.imei1 || (serial ? '' : '—'), pair.imei2 && `IMEI 2 ${pair.imei2}`, serial && `S/N ${serial}`].filter(Boolean).join('  ')}`; }).join('\n');
     if (typeof navigator.share === 'function') {
-      try { await navigator.share({ text }); setToast('Numbers sent to the share menu.'); return; }
+      try { await navigator.share({ text }); setToast('Numbers sent to the share menu.'); offerSold(rows.map(r => r.id)); return; }
       catch (error) { if ((error as DOMException)?.name === 'AbortError') return; }
     }
-    setToast((await copyText(text)) ? `${rows.length} numbers copied. Paste them into your chat.` : 'Could not share or copy the numbers.');
+    const copied = await copyText(text);
+    setToast(copied ? `${rows.length} numbers copied. Paste them into your chat.` : 'Could not share or copy the numbers.');
+    if (copied) offerSold(rows.map(r => r.id));
   }
 
   /** Apply the Bulk edit form to every target phone. */
@@ -5770,6 +5812,7 @@ export default function App() {
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}
       </nav>}
+      {soldOffer && (() => { const g = soldOfferGroups(soldOffer.ids); return <SoldOffer count={soldOffer.ids.length} groups={g.groups} noOwner={g.noOwner} done={soldOffer.done} onMark={markOfferSold} onUndo={undoOfferSold} onClose={() => setSoldOffer(null)} onNever={() => { localStorage.setItem('imeilens.askSoldAfterSend', 'off'); setSoldOffer(null); setToast('Will not ask again. Mark phones as Sold in Phones whenever you want.'); }} />; })()}
       {toast && (
         <div className="toast">
           <AlertTriangle size={16} />

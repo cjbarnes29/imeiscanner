@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/dashboard', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -294,6 +294,13 @@ const R = await load('retail/reportsync'), H = await load('retail/dashboard');
   assert.match(P.buildReport(r1.report), /^A07 64GB : 00\/17\n\(03,00,14\) Vlt,Grn,Blk$/m, 'the colour counts and the stock follow; "Vlt" is the report\'s label for Violet');
   assert.equal(P.reportItems(r1.report)[0].scanAdded, 2); assert.equal(P.reportItems(r1.report)[0].sold, 0, 'sold is never touched');
   assert.equal(R.syncScans(st7, r1.report, more7).report, r1.report, 'running it again changes nothing');
+  // a phone of a model the report does not list leaves the stock (sold) and comes back (undo): it is not a new scan, so no new line appears
+  const other = phone('SM-A175F', '128GB', 'Black');
+  const repOther = R.withBaseline(st7, P.parseReport(text7), [...before7, other]);
+  const goneO = R.syncScans(st7, repOther, before7);
+  assert.equal(goneO.report, repOther, 'a phone that is not in the report leaving the stock changes nothing and does not loop');
+  const back = R.syncScans(st7, goneO.report, [...before7, other]);
+  assert.equal(back.created, 0, 'coming back from Sold does not make a new line'); assert.equal(back.report, repOther, 'and nothing changes');
   // a colour the line does not have gets its own entry
   const more7b = [...more7, phone('SM-A075F', '64GB', 'Mint')];
   const r2 = R.syncScans(st7, r1.report, more7b);
@@ -333,6 +340,7 @@ const R = await load('retail/reportsync'), H = await load('retail/dashboard');
 
 // ---- 8. a phone marked Sold counts by itself (targets and report); taking it back undoes it ---------------------------------------------------------------
 const SS = await load('retail/soldsync');
+const TS2 = await load('retail/targetsummary');
 {
   const tg = (id, lines) => ({ personId: id, month: '2026-11', lines, source: 'manual', importedAt: '2026-11-01T00:00:00.000Z' });
   const base = { ...D.emptyState(), targets: { '2026-11': { p1: tg('p1', [{ segment: 'low', target: 10, achieved: 2 }]) } }, report: P.parseReport('A07 64GB : 00/15\n(02,00,13) Vlt,Grn,Blk') };
@@ -350,6 +358,12 @@ const SS = await load('retail/soldsync');
   const sold1 = SS.syncSold({ ...zero, recordMeta: { s1: { status: 'sold' } } }, ph, day);
   assert.equal(sold1.added, 1); assert.equal(ach(sold1.state), 3, 'the owner\'s Sold: 2 -> 3'); assert.equal(soldOf(sold1.state), 1, 'the report line says Sold 1');
   assert.match(P.buildReport(sold1.state.report), /^A07 64GB : 01\/15$/m);
+  // what was sold on a day (the Targets screen shows it as "today N")
+  const e1 = sold1.state.soldLedger.s1;
+  assert.deepEqual(SS.soldOnDay(sold1.state, day), { [e1.personId]: { [e1.segment]: 1 } }, 'the sale is counted on the day it was marked');
+  assert.deepEqual(SS.soldOnDay(sold1.state, '2000-01-01'), {}, 'another day: nothing');
+  assert.equal(D.cleanState(JSON.parse(JSON.stringify(sold1.state))).soldLedger.s1.date, day, 'the day is saved and loaded');
+  assert.deepEqual(SS.soldOnDay(first.state, day), {}, 'sales that were there before days were kept are not counted as today');
   assert.equal(SS.syncSold(sold1.state, ph, day).state, sold1.state, 'running it again changes nothing (same state object)');
 
   // Given is not a sale
@@ -439,3 +453,15 @@ const CD = await load('retail/colour-dictionary'), CL = await load('retail/colou
 }
 
 console.log('retail v2: all checks passed');
+
+{
+  const row = (label, target, sold, remaining, perDay, each) => ({ label, target, sold, remaining, perDay, each });
+  const text = TS2.targetSummary({ month: '2026-11', level: 90, days: 15, rows: [
+    row('Fold 1', 10, 1, 8, 0.6, [{ name: 'Carlou Test', target: 5, sold: 1, remaining: 4, perDay: 0.3, today: 1 }, { name: 'Asha Test', target: 5, sold: 0, remaining: 4, perDay: 0.3 }]),
+    row('Mid', 6, 6, 0, 0, [{ name: 'Carlou Test', target: 6, sold: 6, remaining: 0, perDay: 0 }]), row('Tablet', 0, 0, 0, 0, [])] });
+  assert.ok(text.startsWith("Targets 2026-11 · 90% · 15 days left")); assert.ok(text.includes("Fold 1: sold 1 of 10 · needs 8 more · 0.6/day"), "Fold 1: sold 1 of 10 · needs 8 more · 0.6/day");
+  assert.ok(text.includes("  Carlou Test: 1/5 (today 1) · needs 4 · 0.3/day"), "  Carlou Test: 1/5 (today 1) · needs 4 · 0.3/day"); assert.ok(text.includes("Mid: sold 6 of 6 · 90% reached"), "Mid: sold 6 of 6 · 90% reached");
+  assert.ok(!text.includes('Tablet'), 'a segment with no target is not listed'); assert.ok(text.includes("Total: 8 more pieces · about 0.6 a day"), "Total: 8 more pieces · about 0.6 a day");
+  assert.ok(TS2.targetSummary({ month: "2026-11", level: 100, days: 1, rows: [] }).includes("No targets set yet."));
+  console.log('target summary ok');
+}

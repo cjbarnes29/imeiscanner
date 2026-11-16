@@ -39,9 +39,9 @@ export function syncSold(state: RetailState, records: StockSource[], today: Date
   for (const r of records) {
     const meta = state.recordMeta[r.id];
     if (meta?.status !== 'sold') continue;
-    now.set(r.id, { personId: r.personId || '', segment: segmentOf(state, r.model, month, meta), month, code: itemFor(state, r.model)?.code || '', storage: unit(variantOf(state, r).storage) });
+    now.set(r.id, { personId: r.personId || '', segment: segmentOf(state, r.model, month, meta), month, code: itemFor(state, r.model)?.code || '', storage: unit(variantOf(state, r).storage), date: today });
   }
-  if (!state.soldLedger) return { state: { ...state, soldLedger: Object.fromEntries(now) }, added: 0, undone: 0 };
+  if (!state.soldLedger) return { state: { ...state, soldLedger: Object.fromEntries([...now].map(([id, e]) => [id, { ...e, date: undefined }])) }, added: 0, undone: 0 };
   const ledger = state.soldLedger;
   const present = new Set(records.map(r => r.id));
   const newOnes = [...now.entries()].filter(([id]) => !ledger[id]);
@@ -56,4 +56,15 @@ export function syncSold(state: RetailState, records: StockSource[], today: Date
     delete kept[id];
   }
   return { state: { ...next, soldLedger: kept }, added, undone };
+}
+
+/** What was sold on one day, from the sales ledger: person -> segment -> pieces (phones counted that day). */
+export function soldOnDay(state: RetailState, date: string): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const e of Object.values(state.soldLedger || {})) {
+    if (e.date !== date) continue;
+    const p = (out[e.personId] ||= {});
+    p[e.segment] = (p[e.segment] || 0) + 1;
+  }
+  return out;
 }

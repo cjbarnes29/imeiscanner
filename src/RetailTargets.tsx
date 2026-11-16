@@ -7,6 +7,8 @@ import { addSegment, assignModels, deleteSegment, moveSegment, renameSegment, se
 import { emptyTarget, lastMonthLine, matchPerson, needAt, parseTargetText, prevMonth, putTarget, startFromLastMonth, suggestedLevels } from './retail/targets';
 import { daysLeft, isMonth, LEVELS, monthOf, SEGMENT_LABEL, type Level, type Segment, type TargetLine } from './retail/types';
 import { itemFor } from './retail/catalog';
+import { soldOnDay } from './retail/soldsync';
+import { targetSummary } from './retail/targetsummary';
 import { num, type RetailCtx } from './retail/ui-helpers';
 
 /** A typed or pasted number: only the digits count. */
@@ -66,16 +68,19 @@ export function TargetsTab(ctx: RetailCtx) {
   };
 
   // one line per segment: everyone chosen, added together
+  const soldToday = useMemo(() => soldOnDay(state, today), [state, today]);
   const rows = useMemo(() => segs.map(segment => {
     let target = 0, sold = 0, remaining = 0;
-    const each: { id: string; name: string; target: number; sold: number; remaining: number; perDay: number }[] = [];
+    const each: { id: string; name: string; target: number; sold: number; remaining: number; perDay: number; today: number }[] = [];
+    let todayAll = 0;
     for (const p of chosen) {
       const l = lineOf(p.id, segment), rem = needAt(l, level, days).remaining;
       target += l.target; sold += l.achieved; remaining += rem;
-      if (l.target > 0 || l.achieved > 0) each.push({ id: p.id, name: p.name, target: l.target, sold: l.achieved, remaining: rem, perDay: ceilTenth(days <= 0 ? rem : rem / days) });
+      const todayN = (soldToday[p.id] || {})[segment] || 0; todayAll += todayN;
+      if (l.target > 0 || l.achieved > 0) each.push({ id: p.id, name: p.name, target: l.target, sold: l.achieved, remaining: rem, perDay: ceilTenth(days <= 0 ? rem : rem / days), today: todayN });
     }
-    return { segment, target, sold, remaining, perDay: ceilTenth(days <= 0 ? remaining : remaining / days), each };
-  }), [state, month, level, personId, people, today]); // eslint-disable-line react-hooks/exhaustive-deps
+    return { segment, target, sold, remaining, perDay: ceilTenth(days <= 0 ? remaining : remaining / days), each, today: todayAll };
+  }), [state, month, level, personId, people, today, soldToday]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const importScreenshot = async (picked: File | undefined) => {
     if (!picked) return;
@@ -109,6 +114,7 @@ export function TargetsTab(ctx: RetailCtx) {
       </div>
       <p className="settings-help">{days} day{days === 1 ? '' : 's'} left. Show what is needed for:</p>
       <div className="lvl-chips" role="group" aria-label="Level">{LEVELS.map(l => <button key={l} type="button" aria-pressed={level === l} className={level === l ? 'on' : ''} onClick={() => setLevel(l)}>{l}</button>)}</div>
+      <div className="share-toolbar"><button type="button" className="subtle-btn" disabled={!rows.some(r => r.target > 0)} onClick={() => ctx.share(targetSummary({ month, level, days, person: personId === 'all' ? '' : people.find(p => p.id === personId)?.name, rows: rows.map(r => ({ ...r, label: segLabel(state, r.segment) })) }))}>Share summary: pieces per day</button></div>
       {hasLastMonth && <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={startMonth}>Start from last month</button></div>}
       <div className="share-toolbar"><input ref={file} type="file" accept="image/*" hidden onChange={e => void importScreenshot(e.target.files?.[0])} />
         <button type="button" className="subtle-btn" disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Reading the screenshot…' : 'Import Promoter screenshot'}</button></div>
@@ -125,10 +131,10 @@ export function TargetsTab(ctx: RetailCtx) {
       <div className="share-toolbar"><button type="button" className="primary" onClick={saveDraft}>Save targets</button><button type="button" className="subtle-btn" onClick={() => setDraft(null)}>Discard</button></div></section>}
 
     {!seg && <ul className="tg-segs">{visible.map(r => <li key={r.segment}><button type="button" className="tg-seg" onClick={() => setOpenSeg(r.segment)} aria-label={`Open ${segLabel(state, r.segment)}`}>
-      <span className="tg-top"><strong>{segLabel(state, r.segment)}</strong><small>Sold {r.sold} of {r.target}</small></span>
+      <span className="tg-top"><strong>{segLabel(state, r.segment)}</strong><small>Sold {r.sold} of {r.target}{r.today > 0 && <> · today {r.today}</>}</small></span>
       <span className="tg-bar"><i style={{ width: `${r.target > 0 ? Math.min(100, Math.round(r.sold / r.target * 100)) : 0}%` }} /></span>
       <span className="tg-need">{r.target <= 0 ? 'No target set' : r.remaining <= 0 ? `${level}% reached` : <>Needs <b>{r.remaining} more</b> for {level}% · {r.perDay}/day</>}</span>
-      {personId === 'all' && r.each.length > 0 && <span className="tg-people">{r.each.map(e => <span key={e.id} className="tg-p"><b>{e.name}</b><small>{e.sold}/{e.target}</small><em>{e.target <= 0 ? '' : e.remaining <= 0 ? 'reached' : `needs ${e.remaining} · ${e.perDay}/day`}</em></span>)}</span>}</button></li>)}
+      {personId === 'all' && r.each.length > 0 && <span className="tg-people">{r.each.map(e => <span key={e.id} className="tg-p"><b>{e.name}</b><small>{e.sold}/{e.target}{e.today > 0 && <> · today {e.today}</>}</small><em>{e.target <= 0 ? '' : e.remaining <= 0 ? 'reached' : `needs ${e.remaining} · ${e.perDay}/day`}</em></span>)}</span>}</button></li>)}
       {!rows.length && <li className="settings-help">Add segments first (Retail &gt; Segments).</li>}
       {hidden > 0 && <li><button type="button" className="subtle-btn" onClick={() => setShowEmpty(true)}>Show {hidden} empty segment{hidden === 1 ? '' : 's'}</button></li>}</ul>}
 

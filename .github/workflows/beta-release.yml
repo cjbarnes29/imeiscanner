@@ -50,6 +50,9 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **After sending:** "Mark them as Sold?" with what will change, and Undo.
+          - **Targets:** sold today per person, and a copyable "pieces per day" summary.
+          - **Back button** goes to the previous screen instead of leaving the app.
           - **Less typing for colours:** a built-in colour dictionary, one Colour names list for the whole report (name a short form once, every line is filled in), and tap suggestions in the popup.
           - **Levels and months:** Use suggested / Same as last month, and Start from last month for targets.
           - **Targets:** the Everyone view lists each person under every segment, with what they need and per day.

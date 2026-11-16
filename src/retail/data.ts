@@ -68,7 +68,7 @@ function cleanLedger(value: unknown): RetailState['soldLedger'] {
   for (const [id, raw] of Object.entries(obj(value)).slice(0, 5000)) {
     const e = obj(raw);
     if (!id || id.length > 80 || !isSegment(e.segment) || !isMonth(e.month)) continue;
-    out[id] = { personId: str(e.personId).slice(0, 80), segment: e.segment as string, month: e.month as string, code: str(e.code).slice(0, 8), storage: str(e.storage).slice(0, 12) };
+    out[id] = { personId: str(e.personId).slice(0, 80), segment: e.segment as string, month: e.month as string, code: str(e.code).slice(0, 8), storage: str(e.storage).slice(0, 12), ...(/^\d{4}-\d{2}-\d{2}$/.test(str(e.date)) ? { date: str(e.date) } : {}) };
   }
   return out;
 }

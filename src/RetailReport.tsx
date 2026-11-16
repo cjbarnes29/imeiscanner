@@ -14,6 +14,7 @@ import { withBaseline } from './retail/reportsync';
 import { acknowledgeTotal, buildReport, listedSold, parseReport, partsSum, reportItems, startNewDay, updateItem } from './retail/stockreport';
 import { monthOf, type ReportItem, type ReportPart, type RetailState, type Segment } from './retail/types';
 import { SheetHandle } from './SheetHandle';
+import { useBackLayer } from './back-layer';
 import { num, type RetailCtx } from './retail/ui-helpers';
 
 type Draft = { name: string; sold: string; stock: string; parts: ReportPart[]; /** what each colour of the line means (a colour name, or '' = not matched) */ names: string[]; code: string; segment: Segment; remember: boolean; search: string; newCode: string; /** teach a colour for this model only (otherwise for every model) */ onlyModel: boolean };
@@ -41,6 +42,7 @@ export function ReportTab(ctx: RetailCtx) {
   const [text, setText] = useState(ctx.sharedText || '');
   const [pasting, setPasting] = useState(!report || !!ctx.sharedText);
   const [open, setOpen] = useState<{ id: string; draft: Draft } | null>(null);
+  useBackLayer(!!open, () => setOpen(null), 'report-line');
   const [only, setOnly] = useState<'all' | 'problems'>('all');
   const [allNames, setAllNames] = useState(false);
   const rec = useMemo(() => (report ? reconcile(state, report, records) : null), [state, report, records]);

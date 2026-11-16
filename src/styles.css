@@ -933,3 +933,7 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
 .tg-people{display:grid;gap:4px;margin-top:6px;padding-top:6px;border-top:1px solid #2a3b4e}
 .tg-p{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;font-size:13px;align-items:baseline}
 .tg-p b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tg-p small{color:#9fb0c3}.tg-p em{grid-column:1/-1;font-style:normal;color:#9fb0c3}
+
+/* after sending: Mark them as Sold? */
+.sold-offer h3{margin:0 0 8px;font-size:18px}.sold-groups li{display:grid;gap:2px}.sold-groups span{font-size:14px}.sold-groups small{color:#9fb0c3}
+.sold-offer .share-toolbar{margin-top:10px}

@@ -119,7 +119,7 @@ export type StockReport = {
 export type ModelColours = { names: string[]; aliases: Record<string, string> };
 
 /** A phone that was marked Sold and already counted in the targets and the report (see soldsync.ts). */
-export type SoldEntry = { personId: string; segment: Segment; month: Month; code: string; storage: string };
+export type SoldEntry = { personId: string; segment: Segment; month: Month; code: string; storage: string; /** the day it was counted (missing = counted before days were kept) */ date?: string };
 
 export type RetailState = {
   version: 1;

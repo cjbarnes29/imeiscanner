@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — after sending, Back button, today on Targets (Android and web)
+- **After you send phones:** "You sent N phones. Mark them as Sold?" lists the models, colours and owners that will change. Mark as Sold takes the stock off the right colour in the report and adds to the owner's Sold, with Undo. Not now changes nothing. Can be turned off (Don't ask again).
+- **Targets:** each segment and person shows what was sold today, and **Share summary: pieces per day** makes a text to copy and send.
+- **Back button:** Back now goes to the screen before (Scan, Phones, Report, Targets...) and closes popups first. It only leaves the app from the first screen.
+- **Fix:** a phone of a model that is not in the report, marked Sold and then taken back, no longer makes a new report line.
+
 ## Unreleased — less typing for colours and levels, per person on Targets, send from People (Android and web)
 - **Colour names:** a built-in colour dictionary names short forms by itself (CRM = Cream, GRPH = Graphite...). The report has one Colour names list for the whole report: name a short form once and every line that uses it is filled in. The popup shows tap suggestions.
 - **Levels and months:** Use suggested / Same as last month for levels, and Start from last month for targets (sold starts at 0).

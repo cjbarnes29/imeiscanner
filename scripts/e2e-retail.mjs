@@ -352,6 +352,44 @@ try{
   await waitFor(`[...document.querySelectorAll('.tg-seg')].some(b=>/^Low/.test(b.innerText.trim())&&/Sold 1 of 0/.test(b.innerText))`,'Low shows Sold 1');
   await sub('Report');
   ok('a phone marked Sold counts by itself: the report line says Sold 1 and the owner\'s Sold in Targets goes up');
+  await nav('Targets');
+  await waitFor(`[...document.querySelectorAll('.tg-seg')].some(b=>/^Low/.test(b.innerText.trim())&&/today 1/.test(b.innerText))`,'Low shows today 1');
+  assert.equal(await run(`[...document.querySelectorAll('button')].some(b=>/^Share summary: pieces per day/.test(b.innerText)&&!b.disabled)`),true,'the summary can be shared');
+  ok('Targets shows what was sold today ("today 1") on the segment line');
+
+  // ---------- after sending: "Mark them as Sold?" ----------
+  await nav('Phones');
+  await click('.select-toggle button','Select');
+  await waitFor(`[...document.querySelectorAll('input[aria-label^="Select "]')].some(i=>i.getAttribute('aria-label')!=='Select r1.jpg'&&i.getAttribute('aria-label')!=='Select visible')`,'phone list');
+  await click('button','Select visible');
+  await run(`navigator.share=async()=>{};true`);
+  await click('button','Send numbers');
+  await waitFor(`!!document.querySelector('.sold-offer')`,'the Mark as Sold prompt');
+  assert.match(await run(`document.querySelector('.sold-offer').innerText`),/Mark them as Sold\?[\s\S]*×[\s\S]*Owner:/,'the prompt lists model, colour and owner');
+  await click('.sold-offer button','Not now');
+  await waitFor(`!document.querySelector('.sold-offer')`,'prompt closed');
+  assert.equal(await run(`document.body.innerText.includes('marked Sold')`),false,'Not now changes nothing');
+  // the phone's Back button: closes the popup first, then goes to the screen before
+  await click('button','Send numbers');
+  await waitFor(`!!document.querySelector('.sold-offer')`,'the prompt for Back');
+  await run(`history.back();true`);
+  await waitFor(`!document.querySelector('.sold-offer')`,'Back closed the popup');
+  assert.equal(await run(`!!document.querySelector('.select-toggle')`),true,'Back from a popup stays on the same screen');
+  await run(`history.back();true`);
+  await waitFor(`document.querySelectorAll('.tg-seg').length>0`,'Back went to Targets, the screen before Phones');
+  ok('Back closes a popup first, then goes to the screen before (it does not leave the app)');
+  await nav('Phones');
+  await waitFor(`!!document.querySelector('.select-toggle')`,'Phones again');
+  await run(`navigator.share=async()=>{};true`);
+  await click('button','Send numbers');
+  await waitFor(`!!document.querySelector('.sold-offer')`,'the prompt again');
+  await click('.sold-offer button','Mark as Sold');
+  await waitFor(`/phones? marked Sold/.test(document.querySelector('.sold-offer')?.innerText||'')`,'marked');
+  await nav('Targets');
+  await waitFor(`[...document.querySelectorAll('.tg-seg')].some(b=>/today [2-9]/.test(b.innerText))`,'today went up');
+  await nav('Phones');
+  await click('.sold-offer button','Undo');
+  ok('after sending, the prompt lists what changes; Not now changes nothing; Mark as Sold adds to today in Targets');
 
   // ---------- Reload: everything persists, scan records untouched ----------
   await send('Page.navigate',{url:'http://localhost:4196/'});

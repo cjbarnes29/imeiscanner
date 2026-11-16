@@ -86,12 +86,18 @@ export function syncScans(state: RetailState, report: StockReport, records: Stoc
   const info = [...works.values()].map(w => { const model = matchModel(state, index, w.item.name); return { work: w, code: model?.code || '', storage: unit(splitName(w.item.name).storage) }; });
   let added = 0, removed = 0;
   const fresh = new Map<string, Map<string, number>>();
+  /** phones that left the stock but have no line in the report: the baseline keeps them, so when they come back they are not "new scans" */
+  const unabsorbed = new Set<string>();
   for (const { key, delta } of deltas) {
     const [code, storage, colour] = key.split('|');
     const home = info.find(i => i.code === code && i.storage === storage) || info.find(i => i.code === code && !i.storage && (i.work.item.kind === 'storage' || !storage));
     if (home) { change(state, home.work, code, storage, colour, delta); if (delta > 0) added += delta; else removed -= delta; }
+    else if (delta < 0) unabsorbed.add(key);
     else if (delta > 0) { const k = `${code}|${storage}`; const m = fresh.get(k) || new Map<string, number>(); m.set(colour, (m.get(colour) || 0) + delta); fresh.set(k, m); }
   }
+  const nextBase: Record<string, number> = { ...cur };
+  for (const key of unabsorbed) nextBase[key] = base[key];
+  if (!added && !removed && !fresh.size && sameCounts(nextBase, base)) return { report, added: 0, removed: 0, created: 0 };
   let entries = report.entries.map(e => (e.t === 'item' ? works.get(e.id)!.item : e));
   let created = 0;
   if (fresh.size) {
@@ -99,5 +105,5 @@ export function syncScans(state: RetailState, report: StockReport, records: Stoc
     const lines = [...fresh.entries()].map(([k, colours]) => { const [code, storage] = k.split('|'); created++; added += [...colours.values()].reduce((a, b) => a + b, 0); return newLine(state, code, storage, colours); });
     entries = [...entries.slice(0, lastItem + 1), ...lines, ...entries.slice(lastItem + 1)];
   }
-  return { report: { ...report, entries, scanBase: cur }, added, removed, created };
+  return { report: { ...report, entries, scanBase: nextBase }, added, removed, created };
 }
