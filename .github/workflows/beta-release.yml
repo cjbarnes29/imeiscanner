@@ -42,28 +42,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'NOTES'
-          ## BETA: IMEI Lens Test (phone camera update)
+          ## BETA: RetailLens Test (Scan. Sell. Track. Achieve.)
           **This is a beta test build, not a production release.**
 
           ### Install
           1. On the phone, download the **.apk** file from the assets below and open it (allow installing from this source when asked).
-          2. It installs as **IMEI Lens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
+          2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
-          - **Take photo / Scan with camera now use the phone's own camera app.** The small in-app camera preview is no longer used on the phone.
-          - Each photo is saved straight into a private folder inside the app (never your gallery) and scanned by the background scanner.
-          - **After taking a photo** (setting under the camera button): keep taking photos, scanning each one while you shoot (default; press Back in the camera to stop) / scan each photo right away / take several, then scan them together (Scan now, or Discard waiting photos).
-          - Clear messages for refused camera permission, cancelled camera, no camera app, or a photo that could not be saved.
-          - Earlier on this branch: fix for 0-byte CSV exports, safer folder export, duplicates are archived (with Undo), Samsung IMEI 1 detection, "Retake photo" prompt for labels cut off by the photo edge, manufacturer profiles (Samsung complete, Apple draft).
-          - **Simpler review:** one **Save** button (saves, then goes to the next record). Leaving a review saves everything, nothing is discarded. **Fix photo** and **More** hold the rarely used buttons.
-          - **Bulk review list:** after a scan, records that need a look open in a fast list (IMEI 1 and Serial per row, autosaved). **Accept N that look right** with Undo; **Review all (N)** reopens it.
-          - A new record whose IMEI is already in your archive shows a soft **Also in archive** hint. Fewer popups: duplicate and invalid notes are short messages, Archive duplicates acts at once with Undo.
+          - **RetailLens** (IMEI Lens stays the scanning engine). The **Retail** tab (Detailed mode) has Today, Catalog, Targets, Gives, Stock, Reports and Data, all offline. Phones are sorted into segments, targets come from Promoter screenshots, allocations are proposed and need your approval, stock follows confirmed sales, and your WhatsApp report format is learned and rewritten for you. Share a WhatsApp report as text to the app to open it in Reports.
+          - **Automatic retry:** a photo a scan could not read is tried once more by itself. IMEI 1 can be recovered from the barcode under strict checks. Only what is still unread goes to Review, with the reason in words, and the scan report shows the counts.
+          - **Photo editor:** Fix It is inside Crop / Edit Photo. Bulk Edit has Previous, Next, Delete and progress. Delete removes a photo from the app only, never from the phone gallery.
+          - **People tab** (add, edit, delete, search, devices, counts, export). The Unknown tab is replaced by a filter and badge.
 
           ### Known limits
-          - Debug-signed test build. Tested on the emulator; **not yet verified on a real phone (camera, POCO / HyperOS, and the new review screens)**.
-          - Photos physically cut off by the photo edge cannot be read: the app asks for a retake.
+          - Debug-signed test build. Tested on the emulator and in automated tests; **not yet verified on a real phone**. Some emulator flows were unstable because the emulator itself was slow.
+          - Not tested with real Promoter screenshots or real WhatsApp reports. The incentive rates are examples: set your own.
+          - The WhatsApp media-folder watcher is not built (shared photos work). Glare and blur retake guidance is not included yet.
           NOTES
           gh release create "${GITHUB_REF_NAME}" out/*.apk out/*.sha256 \
-            --title "IMEI Lens BETA ${GITHUB_REF_NAME#beta-v}" \
+            --title "RetailLens BETA ${GITHUB_REF_NAME#beta-v}" \
             --prerelease --latest=false \
             --notes-file notes.md
