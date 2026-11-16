@@ -50,12 +50,11 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
-          - **Report:** paste your WhatsApp report (`Model : sold/stock` and the colour counts). It is read on the phone and checked against the phones you scanned: every difference is said in words, and abbreviations are matched from your scans. Tap a line to fix the name, segment, sold, stock and colours. Copy it back out in your own layout with today's date; **New day** resets sold.
-          - **Segments:** make your own (Fold 1, Fold 2…) and tick the models in each.
-          - **Targets:** tap a level (70 to 120) and every segment says how many pieces are still needed and per day. Open a segment to see each person: target, their own sold count, and the pieces needed per level (typed from the Promoter screen).
-          - **Gives:** suggestions only, with Approve and Skip. **Catalog:** mark phones In stock, Sold or Given.
+          - **A new, simpler layout.** The bottom bar is **Home, Scan, Phones, Report, Targets, Export**. People, Gives, Segments, Catalog, Share and Backup are under the **⋯** button at the top. Every screen has its own title (no more repeated "Scanned records" card).
+          - **Phones:** a short list. Each phone shows its model and IMEI; tap it to open colour, RAM, IMEI 2, segment, stock status and the edit fields. Tick boxes and the action bar only appear after **Select**. "New scans go to" is now on the Scan screen.
+          - **Home:** pick a person, and "Sell first for <name>" shows whose targets they are.
+          - **Report:** paste your WhatsApp report; it is checked against your scanned phones (lines with no stock are counted as "no stock", not as matching). **Segments:** your own (Fold 1…). **Targets:** tap a level 70 to 120 for the pieces still needed. **Gives:** suggestions only.
           - Earlier in RetailLens: automatic retry of unread photos, bulk photo editor, People tab, WhatsApp report text share.
-          - The Stock tab and the old Reports writer are gone.
 
           ### Known limits
           - Debug-signed test build. Tested on the emulator and in automated tests; **not yet verified on a real phone**. Some emulator flows were unstable because the emulator itself was slow.
