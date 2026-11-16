@@ -5,6 +5,7 @@ import { CATALOG_AUTO_KEY, readCatalogEntries, SamsungCatalog } from './SamsungC
 import { CatalogDialog } from './CatalogDialog';
 import { deviceRamGb, embedPhotoLimit, MAX_PHOTOS_PER_BATCH } from './capacity';
 import { readTextSize, saveTextSize, TEXT_SIZES, type TextSizeId } from './text-size';
+import { readTheme, saveTheme, THEMES, type ThemeId } from './theme';
 import { AuthorCredit, TutorialsDialog, WhatsNewDialog } from './Guide';
 import { APP_COMMIT, APP_VERSION } from './version';
 
@@ -210,6 +211,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
 
   const [guide, setGuide] = useState<'' | 'new' | 'tutorials'>('');
   const [textSize, setTextSize] = useState<TextSizeId>(readTextSize);
+  const [theme, setTheme] = useState<ThemeId>(readTheme);
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
@@ -217,6 +219,8 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
 
     <h3>Help</h3>
     <div className="settings-learn"><button type="button" className="primary" onClick={() => setGuide('tutorials')}>Tutorials: how to do everything</button><button type="button" className="subtle-btn" onClick={() => setGuide('new')}>What’s new</button></div>
+    <h3>Colour</h3>
+    <div className="theme-choice" role="radiogroup" aria-label="Colour theme">{THEMES.map(item => <button key={item.id} type="button" role="radio" aria-checked={theme === item.id} aria-label={item.label} title={item.label} className={theme === item.id ? 'on' : ''} style={{ background: item.swatch }} onClick={() => { setTheme(item.id); saveTheme(item.id); }}><span>{item.label}</span></button>)}</div>
     <h3>Text size</h3>
     <p className="settings-help">Make the writing in the whole app smaller or bigger. It is remembered on this phone.</p>
     <div className="text-size-choice" role="radiogroup" aria-label="Text size">{TEXT_SIZES.map(size => <button key={size.id} type="button" role="radio" aria-checked={textSize === size.id} className={textSize === size.id ? "primary" : "subtle-btn"} onClick={() => { setTextSize(size.id); saveTextSize(size.id); }}>{size.label}</button>)}</div>

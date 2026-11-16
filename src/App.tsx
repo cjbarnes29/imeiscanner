@@ -1,5 +1,6 @@
 import { activeIssue, issueTextFor } from './label-issue';
 import { RetailHub, type RetailRecord, type RetailSub } from './RetailHub';
+import { SheetHandle } from './SheetHandle';
 import { reconcile as reconcileReport } from './retail/reconcile';
 import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
@@ -3016,6 +3017,8 @@ export default function App() {
   const colourSeen = useMemo(() => { const out: Record<string, string[]> = {}; for (const r of retailRecords) { const code = modelCode4(r.model); const c = retailCanonColour(retailVariantOf(retail, r).color); if (code && c) (out[code] ||= []).push(c); } return out; }, [retail, retailRecords]);
   /** Report lines that need a look (shown as the badge on the Report button). */
   const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
+  const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
+  const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;
   function assignOwners(changes: { id: string; personId: string }[]) {
     const owner = new Map(changes.map(change => [change.id, change.personId]));
     setRecords(old => markDuplicateRecords(old.map(r => owner.has(r.id) ? { ...r, personId: owner.get(r.id)! } : r)));
@@ -4744,6 +4747,7 @@ export default function App() {
         </div>
       </section></div>}
       {moreOpen && !simpleView && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) setMoreOpen(false); }}><section className="modal more-sheet" role="dialog" aria-modal="true" aria-label="More">
+        <SheetHandle onClose={() => setMoreOpen(false)} />
         <div className="modal-head"><h2>More</h2><button className="iconbtn" aria-label="Close" onClick={() => setMoreOpen(false)}><X size={17} /></button></div>
         <ul className="more-list">
           {([['people', 'People', `${personGroups.length} people · devices and targets`], ['gives', 'Gives', 'Suggested phones for each person'], ['segments', 'Segments', 'Fold 1, Fold 2 and your own'], ['catalog', 'Catalog', 'Models, abbreviations, colours'], ['models', 'Assign by model', 'Give phones out by model'], ['share', 'Share', 'Send phones or numbers'], ['data', 'Backup and data', 'Backup, restore, undo, history']] as const).map(([key, label, hint]) =>
@@ -5706,14 +5710,14 @@ export default function App() {
         </> : <p>This picture is saved in the browser that scanned it. Open the Excel link on that phone in the same browser (Chrome) where you scanned, or use the picture file saved next to the Excel file.</p>}
       </section></div>}
       {showTop && !selected && shareIds.length === 0 && !cameraOpen && <button type="button" className="back-to-top" aria-label="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>↑ Top</button>}
-      {simpleView && <nav className="bottom-nav" aria-label="Sections">
-        {([['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const).map(([key, label, Icon]) =>
+      {simpleView && <nav className="bottom-nav" aria-label="Sections" style={{ '--n': simpleNav.length, '--i': Math.max(0, simpleNav.findIndex(item => item[0] === activeView)) } as React.CSSProperties}>
+        {simpleNav.map(([key, label, Icon]) =>
           <button key={key} type="button" className={activeView === key ? 'active' : ''} aria-current={activeView === key ? 'page' : undefined} onClick={() => openView(key)}>
             <Icon size={20} /><span>{label}</span>{key === 'records' && records.length > 0 && <b>{records.length > 99 ? '99+' : records.length}</b>}
           </button>)}
       </nav>}
-      {!simpleView && <nav className="bottom-nav" aria-label="Sections">
-        {([['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const).map(([key, label, Icon, badge]) =>
+      {!simpleView && <nav className="bottom-nav" aria-label="Sections" style={{ '--n': detailedNav.length, '--i': Math.max(0, detailedNav.findIndex(item => item[0] === activeView)) } as React.CSSProperties}>
+        {detailedNav.map(([key, label, Icon, badge]) =>
           <button key={key} type="button" className={activeView === key ? 'active' : ''} aria-current={activeView === key ? 'page' : undefined} onClick={() => openView(key)}>
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}

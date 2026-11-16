@@ -58,6 +58,20 @@ check(results, 'Targets has the level chips 70 to 120', JSON.stringify(chips) ==
 check(results, 'the new segment is a line in Targets', await eval_(`[...document.querySelectorAll('.tg-seg')].some(b=>b.innerText.includes('Fold 1'))`));
 shot('targets');
 
+// the ⋯ More menu is a bottom sheet with a handle
+await eval_(`document.querySelector('button[aria-label="More"]').click();true`);
+await sleep(900);
+check(results, 'the More menu opens as a bottom sheet with a grab handle', await eval_(`!!document.querySelector('.more-sheet .sheet-grab')`));
+shot('more-sheet');
+await eval_(`document.querySelector('.more-sheet [aria-label="Close"]').click();true`);
+await sleep(400);
+// an accent theme turns every green of the app to another hue (and goes back)
+await eval_(`localStorage.setItem('retaillens-theme-v1','violet');document.documentElement.setAttribute('data-theme','violet');true`);
+await sleep(500);
+shot('theme-violet');
+check(results, 'the Violet theme changes the accent colour', await eval_(`getComputedStyle(document.documentElement).getPropertyValue('--g1').trim()!=='' && document.documentElement.getAttribute('data-theme')==='violet'`));
+await eval_(`localStorage.removeItem('retaillens-theme-v1');document.documentElement.removeAttribute('data-theme');true`);
+
 // the report and the segment are still there after the app is closed and opened again
 adb(c.device, 'shell', 'am', 'force-stop', c.app);
 adb(c.device, 'shell', 'am', 'start', '-n', `${c.app}/com.imeilens.scanner.MainActivity`);

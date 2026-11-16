@@ -2,6 +2,11 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — colour themes and more motion (Android and web)
+- **Colour themes:** Settings > Colour: Mint (as before), Ocean, Violet, Rose. Every green of the stylesheet is now a variable, so one choice recolours buttons, badges, bars and highlights everywhere. Remembered on the phone. The dark look stays.
+- **Motion:** the bottom bar's highlight slides to the new button; list rows (phones, report, targets, More) arrive one after another; the ⋯ More menu is a bottom sheet on phones that springs up and can be dragged down to close.
+- Not built: a light theme (the stylesheet has about a hundred fixed neutral colours), count-up numbers, loading shimmer.
+
 ## Unreleased — less noise, a little motion (Android and web)
 - Removed the "STEP 01 / BULK UPLOAD" and "STEP 02 / EXPORT OPTIONS" decoration: Scan and Export have one title and a short line, like every other screen. Shorter help texts (background scanning, camera series) and a one-line footer.
 - Short, quiet animations: a screen or a sheet eases in, a phone's details slide open, a pressed button gives a little, the active bottom button pops, progress bars grow. All off when the phone asks for reduced motion.
