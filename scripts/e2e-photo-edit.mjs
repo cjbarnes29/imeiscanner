@@ -256,6 +256,7 @@ try{
   assert.match(await run(`document.querySelector('.people-tab .people-list').textContent`),/Nobody matches/);
   await type('');await sleep(300);
   assert.ok(await run(`[...document.querySelectorAll('.people-tab .person-tools button')].some(b=>b.textContent.trim().startsWith('Devices ('))&&[...document.querySelectorAll('.people-tab .person-tools button')].some(b=>/Export/.test(b.textContent))`),'Devices and Export per person');
+  assert.ok(await run(`['Send','Bluetooth','Numbers'].every(t=>[...document.querySelectorAll('.people-tab .person-tools button')].some(b=>b.textContent.trim()===t))`),'Send, Bluetooth and Numbers per person');
   ok('People tab: add + rename a person, search by name ("Nobody matches" otherwise), Devices (N) and Export per person');
 
   // ---------- 6. Auto Scan: a photo the scan could not read is retried once, automatically, then stays in Review ----------

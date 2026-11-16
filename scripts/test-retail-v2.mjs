@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/dashboard'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/dashboard', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -172,7 +172,7 @@ state.recordMeta = { sold1: { status: 'sold' } };
 const rc = X.reconcile(state, rep, scans);
 const by = name => rc.lines[items.findIndex(i => i.name === name)];
 assert.equal(by('A27 5G 8/256GB').status, 'agree', JSON.stringify(by('A27 5G 8/256GB').issues));
-assert.deepEqual(by('A27 5G 8/256GB').partMatch, ['Black', 'Blue', null], 'abbreviations are matched to the colours that were scanned');
+assert.deepEqual(by('A27 5G 8/256GB').partMatch, ['Black', 'Blue', 'Light Pink'], 'abbreviations are matched to the colours that were scanned, and "L.Pink" (not scanned) by the dictionary');
 const a07 = by('A07 64GB');
 assert.equal(a07.status, 'differ'); assert.ok(a07.issues.some(i => i.kind === 'stock-differs' && /Report stock 15, scanned 2/.test(i.text)));
 assert.ok(a07.issues.some(i => i.kind === 'colour-differs' && /Vlt \(Violet\): report 2, scanned 2/.test(i.text)) === false, 'violet agrees (2 and 2), so only the other colours differ');
@@ -377,6 +377,65 @@ const SS = await load('retail/soldsync');
   assert.deepEqual(D.cleanState(JSON.parse(JSON.stringify(sold1.state))).soldLedger, sold1.state.soldLedger);
   assert.deepEqual(D.cleanState({ soldLedger: { ok: { personId: 'p1', segment: 'low', month: '2026-11', code: 'A075', storage: '64GB' }, bad: { segment: '', month: 'x' }, '': {} } }).soldLedger, { ok: { personId: 'p1', segment: 'low', month: '2026-11', code: 'A075', storage: '64GB' } });
   assert.equal(D.cleanState({}).soldLedger, undefined);
+}
+
+
+// ---- 9. less typing: the colour dictionary, answers that are used everywhere, one list for the whole report, levels and months ----------------------------
+const CD = await load('retail/colour-dictionary'), CL = await load('retail/colourlist');
+{
+  // the built-in short forms
+  for (const [abbr, name] of [['CRM', 'Cream'], ['GRPH', 'Graphite'], ['LVND', 'Lavender'], ['VLT', 'Violet'], ['Blk', 'Black'], ['WT', 'White'], ['S.B', 'Silver Blue'], ['C.VLT', 'Cosmic Violet'], ['I.BLU', 'Icy Blue'], ['LiLc', 'Lilac'], ['L.Pink', 'Light Pink'], ['GRY', 'Gray'], ['Grn', 'Green']]) assert.equal(CD.dictionaryExact(abbr), name, abbr);
+  assert.equal(CD.dictionaryExact('XQZ'), null); assert.equal(CD.dictionaryExact('Bl'), null, 'a short form that could mean two colours is not listed');
+
+  // who answers first: this model's own answer > an answer for every model > the model's colours that fit > the dictionary
+  const s0 = D.emptyState();
+  assert.deepEqual(K.resolveColourWhy(s0, 'F776', 'CRM', []), { name: 'Cream', source: 'dictionary' });
+  assert.deepEqual(K.resolveColourWhy(s0, 'F776', 'GRPH', ['Graphite']), { name: 'Graphite', source: 'fit' });
+  const t1 = K.teachColourEverywhere(s0, 'CRM', 'Creme', 'F776');
+  assert.deepEqual(K.resolveColourWhy(t1, 'A176', 'CRM', []), { name: 'Creme', source: 'taught' }, 'taught once, used for every model');
+  assert.ok(K.modelColourNames(t1, 'F776').includes('Creme'), 'the model the answer was given on gets the colour too');
+  const t2 = K.teachColour(t1, 'A176', 'CRM', 'Beige');
+  assert.equal(K.resolveColour(t2, 'A176', 'CRM', []), 'Beige'); assert.equal(K.resolveColour(t2, 'F776', 'CRM', []), 'Creme', "a model's own answer wins for that model only");
+  assert.equal(K.resolveColour(s0, 'F776', 'XYZ', []), null, 'nothing is guessed');
+
+  // tap suggestions
+  assert.equal(K.suggestColours('CRM')[0], 'Cream'); assert.deepEqual(K.suggestColours('XQZ'), []);
+  assert.equal(K.suggestColours('LVN', ['Lavender'])[0], 'Lavender'); assert.ok(K.suggestColours('GR').length >= 1 && K.suggestColours('GR').length <= 4);
+
+  // a report fills itself: no typing at all
+  const flip = P.parseReport('Z Fold8 256GB : 00/04\n(02,00,02) CRM,GRPH,LVND\n\nZ Fold8 Ultra 256GB : 00/08\n(03,03,02) GRPH,VLT,CRM\n\nA07 64GB : 00/02\n(00,00,02) Vlt,Grn,XQZ');
+  const rf = X.reconcile(s0, flip, []).lines;
+  assert.deepEqual(rf[0].partMatch, ['Cream', 'Graphite', 'Lavender']); assert.deepEqual(rf[1].partMatch, ['Graphite', 'Violet', 'Cream']); assert.deepEqual(rf[2].partMatch, ['Violet', 'Green', null]);
+  // one row per abbreviation for the whole report; only the ones nobody knows are open
+  const rows = CL.reportColourLabels(s0, flip, []);
+  assert.deepEqual(rows.map(r => [r.label, r.lines, !!r.resolved]).slice(0, 1), [['XQZ', 1, false]], 'the unknown one comes first');
+  assert.equal(rows.find(r => r.label === 'GRPH').lines, 2, 'GRPH is used on two lines: one answer covers both');
+  assert.equal(rows.filter(r => !r.resolved).length, 1, 'everything else was filled in by itself');
+  const answered = CL.reportColourLabels(K.teachColourEverywhere(s0, 'XQZ', 'Mystic Blue'), flip, []);
+  assert.equal(answered.filter(r => !r.resolved).length, 0, 'one answer and nothing is left to type'); assert.equal(answered.find(r => r.label === 'XQZ').resolved.name, 'Mystic Blue');
+  // all-zero lines are not asked about
+  assert.equal(CL.reportColourLabels(s0, P.parseReport('Z Fold8 512GB : 00/00\n(00,00,00) ZZZ,YYY,XXX'), []).length, 0);
+  // the colours are compared with the scans only when the scanned phones have a colour set
+  const noColour = X.reconcile(s0, P.parseReport('A07 64GB : 00/02\n(00,00,02) Vlt,Grn,Blk'), [{ ...phone('SM-A075F', '64GB', 'x'), raw: '4GB | 64GB' }, { ...phone('SM-A075F', '64GB', 'x'), raw: '4GB | 64GB' }]).lines[0];
+  assert.ok(noColour.issues.every(i => i.kind !== 'colour-differs'), 'no colour set on the scanned phones: nothing to compare, nothing invented: ' + JSON.stringify(noColour.issues));
+  // saved and loaded
+  assert.deepEqual(D.cleanState(JSON.parse(JSON.stringify(t1))).colourAliases, { crm: 'Creme' });
+  assert.deepEqual(D.cleanState({ colourAliases: { ok: 'Fine', 'bad key': 'x', empty: '' } }).colourAliases, { ok: 'Fine' }); assert.equal(D.cleanState({}).colourAliases, undefined);
+
+  // levels and months
+  assert.deepEqual(G.suggestedLevels(5), { 70: 4, 80: 4, 90: 5, 100: 5, 110: 6, 120: 6 }); assert.deepEqual(G.suggestedLevels(0), { 70: 0, 80: 0, 90: 0, 100: 0, 110: 0, 120: 0 });
+  assert.equal(G.prevMonth('2026-11'), '2026-10'); assert.equal(G.prevMonth('2026-01'), '2025-12');
+  const tgt = (month, id, lines) => ({ personId: id, month, lines, source: 'manual', importedAt: '2026-01-01T00:00:00.000Z' });
+  const m0 = { ...D.emptyState(), targets: { '2026-10': { p1: tgt('2026-10', 'p1', [{ segment: 'low', target: 10, achieved: 8, levels: { 70: 7, 100: 10 } }, { segment: 'mid', target: 4, achieved: 4 }]), p2: tgt('2026-10', 'p2', [{ segment: 'low', target: 20, achieved: 5 }]) }, '2026-11': { p1: tgt('2026-11', 'p1', [{ segment: 'mid', target: 6, achieved: 1 }]) } } };
+  assert.equal(G.lastMonthLine(m0, '2026-11', 'p1', 'low').target, 10); assert.equal(G.lastMonthLine(m0, '2026-11', 'p1', 'tablet'), undefined);
+  const nm = G.startFromLastMonth(m0, '2026-11');
+  assert.equal(nm.added, 2, 'p1 low and p2 low; p1 mid already has a target this month');
+  const n1 = nm.state.targets['2026-11'].p1.lines;
+  assert.deepEqual(n1.find(l => l.segment === 'low'), { segment: 'low', target: 10, achieved: 0, levels: { 70: 7, 100: 10 } }, 'target and levels come over, sold starts at 0');
+  assert.deepEqual(n1.find(l => l.segment === 'mid'), { segment: 'mid', target: 6, achieved: 1 }, 'what is already typed for this month is not touched');
+  assert.equal(nm.state.targets['2026-11'].p2.lines[0].target, 20);
+  assert.equal(G.startFromLastMonth(nm.state, '2026-11').added, 0, 'running it again adds nothing');
+  assert.equal(G.startFromLastMonth(D.emptyState(), '2026-11').added, 0);
 }
 
 console.log('retail v2: all checks passed');

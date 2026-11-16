@@ -920,3 +920,16 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
 .split-list li{flex-wrap:wrap;gap:8px}
 .split-list button.subtle-btn{font-size:13px;min-width:0;padding:6px 12px}
 .manage-people{min-height:44px}
+
+/* less typing: tap suggestions, the colour list of the whole report */
+.rep-sugg{display:flex;gap:8px;flex-wrap:wrap;grid-column:1/-1}.rep-colour .rep-sugg{margin:-2px 0 4px}
+.chip-btn{min-height:40px;padding:6px 14px;border:1px solid #35506a;border-radius:999px;background:#162638;color:#e8edf5;font:inherit;font-size:14px;cursor:pointer;transition:background-color .15s,transform .08s}.chip-btn:active{transform:scale(.96)}
+.rep-lab{display:grid!important;gap:8px;align-items:stretch!important}.rep-lab-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}.rep-lab-top strong{font-size:16px}
+.rep-lab input{width:100%}
+.tg-level-actions{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.rep-colours-card summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* Targets, everyone view: each person under the segment line */
+.tg-people{display:grid;gap:4px;margin-top:6px;padding-top:6px;border-top:1px solid #2a3b4e}
+.tg-p{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;font-size:13px;align-items:baseline}
+.tg-p b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tg-p small{color:#9fb0c3}.tg-p em{grid-column:1/-1;font-style:normal;color:#9fb0c3}

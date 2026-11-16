@@ -50,6 +50,10 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **Less typing for colours:** a built-in colour dictionary, one Colour names list for the whole report (name a short form once, every line is filled in), and tap suggestions in the popup.
+          - **Levels and months:** Use suggested / Same as last month, and Start from last month for targets.
+          - **Targets:** the Everyone view lists each person under every segment, with what they need and per day.
+          - **People:** Send, Bluetooth / nearby and Numbers buttons for each person.
           - **Numbers follow the phones by themselves:** mark a phone **Sold** and the owner's **Sold** in Targets goes up, the report line's **Sold** goes up, and the report stock goes down. Mark it back to In stock and it all comes off again. **Given** only leaves the stock. Scanned phones go into the report by themselves, too.
           - **Typed numbers:** Target and Sold are typed or pasted (no − / + buttons). **Copy target to everyone** copies the target only, never Sold. Assign by model is typed too, with **Copy to everyone**.
           - **Report popup in the right place** (above the bottom bar), with Previous / Next, "How to fix this line", editable labels, **Match my scans**; Save line marks a line as checked.

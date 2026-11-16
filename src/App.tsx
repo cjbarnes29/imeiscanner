@@ -2891,6 +2891,11 @@ export default function App() {
   const personTools = (personId: string, label: string) => { const count = phonesOf(personId).length; return <div className="person-tools">
     <button type="button" className="subtle-btn" disabled={!count} aria-label={`Show the ${count} phones of ${label}`} onClick={() => jumpTo('records', 'All', personId)}>Devices ({count})</button>
     <button type="button" className="subtle-btn" disabled={!count} aria-label={`Export the phones of ${label}`} onClick={() => exportPhones(phonesOf(personId))}><Download size={14} /> Export</button>
+    {personId !== UNASSIGNED_FILTER && <>
+      <button type="button" className="subtle-btn" disabled={!count} aria-label={`Send the phones of ${label} by WhatsApp or the share menu`} onClick={() => startWhatsApp({ id: personId, name: label })}>Send</button>
+      <button type="button" className="subtle-btn" disabled={!count} aria-label={`Send the phones of ${label} by Bluetooth or nearby`} onClick={() => startWhatsApp({ id: personId, name: label }, true)}>Bluetooth</button>
+      <button type="button" className="subtle-btn" disabled={!count} aria-label={`Share the numbers of ${label}`} onClick={() => void shareOrCopyText(phonesOf(personId).map(row => { const pair = recordImeiPair(row); return [pair.imei1, pair.imei2].filter(Boolean).join(String.fromCharCode(10)); }).filter(Boolean).join(String.fromCharCode(10)), `${label}'s numbers`)}>Numbers</button>
+    </>}
   </div>; };
   const peoplePanel = (
             <details className="people-panel" open={peopleOpen || activeView === 'people'} onToggle={event => setPeopleOpen((event.currentTarget as HTMLDetailsElement).open)}>
@@ -2925,7 +2930,7 @@ export default function App() {
   const peopleTab = (
     <div className="give-tab people-tab">
       <input type="search" className="people-search" aria-label="Search people or their phones" placeholder="Search a name, IMEI, serial or model" value={peopleQuery} onChange={event => setPeopleQuery(event.target.value)} />
-      <p className="settings-help">Add, rename or delete people. Devices shows a person's phones in Records (move, share or delete them there); Export saves only that person's phones.</p>
+      <p className="settings-help">Add, rename or delete people. Devices shows a person's phones; Send and Bluetooth share their pictures and numbers; Numbers shares just the IMEIs; Export saves the phones.</p>
       {peoplePanel}
     </div>
   );

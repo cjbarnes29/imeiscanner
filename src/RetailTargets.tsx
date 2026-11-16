@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { fullCatalog, segmentOf, setModelSegment } from './retail/catalog';
 import { addSegment, assignModels, deleteSegment, moveSegment, renameSegment, segLabel, segmentDefs, segmentIds } from './retail/segments';
-import { emptyTarget, matchPerson, needAt, parseTargetText, putTarget } from './retail/targets';
+import { emptyTarget, lastMonthLine, matchPerson, needAt, parseTargetText, prevMonth, putTarget, startFromLastMonth, suggestedLevels } from './retail/targets';
 import { daysLeft, isMonth, LEVELS, monthOf, SEGMENT_LABEL, type Level, type Segment, type TargetLine } from './retail/types';
 import { itemFor } from './retail/catalog';
 import { num, type RetailCtx } from './retail/ui-helpers';
@@ -50,6 +50,14 @@ export function TargetsTab(ctx: RetailCtx) {
     ctx.change(next, 'copy target');
     ctx.notify(`Target ${value} copied to ${count} ${count === 1 ? 'person' : 'people'}. Levels and sold were not changed.`);
   };
+  /** A new month starts from the last one: targets and levels come over for everyone, sold starts at 0. */
+  const startMonth = () => {
+    const r = startFromLastMonth(state, month);
+    if (!r.added) { ctx.notify('Nothing to copy: this month already has its targets (or last month had none).'); return; }
+    ctx.change(r.state, 'targets from last month');
+    ctx.notify(`${r.added} target line${r.added === 1 ? '' : 's'} copied from last month. Sold starts at 0.`);
+  };
+  const hasLastMonth = Object.keys(state.targets[prevMonth(month)] || {}).length > 0;
   const setLevelPieces = (pid: string, segment: Segment, lv: Level, value: string) => {
     const line = lineOf(pid, segment);
     const levels = { ...(line.levels || {}) };
@@ -60,8 +68,13 @@ export function TargetsTab(ctx: RetailCtx) {
   // one line per segment: everyone chosen, added together
   const rows = useMemo(() => segs.map(segment => {
     let target = 0, sold = 0, remaining = 0;
-    for (const p of chosen) { const l = lineOf(p.id, segment); target += l.target; sold += l.achieved; remaining += needAt(l, level, days).remaining; }
-    return { segment, target, sold, remaining, perDay: ceilTenth(days <= 0 ? remaining : remaining / days) };
+    const each: { id: string; name: string; target: number; sold: number; remaining: number; perDay: number }[] = [];
+    for (const p of chosen) {
+      const l = lineOf(p.id, segment), rem = needAt(l, level, days).remaining;
+      target += l.target; sold += l.achieved; remaining += rem;
+      if (l.target > 0 || l.achieved > 0) each.push({ id: p.id, name: p.name, target: l.target, sold: l.achieved, remaining: rem, perDay: ceilTenth(days <= 0 ? rem : rem / days) });
+    }
+    return { segment, target, sold, remaining, perDay: ceilTenth(days <= 0 ? remaining : remaining / days), each };
   }), [state, month, level, personId, people, today]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const importScreenshot = async (picked: File | undefined) => {
@@ -96,6 +109,7 @@ export function TargetsTab(ctx: RetailCtx) {
       </div>
       <p className="settings-help">{days} day{days === 1 ? '' : 's'} left. Show what is needed for:</p>
       <div className="lvl-chips" role="group" aria-label="Level">{LEVELS.map(l => <button key={l} type="button" aria-pressed={level === l} className={level === l ? 'on' : ''} onClick={() => setLevel(l)}>{l}</button>)}</div>
+      {hasLastMonth && <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={startMonth}>Start from last month</button></div>}
       <div className="share-toolbar"><input ref={file} type="file" accept="image/*" hidden onChange={e => void importScreenshot(e.target.files?.[0])} />
         <button type="button" className="subtle-btn" disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Reading the screenshot…' : 'Import Promoter screenshot'}</button></div>
     </section>
@@ -113,7 +127,8 @@ export function TargetsTab(ctx: RetailCtx) {
     {!seg && <ul className="tg-segs">{visible.map(r => <li key={r.segment}><button type="button" className="tg-seg" onClick={() => setOpenSeg(r.segment)} aria-label={`Open ${segLabel(state, r.segment)}`}>
       <span className="tg-top"><strong>{segLabel(state, r.segment)}</strong><small>Sold {r.sold} of {r.target}</small></span>
       <span className="tg-bar"><i style={{ width: `${r.target > 0 ? Math.min(100, Math.round(r.sold / r.target * 100)) : 0}%` }} /></span>
-      <span className="tg-need">{r.target <= 0 ? 'No target set' : r.remaining <= 0 ? `${level}% reached` : <>Needs <b>{r.remaining} more</b> for {level}% · {r.perDay}/day</>}</span></button></li>)}
+      <span className="tg-need">{r.target <= 0 ? 'No target set' : r.remaining <= 0 ? `${level}% reached` : <>Needs <b>{r.remaining} more</b> for {level}% · {r.perDay}/day</>}</span>
+      {personId === 'all' && r.each.length > 0 && <span className="tg-people">{r.each.map(e => <span key={e.id} className="tg-p"><b>{e.name}</b><small>{e.sold}/{e.target}</small><em>{e.target <= 0 ? '' : e.remaining <= 0 ? 'reached' : `needs ${e.remaining} · ${e.perDay}/day`}</em></span>)}</span>}</button></li>)}
       {!rows.length && <li className="settings-help">Add segments first (Retail &gt; Segments).</li>}
       {hidden > 0 && <li><button type="button" className="subtle-btn" onClick={() => setShowEmpty(true)}>Show {hidden} empty segment{hidden === 1 ? '' : 's'}</button></li>}</ul>}
 
@@ -129,6 +144,8 @@ export function TargetsTab(ctx: RetailCtx) {
         <div className="tg-actions"><button type="button" className="link-btn" onClick={() => setLevelsFor(levelsFor === key ? '' : key)}>{levelsFor === key ? 'Hide levels' : 'Edit levels'}</button>
           {people.length > 1 && <button type="button" className="subtle-btn" aria-label={`Copy the target of ${p.name} to everyone`} disabled={l.target <= 0} onClick={() => copyTargetToEveryone(p.id, seg)}>Copy target to everyone</button>}</div>
         {levelsFor === key && <div className="tg-levels"><p className="settings-help">Pieces needed in total at each level (from the Promoter screen). Blank = target × level.</p>
+          <div className="tg-level-actions"><button type="button" className="subtle-btn" disabled={l.target <= 0} onClick={() => setLine(p.id, seg, { levels: suggestedLevels(l.target) })}>Use suggested</button>
+            {(() => { const last = lastMonthLine(state, month, p.id, seg); return <button type="button" className="subtle-btn" disabled={!last} onClick={() => last && setLine(p.id, seg, { target: last.target, levels: last.levels ? { ...last.levels } : undefined })}>Same as last month</button>; })()}</div>
           {LEVELS.map(lv => <label key={lv}>{lv}%<input inputMode="numeric" aria-label={`${lv}% pieces for ${p.name}`} placeholder={String(Math.ceil(l.target * lv / 100))} value={l.levels?.[lv] ?? ''} onChange={e => setLevelPieces(p.id, seg, lv, e.target.value.replace(/[^\d]/g, ''))} onFocus={e => e.currentTarget.select()} /></label>)}</div>}
       </div>; })}
       {!chosen.length && <p className="settings-help">Add people in the People tab first.</p>}

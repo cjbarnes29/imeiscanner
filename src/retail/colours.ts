@@ -4,6 +4,7 @@
  * A report abbreviation is resolved by what the person taught first, then by a fit rule against those names; two equally good fits are never guessed.
  */
 import { itemFor } from './catalog';
+import { dictionaryExact, dictionaryNear } from './colour-dictionary';
 import type { ModelColours, RetailState } from './types';
 
 const letters = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
@@ -44,11 +45,41 @@ export function modelColourNames(state: Pick<RetailState, 'colours' | 'catalog'>
   return [...new Set(all)].sort((a, b) => a.localeCompare(b));
 }
 
-/** What a report abbreviation means for this model: what the person taught, else the best fit among `names`, else null. */
-export function resolveColour(state: Pick<RetailState, 'colours'>, code: string, label: string, names: string[]): string | null {
-  const taught = entry(state, code).aliases[letters(label)];
-  if (taught) return taught;
-  return bestColour(label, names);
+export type ColourWhy = { name: string; source: 'model' | 'taught' | 'fit' | 'dictionary' };
+/**
+ * What a report abbreviation means for this model, and why: (1) what the person taught for this model, (2) what they taught for every model, (3) the best
+ * fit among the model's own colours (scanned, catalog), (4) the built-in dictionary of Samsung colours. Null when none says (or two fit equally).
+ */
+export function resolveColourWhy(state: Pick<RetailState, 'colours' | 'colourAliases'>, code: string, label: string, names: string[]): ColourWhy | null {
+  const key = letters(label);
+  const own = entry(state, code).aliases[key];
+  if (own) return { name: own, source: 'model' };
+  const taught = state.colourAliases?.[key];
+  if (taught) return { name: taught, source: 'taught' };
+  const fit = bestColour(label, names);
+  if (fit) return { name: fit, source: 'fit' };
+  const dict = dictionaryExact(label);
+  return dict ? { name: dict, source: 'dictionary' } : null;
+}
+export const resolveColour = (state: Pick<RetailState, 'colours' | 'colourAliases'>, code: string, label: string, names: string[]): string | null => resolveColourWhy(state, code, label, names)?.name ?? null;
+
+/** Up to `limit` colour names to tap for a short form, best first: the exact dictionary answer, the model's own colours that fit, the dictionary names that start alike. */
+export function suggestColours(label: string, names: string[] = [], limit = 4): string[] {
+  const scored = new Map<string, number>();
+  const add = (name: string, score: number) => { if (score > (scored.get(name) || 0)) scored.set(name, score); };
+  const exact = dictionaryExact(label);
+  if (exact) add(exact, 200);
+  for (const n of names) { const s = colourScore(label, n); if (s > 0) add(canonColour(n), 100 + s); }
+  for (const n of dictionaryNear(label)) add(n, 60);
+  return [...scored.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n).slice(0, limit);
+}
+
+/** The person said what a short form means for EVERY model (and the colour is added to the model's own list too, when a model is given). */
+export function teachColourEverywhere<S extends Pick<RetailState, 'colourAliases' | 'colours'>>(state: S, label: string, name: string, code = ''): S {
+  const key = letters(label), colour = canonColour(name);
+  if (!key || !colour) return state;
+  const next: S = { ...state, colourAliases: { ...state.colourAliases, [key]: colour } };
+  return code ? addColours(next, code, [colour]) : next;
 }
 
 /** Adds colours to a model (names only). */

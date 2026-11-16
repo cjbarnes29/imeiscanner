@@ -156,3 +156,37 @@ export function putTarget<S extends { targets: Record<Month, Record<string, Pers
   if (!isMonth(target.month) || !target.personId) return state;
   return { ...state, targets: { ...state.targets, [target.month]: { ...(state.targets[target.month] || {}), [target.personId]: target } } };
 }
+
+// ---- less typing: levels and months -----------------------------------------------------------------------------------------------------------------
+
+export const prevMonth = (month: Month): Month => { const [y, m] = month.split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+
+/** The six levels filled in with target x level, rounded up (what a blank level already means): for the person to write down and then change the few that differ. */
+export const suggestedLevels = (target: number): Partial<Record<Level, number>> => Object.fromEntries(LEVELS.map(level => [level, Math.ceil(Math.max(0, target) * level / 100)])) as Partial<Record<Level, number>>;
+
+/** This person's line for a segment in the month before (target and levels; never sold), when there is one. */
+export const lastMonthLine = (state: { targets: Record<Month, Record<string, PersonTarget>> }, month: Month, personId: string, segment: Segment): TargetLine | undefined =>
+  state.targets[prevMonth(month)]?.[personId]?.lines.find(l => l.segment === segment && (l.target > 0 || !!l.levels));
+
+/**
+ * A new month starts from the last one: every person's target and levels of last month are copied into this month where this month has none yet.
+ * Sold always starts at 0 (it is counted again from the phones). Nothing that is already typed for this month is touched.
+ */
+export function startFromLastMonth<S extends { targets: Record<Month, Record<string, PersonTarget>> }>(state: S, month: Month): { state: S; added: number } {
+  const last = state.targets[prevMonth(month)] || {};
+  let next = state, added = 0;
+  for (const [personId, person] of Object.entries(last)) {
+    const base = next.targets[month]?.[personId] || emptyTarget(personId, month, 'manual', new Date().toISOString(), []);
+    let lines = base.lines;
+    for (const line of person.lines) {
+      if (!(line.target > 0)) continue;
+      const have = lines.find(l => l.segment === line.segment);
+      if (have && have.target > 0) continue;
+      const copy = { segment: line.segment, target: line.target, achieved: have?.achieved || 0, ...(line.levels ? { levels: { ...line.levels } } : {}) };
+      lines = have ? lines.map(l => (l.segment === line.segment ? copy : l)) : [...lines, copy];
+      added++;
+    }
+    if (lines !== base.lines) next = putTarget(next, { ...base, lines });
+  }
+  return { state: next, added };
+}

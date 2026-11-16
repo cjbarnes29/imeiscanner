@@ -109,6 +109,19 @@ try{
   assert.match(rows[0],/Note 17/, 'problems come first (the unknown one on top)');
   assert.ok(rows.some(r=>/S26U 256GB/.test(r)&&/report 2, scanned 1|Report stock 2, scanned 1/i.test(r)),'the difference is said in words: '+JSON.stringify(rows));
   ok('every problem is described in words, worst first');
+  // colour names: the built-in dictionary named every short form by itself; one answer names a short form everywhere
+  await waitFor(`!!document.querySelector('.rep-colours-card')`,'the colour names list');
+  assert.match(await run(`document.querySelector('.rep-colours-card summary').innerText`),/all named/,'every short form was named by itself');
+  await run(`document.querySelector('.rep-colours-card').open=true`);
+  await click('.rep-colours-card button','Show all');
+  await waitFor(`document.querySelectorAll('.rep-colours-card .rep-lab').length>=4`,'a row for each short form');
+  const labTexts=await run(`[...document.querySelectorAll('.rep-colours-card .rep-lab')].map(r=>r.innerText.replace(/\\s+/g,' '))`);
+  assert.ok(labTexts.some(t=>/LiLc/.test(t)&&/= Lilac/.test(t)&&/built in/.test(t)),'LiLc = Lilac from the dictionary: '+JSON.stringify(labTexts));
+  assert.ok(labTexts.some(t=>/NVY/.test(t)&&/= Navy/.test(t)&&/from scanned phones/.test(t)),'NVY = Navy from a scanned phone: '+JSON.stringify(labTexts));
+  assert.ok(labTexts.some(t=>/Blk/.test(t)&&/\d+ lines/.test(t)),'one row for the whole report, with the number of lines that use it: '+JSON.stringify(labTexts));
+  await run(`(()=>{const el=document.querySelector('input[aria-label="Colour for LiLc"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Lilac Purple');el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));return true;})()`);
+  await waitFor(`[...document.querySelectorAll('.rep-colours-card .rep-lab')].some(r=>/LiLc/.test(r.innerText)&&/= Lilac Purple/.test(r.innerText)&&/· you/.test(r.innerText))`,'named once');
+  ok('the dictionary names every short form by itself, and one answer names a short form on every line');
   await shot('1-report');
   assert.match(await body(),/Sellout in the list: 2 · the report says 3/);
   await click('button','Includes phones not listed');
@@ -205,6 +218,13 @@ try{
   await click('button','90');
   await waitFor(`/For 90%:[\\s\\S]*needs 4 more/.test(document.querySelector('.retail-targets').innerText)`,'90 uses target x level (4.5 -> 5)');
   ok('a level left blank falls back to target x level, rounded up');
+  // less typing for levels: "Use suggested" writes target x level into the boxes, "Same as last month" waits for a last month
+  assert.equal(await run(`[...document.querySelectorAll('button')].some(b=>/^Start from last month/.test(b.textContent.trim()))`),false,'no last month: no "Start from last month"');
+  await click('.tg-level-actions button','Use suggested');
+  await waitFor(`document.querySelector('input[aria-label="70% pieces for Carlou Test"]').value==='4'`,'suggested levels written down');
+  assert.equal(await run(`document.querySelector('input[aria-label="90% pieces for Carlou Test"]').value`),'5','target 5 x 90% = 4.5, rounded up');
+  assert.equal(await run(`document.querySelector('.tg-level-actions button:nth-child(2)').disabled`),true,'with no last month, "Same as last month" is off');
+  ok('"Use suggested" fills the levels from the target; "Same as last month" and "Start from last month" only appear when there is a last month');
   // numbers are typed or pasted (only the digits count), and one person's target can be copied to everyone
   await setVal('input[aria-label="Sold of Carlou Test"]','12 pcs');
   await waitFor(`document.querySelector('input[aria-label="Sold of Carlou Test"]').value==='12'`,'pasted text keeps its digits');
@@ -218,6 +238,7 @@ try{
   await click('button','← All segments');
   await waitFor(`!!document.querySelector('.tg-segs')`,'back to the list');
   assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Sold 1 of 10/);
+  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Carlou Test[\s\S]*\/day/,'each person and per day under the segment');
   ok('the segment line adds everyone up: sold 1 of 10 (two people with a target of 5 each)');
   await shot('4-targets-lines');
 

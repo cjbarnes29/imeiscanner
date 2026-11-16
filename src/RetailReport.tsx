@@ -6,7 +6,9 @@ import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { itemFor, saveItem, segmentOf, setModelSegment } from './retail/catalog';
 import { reconcile, searchModels, teachAlias, type LineResult } from './retail/reconcile';
-import { canonColour, modelColourNames, teachColour } from './retail/colours';
+import { canonColour, modelColourNames, suggestColours, teachColour, teachColourEverywhere } from './retail/colours';
+import { COLOUR_DICTIONARY } from './retail/colour-dictionary';
+import { reportColourLabels } from './retail/colourlist';
 import { segLabel, segmentIds } from './retail/segments';
 import { withBaseline } from './retail/reportsync';
 import { acknowledgeTotal, buildReport, listedSold, parseReport, partsSum, reportItems, startNewDay, updateItem } from './retail/stockreport';
@@ -14,7 +16,7 @@ import { monthOf, type ReportItem, type ReportPart, type RetailState, type Segme
 import { SheetHandle } from './SheetHandle';
 import { num, type RetailCtx } from './retail/ui-helpers';
 
-type Draft = { name: string; sold: string; stock: string; parts: ReportPart[]; /** what each colour of the line means (a colour name, or '' = not matched) */ names: string[]; code: string; segment: Segment; remember: boolean; search: string; newCode: string };
+type Draft = { name: string; sold: string; stock: string; parts: ReportPart[]; /** what each colour of the line means (a colour name, or '' = not matched) */ names: string[]; code: string; segment: Segment; remember: boolean; search: string; newCode: string; /** teach a colour for this model only (otherwise for every model) */ onlyModel: boolean };
 
 const mark = (status: LineResult['status']) => (status === 'agree' ? '✓' : status === 'checked' ? '✓' : status === 'unknown' ? '?' : status === 'differ' ? '!' : status === 'empty' ? '–' : '•');
 const clipboard = (text: string, ctx: RetailCtx) => { void navigator.clipboard?.writeText(text).then(() => ctx.notify('Report copied. Paste it into WhatsApp.'), () => ctx.notify('Could not copy. Use Send instead.')); };
@@ -40,7 +42,9 @@ export function ReportTab(ctx: RetailCtx) {
   const [pasting, setPasting] = useState(!report || !!ctx.sharedText);
   const [open, setOpen] = useState<{ id: string; draft: Draft } | null>(null);
   const [only, setOnly] = useState<'all' | 'problems'>('all');
+  const [allNames, setAllNames] = useState(false);
   const rec = useMemo(() => (report ? reconcile(state, report, records) : null), [state, report, records]);
+  const labels = useMemo(() => (report ? reportColourLabels(state, report, records) : []), [state, report, records]);
   const byId = useMemo(() => new Map((rec?.lines || []).map(l => [l.id, l])), [rec]);
   const month = monthOf(today);
 
@@ -57,7 +61,7 @@ export function ReportTab(ctx: RetailCtx) {
   const openLine = (item: ReportItem, from: RetailState = state) => {
     const result = byId.get(item.id);
     const code = result?.code || '';
-    setOpen({ id: item.id, draft: { name: item.name, sold: String(item.sold), stock: String(item.stock), parts: item.parts.map(p => ({ ...p })), names: item.parts.map((_, k) => result?.partMatch[k] || ''), code, segment: code ? segmentOf(from, code, month) : 'other', remember: true, search: '', newCode: '' } });
+    setOpen({ id: item.id, draft: { name: item.name, sold: String(item.sold), stock: String(item.stock), parts: item.parts.map(p => ({ ...p })), names: item.parts.map((_, k) => result?.partMatch[k] || ''), code, segment: code ? segmentOf(from, code, month) : 'other', remember: true, search: '', newCode: '', onlyModel: false } });
   };
 
   const d = open?.draft;
@@ -74,7 +78,7 @@ export function ReportTab(ctx: RetailCtx) {
     let next: RetailState = { ...state, report: updateItem(report, item.id, { name: d.name.trim() || item.name, sold: num(d.sold), stock: num(d.stock), parts: item.kind === 'none' ? undefined : d.parts, ...(check ? { checked: true } : {}) }) };
     if (d.code) {
       // a colour the person named is remembered for this model (so the next report needs no question)
-      if (item.kind === 'colour') d.parts.forEach((p, k) => { const meant = canonColour(d.names[k] || ''); if (p.label && meant && meant !== (openResult?.partMatch[k] || '')) next = teachColour(next, d.code, p.label, meant); });
+      if (item.kind === 'colour') d.parts.forEach((p, k) => { const meant = canonColour(d.names[k] || ''); if (p.label && meant && meant !== (openResult?.partMatch[k] || '')) next = d.onlyModel ? teachColour(next, d.code, p.label, meant) : teachColourEverywhere(next, p.label, meant, d.code); });
       if (d.remember) next = teachAlias(next, d.name.trim() || item.name, d.code);
       if (itemFor(next, d.code) && segmentOf(next, d.code, month) !== d.segment) next = setModelSegment(next, d.code, d.segment);
     }
@@ -106,6 +110,13 @@ export function ReportTab(ctx: RetailCtx) {
   };
   const setPart = (k: number, patch: Partial<ReportPart>) => { if (open && d) setOpen({ id: open.id, draft: { ...d, parts: d.parts.map((x, i) => i === k ? { ...x, ...patch } : x) } }); };
 
+  /** A colour name given once for a short form: every line that uses it is filled in, for every model. */
+  const nameLabel = (label: string, value: string) => {
+    const name = canonColour(value);
+    if (!name) return;
+    ctx.change(teachColourEverywhere(state, label, name), '');
+    ctx.notify(`${label} is ${name} on every line.`);
+  };
   const copy = () => { if (report) clipboard(buildReport(report, { date: new Date() }), ctx); };
   const send = () => { if (report) ctx.share(buildReport(report, { date: new Date() })); };
   const newDay = () => { if (report) { ctx.change({ ...state, report: startNewDay(report) }, 'new day'); ctx.notify('New day: sold is back to 00 and stock stays.'); } };
@@ -129,6 +140,7 @@ export function ReportTab(ctx: RetailCtx) {
       <span className="rep-nums">Sold {item.sold}<br />Stock {item.stock}</span></button></li>;
   };
 
+  const popupNames = d?.code ? modelColourNames(state, d.code, openResult?.scanned.colours.map(c => c.name).filter(n => n !== 'No colour') || []) : [];
   const found = d && !d.code ? searchModels(state, d.search || d.name.replace(/\b\d{1,4}\s*(gb|tb)\b|\d{1,2}\s*\/\s*\d{2,4}\s*(gb|tb)?/gi, ''), 6) : [];
   const chosen = d?.code ? itemFor(state, d.code) : undefined;
   const helpKinds = openResult ? [...new Set(openResult.issues.map(i => i.kind))].filter(k => HELP[k]).slice(0, 3) : [];
@@ -154,6 +166,18 @@ export function ReportTab(ctx: RetailCtx) {
         <div className="filter-chips" role="group" aria-label="Show"><button type="button" className={only === 'all' ? 'active' : ''} onClick={() => setOnly('all')}>All lines <b>{items.length}</b></button><button type="button" className={only === 'problems' ? 'active' : ''} onClick={() => setOnly('problems')}>Only problems <b>{sum.differ + sum.unknown}</b></button></div>
       </section>
 
+      {labels.length > 0 && <details className="retail-card rep-colours-card" open={labels.some(l => !l.resolved)}>
+        <summary><strong>Colour names</strong> {labels.some(l => !l.resolved) ? <span className="rep-chip w">{labels.filter(l => !l.resolved).length} to name</span> : <span className="rep-chip ok">all named</span>}</summary>
+        <p className="settings-help">One row for each short form in the report (CRM, GRPH…). Name it once and every line that uses it is filled in, for every model. Tap a name or type one.</p>
+        <datalist id="rep-all-colours">{COLOUR_DICTIONARY.map(c => <option key={c.name} value={c.name} />)}</datalist>
+        <ul className="retail-list">{labels.filter(l => allNames || !l.resolved).map(l => <li key={l.key} className="rep-lab">
+          <div className="rep-lab-top"><strong>{l.label}</strong><small>{l.lines} line{l.lines === 1 ? '' : 's'}</small>{l.resolved && <small className="rep-ok">= {l.resolved.name}{l.mixed ? ' (differs by model)' : ''} · {l.resolved.source === 'dictionary' ? 'built in' : l.resolved.source === 'fit' ? 'from scanned phones' : 'you'}</small>}</div>
+          {l.suggestions.length > 0 && <div className="rep-sugg">{l.suggestions.map(n => <button key={n} type="button" className="chip-btn" onClick={() => nameLabel(l.label, n)}>{n}</button>)}</div>}
+          <input list="rep-all-colours" aria-label={`Colour for ${l.label}`} placeholder="or type a colour" defaultValue="" onKeyDown={e => { if (e.key === 'Enter') { nameLabel(l.label, e.currentTarget.value); e.currentTarget.value = ''; } }} onBlur={e => { if (e.currentTarget.value.trim()) { nameLabel(l.label, e.currentTarget.value); e.currentTarget.value = ''; } }} />
+        </li>)}
+          {!labels.some(l => !l.resolved) && !allNames && <li className="settings-help">Every short form has a colour name.</li>}</ul>
+        {labels.some(l => l.resolved) && <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={() => setAllNames(v => !v)}>{allNames ? 'Show only the unnamed' : `Show all ${labels.length}`}</button></div>}
+      </details>}
       <ul className="rep-list">{sorted.map(row)}{!sorted.length && <li className="settings-help">{only === 'problems' ? 'No problems: every line agrees or was checked by you.' : 'No model lines.'}</li>}</ul>
       {rest.length > 0 && <details className="retail-card"><summary>Rest of the report (kept as you typed it)</summary><pre className="rep-rest">{rest.join('\n')}</pre></details>}
 
@@ -187,12 +211,14 @@ export function ReportTab(ctx: RetailCtx) {
               {openItem.kind === 'colour' && <input list="rep-colours" className="rep-cname" aria-label={`${p.label} is`} placeholder="colour name" value={d.names[k] ?? ''} onChange={e => setOpen({ id: open.id, draft: { ...d, names: d.names.map((x, i) => i === k ? e.target.value : x) } })} />}
               <input className="rep-ccount" aria-label={`${p.label} count`} inputMode="numeric" value={p.count ?? p.raw} onChange={e => setPart(k, { count: e.target.value.trim() === '' ? 0 : num(e.target.value), raw: e.target.value })} />
               <button type="button" className="iconbtn" aria-label={`Remove ${p.label || 'this colour'}`} onClick={() => setOpen({ id: open.id, draft: { ...d, parts: d.parts.filter((_, i) => i !== k), names: d.names.filter((_, i) => i !== k) } })}>✕</button>
+              {openItem.kind === 'colour' && p.label && <div className="rep-sugg">{suggestColours(p.label, popupNames).filter(n => n !== canonColour(d.names[k] || '')).map(n => <button key={n} type="button" className="chip-btn" onClick={() => setOpen({ id: open.id, draft: { ...d, names: d.names.map((x, i) => i === k ? n : x) } })}>{n}</button>)}</div>}
               {scanned !== undefined && <small className="rep-cscan">scanned {scanned}</small>}</div>; })}
           <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={() => setOpen({ id: open.id, draft: { ...d, parts: [...d.parts, { label: '', count: 0, raw: '00' }], names: [...d.names, ''] } })}>+ Add {openItem.kind === 'storage' ? 'storage' : 'colour'}</button></div>
           {openItem.kind === 'colour' && <p className="rep-ok">Colours add up to {partsSum({ ...openItem, parts: d.parts })}: that is the stock.</p>}
           {openResult?.issues.filter(i => i.kind === 'scanned-colour-missing').map((i, k) => <p key={k} className="amber">{i.text}</p>)}</>}
         {canMatch && <div className="rep-match"><button type="button" className="subtle-btn" onClick={matchScans}>Match my scans ({openResult!.scanned.total})</button>
           <small>Sets {openItem.kind === 'none' ? 'the stock' : 'the colour counts'} to what you scanned. You can still change it before saving.{noColour > 0 ? ` ${noColour} scanned phone${noColour === 1 ? ' has' : 's have'} no colour: set it in Phones.` : ''}</small></div>}
+        {openItem.kind === 'colour' && <label className="check-row"><input type="checkbox" checked={d.onlyModel} disabled={!d.code} onChange={e => setOpen({ id: open.id, draft: { ...d, onlyModel: e.target.checked } })} /> Colour names only for this model (otherwise every model)</label>}
         <label className="check-row"><input type="checkbox" checked={d.remember} disabled={!d.code} onChange={e => setOpen({ id: open.id, draft: { ...d, remember: e.target.checked } })} /> Remember “{d.name}” for the next reports</label>
         <div className="share-toolbar rep-actions"><button type="button" className="primary" onClick={() => save(openItem)}>Save line</button>{nextProblem && <button type="button" className="subtle-btn" onClick={() => saveNext(openItem)}>Save and next</button>}<button type="button" className="subtle-btn" onClick={() => setOpen(null)}>Cancel</button></div>
       </section></div>, document.body)}

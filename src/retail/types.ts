@@ -126,6 +126,8 @@ export type RetailState = {
   catalog: CatalogItem[];
   /** The sales already counted (record id -> who, which segment, which month, which model): a phone is never counted twice, and taking it back undoes it. */
   soldLedger?: Record<string, SoldEntry>;
+  /** What a report abbreviation means for every model (key = letters of the abbreviation, lower case): taught once, used everywhere. A model's own entry wins. */
+  colourAliases?: Record<string, string>;
   /** Colours of each model, by model code. */
   colours?: Record<string, ModelColours>;
   /** The person's own segments (Fold 1, Fold 2…). Missing = the starting list. */
