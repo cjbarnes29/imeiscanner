@@ -117,6 +117,7 @@ try{
   assert.equal(await openRow('S26U 256GB'),true);
   await waitFor(`!!document.querySelector('.rep-sheet')`,'line sheet');
   assert.match(await run(`document.querySelector('.rep-sheet').innerText`),/Matches[\s\S]*Galaxy S26 Ultra/);
+  assert.equal(await run(`document.querySelector('.rep-sheet input[aria-label="Blk is"]').value`),'Black','the report colour "Blk" is matched to the scanned colour Black, and can be changed');
   await setVal('.rep-sheet input[aria-label="Blk count"]','1');
   assert.equal(await run(`document.querySelector('.rep-sheet input[disabled]')?.value`),'1','the stock follows the colours');
   await shot('2-line-sheet');
@@ -208,6 +209,13 @@ try{
   await click('button','Done');
   await waitFor(`!document.querySelector('.action-bar.show')`,'selection bar goes away');
   ok('Phones is a short list (model and IMEI in groups), details open on tap, and the selection bar only shows in Select mode');
+
+  // a colour for a phone, from the colours of its model
+  const colourOpts=await run(`[...document.querySelector('select[aria-label="Colour of Galaxy A17 5G 128GB"]').options].map(o=>o.textContent)`);
+  assert.deepEqual(colourOpts,['Not set','Black','Blue'],'the colours seen on the scanned A17 phones: '+colourOpts);
+  await setVal('select[aria-label="Colour of Galaxy A17 5G 128GB"]','Blue',0);
+  await waitFor(`/Colour\\s*\\n?\\s*Blue/.test(document.querySelector('.phone-row .pr-facts').innerText)`,'colour saved');
+  ok('each phone has a colour dropdown limited to the colours of its model');
   await nav('Scan');
   await waitFor(`!!document.querySelector('select[aria-label="New scans go to"]')`,'new scans go to');
   ok('"New scans go to" is on the Scan screen');
@@ -235,6 +243,20 @@ try{
   // ---------- Catalog: a phone marked sold is no longer in stock for the report ----------
   await sub('Catalog');
   await waitFor(`!!document.querySelector('input[aria-label="Select r1.jpg"]')`,'phone list');
+
+  // the colours of a model, typed once in the Catalog
+  await setVal('input[aria-label="Search models"]','a17 5g');
+  await waitFor(`[...document.querySelectorAll('.retail-catalog .retail-list li')].some(l=>/A17 5G/.test(l.innerText))`,'A17 in the catalog');
+  await run(`(()=>{const li=[...document.querySelectorAll('.retail-catalog .retail-list li')].find(l=>/A17 5G/.test(l.innerText)&&[...l.querySelectorAll('button')].some(x=>x.textContent.trim()==='Edit'));[...li.querySelectorAll('button')].find(x=>x.textContent.trim()==='Edit').click();return true;})()`);
+  await waitFor(`!!document.querySelector('textarea[aria-label="Colours of this model"]')`,'the colours box');
+  await setVal('textarea[aria-label="Colours of this model"]','Graphite = GRPH\ngrey = GRY');
+  await click('button','Save');
+  await waitFor(`!document.querySelector('textarea[aria-label="Colours of this model"]')`,'saved');
+  await run(`(()=>{const li=[...document.querySelectorAll('.retail-catalog .retail-list li')].find(l=>/A17 5G/.test(l.innerText)&&[...l.querySelectorAll('button')].some(x=>x.textContent.trim()==='Edit'));[...li.querySelectorAll('button')].find(x=>x.textContent.trim()==='Edit').click();return true;})()`);
+  await waitFor(`!!document.querySelector('textarea[aria-label="Colours of this model"]')`,'reopened');
+  assert.equal(await run(`document.querySelector('textarea[aria-label="Colours of this model"]').value`),'Graphite = GRPH\nGray = GRY','one spelling (grey -> Gray), abbreviations kept');
+  await click('button','Cancel');
+  ok('the colours of a model (and their report abbreviations) are typed once in the Catalog and kept');
   await run(`document.querySelector('input[aria-label="Select r1.jpg"]').click()`);
   await waitFor(`!!document.querySelector('select[aria-label="Stock status"]')`,'bulk bar');
   await setVal('select[aria-label="Stock status"]','sold');

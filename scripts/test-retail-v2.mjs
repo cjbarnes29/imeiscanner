@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/reconcile', 'retail/segments'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -228,5 +228,42 @@ const junk = D.cleanState({ segments: [{ id: '', name: 'x' }, 5, { id: 'ok', nam
 assert.deepEqual(junk.segments, [{ id: 'ok', name: 'Ok' }]); assert.deepEqual(junk.aliases, { good: 'A276' }); assert.equal(junk.report, undefined); assert.equal(junk.recordMeta.z.status, undefined);
 assert.deepEqual(junk.targets['2026-11'].p.lines[0], { segment: 'f1', target: 0, achieved: 0, levels: { 80: 3 } });
 assert.deepEqual(D.cleanState(null).aliases, {}); assert.equal(D.cleanState(undefined).segments, undefined);
+
+
+// ---- 6. colours of each model --------------------------------------------------------------------------------------------------------------
+const K = await load('retail/colours');
+assert.equal(K.canonColour('grey'), 'Gray'); assert.equal(K.canonColour(' icy  blue '), 'Icy Blue'); assert.equal(K.canonColour('LIGHT GREY'), 'Light Gray'); assert.equal(K.canonColour(''), '');
+// the names of a model: what was typed, the catalog variants, and the colours seen on scanned phones, in one spelling
+let cs = D.emptyState();
+cs = C.saveItem(cs, { code: 'F776', name: 'Galaxy Z Flip8', abbreviation: 'Z Flip8', segment: 'other', monthly: {}, variants: [{ sku: '', ram: '', storage: '256GB', colors: ['cream', 'Pink'] }], custom: true });
+cs = K.addColours(cs, 'F776', ['graphite', 'Grey']);
+assert.deepEqual(K.modelColourNames(cs, 'F776', ['CREAM', 'Mint']), ['Cream', 'Graphite', 'Gray', 'Mint', 'Pink'].sort((a, b) => a.localeCompare(b)), 'one spelling, no duplicates');
+// what a report abbreviation means: taught first, then the fit rule
+assert.equal(K.resolveColour(cs, 'F776', 'GRPH', K.modelColourNames(cs, 'F776')), 'Graphite', 'the fit rule');
+assert.equal(K.resolveColour(cs, 'F776', 'XYZ', K.modelColourNames(cs, 'F776')), null, 'no fit, nothing guessed');
+cs = K.teachColour(cs, 'F776', 'X.Y.Z', 'charcoal');
+assert.equal(K.resolveColour(cs, 'F776', 'xyz', []), 'Charcoal', 'taught, whatever the dots and case'); assert.ok(K.modelColourNames(cs, 'F776').includes('Charcoal'), 'a taught colour joins the model');
+assert.equal(K.resolveColour(cs, 'A176', 'XYZ', []), null, 'what is taught for one model is not used for another');
+// the report check uses it: the scanned colour is "Charcoal"; "XYZ" only fits once it is taught
+const flipReport = P.parseReport('Z Flip8 256GB : 00/01\n(01) XYZ');
+const flipScans = [phone('SM-F776B', '256GB', 'charcoal')];
+const before2 = X.reconcile(D.emptyState(), flipReport, flipScans).lines[0];
+assert.ok(before2.issues.some(i => i.kind === 'colour-unmatched'), 'unknown abbreviation, not taught: pointed out');
+const after2 = X.reconcile(cs, flipReport, flipScans).lines[0];
+assert.equal(after2.status, 'agree', JSON.stringify(after2.issues)); assert.deepEqual(after2.partMatch, ['Charcoal']);
+// scanned colours are compared in one spelling
+const greyLine = X.reconcile(D.emptyState(), P.parseReport('A17 5G 128GB : 00/02\n(02) Gry'), [phone('SM-A176B', '128GB', 'grey'), phone('SM-A176B', '128GB', 'Gray')]).lines[0];
+assert.equal(greyLine.status, 'agree', JSON.stringify(greyLine.issues)); assert.deepEqual(greyLine.scanned.colours, [{ name: 'Gray', count: 2 }], '"grey" and "Gray" are one colour');
+// the edit box: one line per colour, "Name = abbreviations"
+const parsed = K.parseColoursText('Cream = CRM, CREAM\nPink = PINK\nGraphite\n  \nGrey = GRY');
+assert.deepEqual(parsed.names, ['Cream', 'Pink', 'Graphite', 'Gray']); assert.equal(parsed.aliases.crm, 'Cream'); assert.equal(parsed.aliases.gry, 'Gray');
+let ct = K.setModelColours(D.emptyState(), 'F776', parsed);
+assert.equal(K.coloursText(ct, 'F776').split('\n')[0], 'Cream = CRM, CREAM'); assert.equal(K.coloursText(ct, 'F776').split('\n')[2], 'Graphite');
+assert.equal(K.setModelColours(ct, 'F776', { names: [], aliases: {} }).colours, undefined, 'emptying a model removes its entry');
+// saved and loaded: kept; junk dropped
+const savedC = D.cleanState(JSON.parse(JSON.stringify(ct)));
+assert.deepEqual(savedC.colours.F776.names, ['Cream', 'Pink', 'Graphite', 'Gray']); assert.equal(savedC.colours.F776.aliases.crm, 'Cream');
+const junkC = D.cleanState({ colours: { F776: { names: ['Ok', 5, ''], aliases: { 'a-b': 'x', ok: 'Fine', bad: '' } }, bad: { names: ['x'] }, A176: 'nope' } });
+assert.deepEqual(junkC.colours, { F776: { names: ['Ok'], aliases: { ok: 'Fine' } } }); assert.equal(D.cleanState({}).colours, undefined);
 
 console.log('retail v2: all checks passed');

@@ -109,9 +109,14 @@ export type StockReport = {
   dateText?: string;
 };
 
+/** What the person typed or taught for one model: its colour names, and what a report abbreviation means (key = letters of the abbreviation, lower case). */
+export type ModelColours = { names: string[]; aliases: Record<string, string> };
+
 export type RetailState = {
   version: 1;
   catalog: CatalogItem[];
+  /** Colours of each model, by model code. */
+  colours?: Record<string, ModelColours>;
   /** The person's own segments (Fold 1, Fold 2…). Missing = the starting list. */
   segments?: SegmentDef[];
   /** What the report calls a model: normalised report name -> catalog model code. Learned when a line is saved ("remember"). */

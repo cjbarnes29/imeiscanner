@@ -10,6 +10,8 @@ What changed in each Android app / web release since 1.7. The web and the Androi
 - **Report:** a line with no stock on either side is counted as "no stock", not as agreeing.
 - **Catalog:** the segment dropdown always shows a value that can be picked.
 - Tests updated for the new names (browser suites, emulator scenarios and Maestro flows).
+- **Buttons and layout:** the Scan screen no longer runs past the right edge of the phone (large system text made its card too wide); small buttons on Home and the top bar are bigger. New layout test (`scripts/e2e-layout.mjs`) checks every screen at 320, 360 and 411 px.
+- **Colours of each model:** type them once in Catalog (one line each: `Cream = CRM`), pick a colour for a phone from its model's colours, and name an unmatched report colour once (it is remembered for that model). "Grey" and "Gray" are one colour. Colours read from labels are offered automatically.
 
 ## Unreleased — RetailLens, version 2 (Android and web)
 **Retail redone around one pasted report.** Tabs: Today, Report, Targets, Gives, Segments, Catalog, Data. The Stock tab, the Reports writer and the Sold automation are gone.

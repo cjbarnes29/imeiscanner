@@ -4,12 +4,13 @@
 import { useMemo, useState } from 'react';
 import { itemFor, saveItem, segmentOf, setModelSegment } from './retail/catalog';
 import { reconcile, searchModels, teachAlias, type LineResult } from './retail/reconcile';
+import { canonColour, modelColourNames, teachColour } from './retail/colours';
 import { segLabel, segmentIds } from './retail/segments';
 import { acknowledgeTotal, buildReport, listedSold, parseReport, partsSum, reportItems, startNewDay, updateItem } from './retail/stockreport';
 import { monthOf, type ReportItem, type ReportPart, type RetailState, type Segment } from './retail/types';
 import { num, type RetailCtx } from './retail/ui-helpers';
 
-type Draft = { name: string; sold: string; stock: string; parts: ReportPart[]; code: string; segment: Segment; remember: boolean; search: string; newCode: string };
+type Draft = { name: string; sold: string; stock: string; parts: ReportPart[]; /** what each colour of the line means (a colour name, or '' = not matched) */ names: string[]; code: string; segment: Segment; remember: boolean; search: string; newCode: string };
 
 const mark = (status: LineResult['status']) => (status === 'agree' ? '✓' : status === 'unknown' ? '?' : status === 'differ' ? '!' : status === 'empty' ? '–' : '•');
 const clipboard = (text: string, ctx: RetailCtx) => { void navigator.clipboard?.writeText(text).then(() => ctx.notify('Report copied. Paste it into WhatsApp.'), () => ctx.notify('Could not copy. Use Send instead.')); };
@@ -36,13 +37,15 @@ export function ReportTab(ctx: RetailCtx) {
   const openLine = (item: ReportItem) => {
     const result = byId.get(item.id);
     const code = result?.code || '';
-    setOpen({ id: item.id, draft: { name: item.name, sold: String(item.sold), stock: String(item.stock), parts: item.parts.map(p => ({ ...p })), code, segment: code ? segmentOf(state, code, month) : 'other', remember: true, search: '', newCode: '' } });
+    setOpen({ id: item.id, draft: { name: item.name, sold: String(item.sold), stock: String(item.stock), parts: item.parts.map(p => ({ ...p })), names: item.parts.map((_, k) => result?.partMatch[k] || ''), code, segment: code ? segmentOf(state, code, month) : 'other', remember: true, search: '', newCode: '' } });
   };
   const save = (item: ReportItem) => {
     if (!open || !report) return;
     const d = open.draft;
     let next: RetailState = { ...state, report: updateItem(report, item.id, { name: d.name.trim() || item.name, sold: num(d.sold), stock: num(d.stock), parts: item.kind === 'none' ? undefined : d.parts }) };
     if (d.code) {
+      // a colour the person named is remembered for this model (so the next report needs no question)
+      if (item.kind === 'colour') d.parts.forEach((p, k) => { const meant = canonColour(d.names[k] || ''); if (p.label && meant && meant !== (openResult?.partMatch[k] || '')) next = teachColour(next, d.code, p.label, meant); });
       if (d.remember) next = teachAlias(next, d.name.trim() || item.name, d.code);
       if (itemFor(next, d.code) && segmentOf(next, d.code, month) !== d.segment) next = setModelSegment(next, d.code, d.segment);
     }
@@ -119,8 +122,9 @@ export function ReportTab(ctx: RetailCtx) {
         <div className="retail-inline"><label>Sold<input inputMode="numeric" value={d.sold} onChange={e => setOpen({ id: open.id, draft: { ...d, sold: e.target.value } })} /></label>
           <label>Stock<input inputMode="numeric" value={openItem.kind === 'colour' ? String(partsSum({ ...openItem, parts: d.parts })) : d.stock} disabled={openItem.kind === 'colour'} onChange={e => setOpen({ id: open.id, draft: { ...d, stock: e.target.value } })} /></label></div>
         {openItem.kind !== 'none' && <><h4>{openItem.kind === 'storage' ? 'Storage counts' : 'Colours'}</h4>
+          {openItem.kind === 'colour' && <datalist id="rep-colours">{(d.code ? modelColourNames(state, d.code, openResult?.scanned.colours.map(c => c.name).filter(n => n !== 'No colour') || []) : []).map(n => <option key={n} value={n} />)}</datalist>}
           {d.parts.map((p, k) => { const scannedName = openResult?.partMatch[k]; const scanned = openItem.kind === 'colour' && scannedName ? openResult?.scanned.colours.find(c => c.name === scannedName)?.count : undefined;
-            return <div key={k} className="rep-colour"><span>{p.label || '—'}{scannedName && openItem.kind === 'colour' && <small> {scannedName}{scanned !== undefined ? `, scanned ${scanned}` : ''}</small>}</span>
+            return <div key={k} className="rep-colour"><span>{p.label || '—'}{openItem.kind === 'colour' && <input list="rep-colours" className="rep-cname" aria-label={`${p.label} is`} placeholder="colour name" value={d.names[k] ?? ''} onChange={e => setOpen({ id: open.id, draft: { ...d, names: d.names.map((x, i) => i === k ? e.target.value : x) } })} />}{scanned !== undefined && <small> scanned {scanned}</small>}</span>
               <input aria-label={`${p.label} count`} inputMode="numeric" value={p.count ?? p.raw} onChange={e => setOpen({ id: open.id, draft: { ...d, parts: d.parts.map((x, i) => i === k ? { ...x, count: e.target.value.trim() === '' ? 0 : num(e.target.value), raw: e.target.value } : x) } })} /></div>; })}
           {openItem.kind === 'colour' && <p className="rep-ok">Colours add up to {partsSum({ ...openItem, parts: d.parts })}: that is the stock.</p>}
           {openResult?.issues.filter(i => i.kind === 'scanned-colour-missing').map((i, k) => <p key={k} className="amber">{i.text}</p>)}</>}

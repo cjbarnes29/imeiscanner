@@ -46,6 +46,17 @@ function cleanReport(value: unknown): StockReport | undefined {
   const t = obj(v.totalSellout);
   return { entries, savedAt: str(v.savedAt), dateText: str(v.dateText) || undefined, totalSellout: typeof t.typed === 'number' ? { typed: count(t.typed), acknowledged: t.acknowledged === true, extra: count(t.extra) } : undefined };
 }
+function cleanColours(value: unknown): RetailState['colours'] {
+  const out: NonNullable<RetailState['colours']> = {};
+  for (const [code, raw] of Object.entries(obj(value))) {
+    if (!/^[A-Z0-9]{3,6}$/.test(code)) continue;
+    const v = obj(raw);
+    const names = [...new Set(arr(v.names).map(n => str(n).trim().slice(0, 30)).filter(Boolean))].slice(0, 40);
+    const aliases = Object.fromEntries(Object.entries(obj(v.aliases)).filter(([k, n]) => /^[a-z]{1,20}$/.test(k) && str(n).trim()).map(([k, n]) => [k, str(n).trim().slice(0, 30)]));
+    if (names.length || Object.keys(aliases).length) out[code] = { names, aliases };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 function cleanSegments(value: unknown): SegmentDef[] | undefined {
   const list = arr(value).map(obj).filter(s => isSegment(s.id) && str(s.name)).map(s => ({ id: str(s.id), name: str(s.name).slice(0, 30) }));
   return list.length ? list : undefined;
@@ -94,7 +105,7 @@ export function cleanState(raw: unknown): RetailState {
   const aliases = Object.fromEntries(Object.entries(obj(v.aliases)).filter(([k, code]) => k.length <= 60 && /^[A-Z0-9]{3,6}$/.test(str(code))).map(([k, code]) => [k, str(code)]));
   return {
     ...base,
-    segments: cleanSegments(v.segments), aliases, report: cleanReport(v.report),
+    segments: cleanSegments(v.segments), aliases, report: cleanReport(v.report), colours: cleanColours(v.colours),
     catalog: arr(v.catalog).map(obj).filter(c => /^[A-Z0-9]{3,6}$/.test(str(c.code))).map(c => ({
       code: str(c.code), name: str(c.name) || str(c.code), abbreviation: str(c.abbreviation) || str(c.name), segment: isSegment(c.segment) ? c.segment : 'other',
       monthly: Object.fromEntries(Object.entries(obj(c.monthly)).filter(([m, s]) => isMonth(m) && isSegment(s))) as Record<Month, never>,

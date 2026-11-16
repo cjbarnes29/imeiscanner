@@ -6,6 +6,7 @@
  * What counts as "scanned and in stock": a valid IMEI, not a duplicate, not sold in the sales list, and not marked sold or given by the person.
  */
 import { fullCatalog, itemFor } from './catalog';
+import { canonColour, modelColourNames, resolveColour } from './colours';
 import { inStock, variantOf, type StockSource } from './inventory';
 import { listedSold, partsSum, hasUnreadable, reportItems } from './stockreport';
 import type { CatalogItem, ReportItem, RetailState, StockReport } from './types';
@@ -75,28 +76,8 @@ export function teachAlias(state: RetailState, reportName: string, code: string)
   return { ...state, aliases: { ...state.aliases, [key]: code } };
 }
 
-// ---- colours ---------------------------------------------------------------------------------------------------------------------------
-
-const letters = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
-const subsequence = (a: string, b: string) => { let i = 0; for (const ch of b) if (ch === a[i]) i++; return i === a.length; };
-/** How well a report colour abbreviation ("Vlt", "C.VLT", "L.Pink") fits a colour name ("Violet", "Cosmic Violet", "Light Pink"). 0 = no fit. */
-export function colourScore(label: string, name: string): number {
-  const a = letters(label), b = letters(name);
-  if (!a || !b) return 0;
-  if (a === b) return 100;
-  if (b.startsWith(a)) return 80;
-  if (a[0] === b[0] && subsequence(a, b)) return 40 + a.length;
-  return 0;
-}
-/** The best colour name for an abbreviation, or null when none fits or two fit equally well (never a guess between two). */
-export function bestColour(label: string, names: string[]): string | null {
-  let best: string | null = null, top = 0, tie = false;
-  for (const name of new Set(names)) {
-    const score = colourScore(label, name);
-    if (score > top) { top = score; best = name; tie = false; } else if (score === top && score > 0) tie = true;
-  }
-  return tie ? null : best;
-}
+// ---- colours: the rules are in colours.ts (re-exported here) ---------------------------------------------------------------------------
+export { bestColour, colourScore } from './colours';
 
 // ---- the check ---------------------------------------------------------------------------------------------------------------------------
 
@@ -109,7 +90,7 @@ function scannedIndex(state: RetailState, records: StockSource[]): { byCode: Map
     const item = itemFor(state, source.model);
     if (!item) continue;
     const v = variantOf(state, source);
-    const scan: Scan = { source, code: item.code, storage: unit(v.storage), ram: unit(v.ram), colour: v.color.trim() };
+    const scan: Scan = { source, code: item.code, storage: unit(v.storage), ram: unit(v.ram), colour: canonColour(v.color) };
     byCode.set(item.code, [...(byCode.get(item.code) || []), scan]);
     total++;
   }
@@ -177,8 +158,8 @@ function checkLine(state: RetailState, index: Map<string, CatalogItem>, byCode: 
   }
 
   if (item.kind === 'colour' && scans.length) {
-    const names = [...scanned.colours.map(c => c.name).filter(n => n !== 'No colour'), ...model.variants.flatMap(v => v.colors)];
-    partMatch = item.parts.map(p => (p.label ? bestColour(p.label, names) : null));
+    const names = modelColourNames(state, model.code, scanned.colours.map(c => c.name).filter(n => n !== 'No colour'));
+    partMatch = item.parts.map(p => (p.label ? resolveColour(state, model.code, p.label, names) : null));
     const seen = new Set<string>();
     item.parts.forEach((p, k) => {
       const name = partMatch[k];

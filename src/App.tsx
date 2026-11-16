@@ -5,6 +5,7 @@ import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
 import { segmentOf as retailSegmentOf, setRecordMeta as retailSetMeta, setModelSegment as retailSetModelSegment } from './retail/catalog';
 import { variantOf as retailVariantOf } from './retail/inventory';
+import { canonColour as retailCanonColour, modelColourNames as retailModelColours } from './retail/colours';
 import { pendingSubmissions } from './retail/sales';
 import { dateKey, localDay, monthOf as retailMonth, type RetailState, type Segment as RetailSegment } from './retail/types';
 import { segLabel as retailSegLabel, segmentIds as retailSegmentIds } from './retail/segments';
@@ -3011,6 +3012,8 @@ export default function App() {
   // What RetailLens sees of the scan records (numbers and names only, never pictures), and the two things it may change: owners and nothing else.
   const retailRecords: RetailRecord[] = useMemo(() => records.map(r => ({ id: r.id, imei: r.imei, model: r.model, personId: r.personId, raw: r.raw, duplicate: r.duplicate, name: r.name, createdAt: r.createdAt, imei2: r.imei2, serial: recordSerial(r), needsReview: !r.checked && reviewStatus(r).includes('Needs review') })), [records]); // eslint-disable-line react-hooks/exhaustive-deps
   const retailPeople = personGroups.map(p => ({ id: p.id, name: personName(p) }));
+  /** The colours read from the labels of scanned phones, by model code: they are offered in each phone's colour list. */
+  const colourSeen = useMemo(() => { const out: Record<string, string[]> = {}; for (const r of retailRecords) { const code = modelCode4(r.model); const c = retailCanonColour(retailVariantOf(retail, r).color); if (code && c) (out[code] ||= []).push(c); } return out; }, [retail, retailRecords]);
   /** Report lines that need a look (shown as the badge on the Report button). */
   const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
   function assignOwners(changes: { id: string; personId: string }[]) {
@@ -5354,6 +5357,8 @@ export default function App() {
                     {reviewNote(r) && <p className="fallback-note">{reviewNote(r)}</p>}
                     <label>Person<select className="inline-edit person-edit" aria-label={'Move record #' + r.number + ' to a person'} value={r.personId || 'unassigned'} onChange={e => assignPerson(r.id, e.target.value)}>
                       {personGroups.map(person => <option key={person.id} value={person.id}>{personName(person)}</option>)}<option value="unassigned">Unassigned</option></select></label>
+                    <label>Colour<select aria-label={'Colour of ' + title} value={retailCanonColour(v.color)} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { color: e.target.value }), '')}>
+                      <option value="">Not set</option>{[...new Set([...retailModelColours(retail, modelCode4(r.model), colourSeen[modelCode4(r.model)] || []), retailCanonColour(v.color)].filter(Boolean))].sort().map(n => <option key={n} value={n}>{n}</option>)}</select></label>
                     <label>Segment of this model<select aria-label={'Segment of ' + title} value={segOfRecord(r)} onChange={e => changeRetail(retailSetModelSegment(retail, r.model, e.target.value), 'segment')}>
                       {[...retailSegmentIds(retail), 'other' as RetailSegment].map(sg => <option key={sg} value={sg}>{retailSegLabel(retail, sg)}</option>)}</select></label>
                     <label>Stock<select aria-label={'Stock status of ' + title} value={retail.recordMeta[r.id]?.status || ''} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { status: e.target.value as never }), '')}>

@@ -5,6 +5,7 @@ import { fullCatalog, itemFor, saveItem, resetItem, segmentOf, setModelSegment, 
 import { withAudit } from './retail/data';
 import { variantOf } from './retail/inventory';
 import { reconcile } from './retail/reconcile';
+import { canonColour, coloursText as colourBox, parseColoursText, setModelColours } from './retail/colours';
 import { segLabel, segmentIds } from './retail/segments';
 import { reportItems } from './retail/stockreport';
 import { todayDashboard } from './retail/dashboard';
@@ -97,6 +98,7 @@ function CatalogTab(ctx: RetailCtx) {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [variants, setVariants] = useState('');
+  const [colourLines, setColourLines] = useState('');
   const [seg, setSeg] = useState<Segment | 'all'>('all');
   const [ids, setIds] = useState<string[]>([]);
   const [bulkSeg, setBulkSeg] = useState<Segment | ''>('');
@@ -109,7 +111,7 @@ function CatalogTab(ctx: RetailCtx) {
   const models = fullCatalog(state).filter(i => !search || `${i.name} ${i.abbreviation} ${i.code}`.toLowerCase().includes(search.toLowerCase())).slice(0, 40);
   const toggle = (id: string) => setIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]);
   const applyBulk = (rememberModel: boolean) => {
-    let next = setRecordMeta(state, ids, { ...(bulkSeg ? { segment: bulkSeg } : {}), ...(bulkStorage ? { storage: bulkStorage } : {}), ...(bulkColor ? { color: bulkColor } : {}), ...(bulkStatus ? { status: (bulkStatus === 'in' ? '' : bulkStatus) as never } : {}) });
+    let next = setRecordMeta(state, ids, { ...(bulkSeg ? { segment: bulkSeg } : {}), ...(bulkStorage ? { storage: bulkStorage } : {}), ...(bulkColor ? { color: canonColour(bulkColor) } : {}), ...(bulkStatus ? { status: (bulkStatus === 'in' ? '' : bulkStatus) as never } : {}) });
     if (rememberModel && bulkSeg) for (const model of new Set(records.filter(r => ids.includes(r.id)).map(r => r.model))) next = setModelSegment(next, model, bulkSeg);
     ctx.change(withAudit(next, 'bulk edit', `${ids.length} phones: ${bulkSeg ? segLabel(state, bulkSeg) : 'segment kept'}${bulkStatus ? `, ${bulkStatus === 'in' ? 'in stock' : bulkStatus}` : ''}${bulkStorage ? `, ${bulkStorage}` : ''}${bulkColor ? `, ${bulkColor}` : ''}`), 'bulk edit'); setIds([]);
     ctx.notify(`${ids.length} phone${ids.length === 1 ? '' : 's'} updated${rememberModel ? '; the segment is remembered for those models' : ''}.`);
@@ -132,10 +134,10 @@ function CatalogTab(ctx: RetailCtx) {
       </div>}
     </section>
     <section className="retail-card"><h3>Models</h3>
-      <div className="retail-inline"><input type="search" aria-label="Search models" placeholder="Search models" value={search} onChange={e => setSearch(e.target.value)} /><button type="button" className="subtle-btn" onClick={() => { setEditing({ code: '', name: '', abbreviation: '', segment: 'mid', monthly: {}, variants: [], custom: true }); setVariants(''); }}>+ Add model</button></div>
+      <div className="retail-inline"><input type="search" aria-label="Search models" placeholder="Search models" value={search} onChange={e => setSearch(e.target.value)} /><button type="button" className="subtle-btn" onClick={() => { setEditing({ code: '', name: '', abbreviation: '', segment: 'mid', monthly: {}, variants: [], custom: true }); setVariants(''); setColourLines(''); }}>+ Add model</button></div>
       <ul className="retail-list">{models.map(i => <li key={i.code}><span><strong>{i.abbreviation}</strong> <small>{i.name} · {i.code}{i.custom ? ' · edited' : ''}</small></span>
         <span className="retail-inline"><select aria-label={`Segment of ${i.name}`} value={segmentOf(state, i.code, month)} onChange={e => ctx.change(setModelSegment(state, i.code, e.target.value as Segment), 'segment')}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select>
-          <button type="button" className="subtle-btn" onClick={() => { setEditing(i); setVariants(variantsText(i)); }}>Edit</button></span></li>)}</ul>
+          <button type="button" className="subtle-btn" onClick={() => { setEditing(i); setVariants(variantsText(i)); setColourLines(colourBox(state, i.code)); }}>Edit</button></span></li>)}</ul>
     </section>
     {editing && <section className="retail-card" role="dialog" aria-label="Edit model"><h3>{editing.code ? `Edit ${editing.name}` : 'Add a model'}</h3>
       <label>Model code (e.g. A176)<input value={editing.code} disabled={!!itemFor(state, editing.code) && !!editing.code} onChange={e => setEditing({ ...editing, code: e.target.value.toUpperCase() })} /></label>
@@ -143,8 +145,9 @@ function CatalogTab(ctx: RetailCtx) {
       <label>Report abbreviation<input value={editing.abbreviation} onChange={e => setEditing({ ...editing, abbreviation: e.target.value })} /></label>
       <label>Segment<select value={[...segmentIds(state), 'other'].includes(editing.segment) ? editing.segment : 'other'} onChange={e => setEditing({ ...editing, segment: e.target.value as Segment })}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select></label>
       <label>Segment for {month} only<select value={editing.monthly[month] || ''} onChange={e => { const monthly = { ...editing.monthly }; if (e.target.value) monthly[month] = e.target.value as Segment; else delete monthly[month]; setEditing({ ...editing, monthly }); }}><option value="">Same as above</option>{segmentIds(state).map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select></label>
+      <label>Colours, one per line: Name = abbreviations used in your report<textarea rows={4} aria-label="Colours of this model" value={colourLines} onChange={e => setColourLines(e.target.value)} placeholder={'Cream = CRM\nPink = PINK\nGraphite = GRPH'} /></label>
       <label>Variants, one per line: SKU | RAM | storage | colours<textarea rows={4} value={variants} onChange={e => setVariants(e.target.value)} placeholder="SM-A176BZKGINU | 6GB | 128GB | Black, Blue" /></label>
-      <div className="share-toolbar"><button type="button" className="primary" disabled={!/^[A-Z0-9]{3,6}$/.test(editing.code)} onClick={() => { ctx.change(saveItem(state, { ...editing, variants: parseVariants(variants) }), 'catalog edit'); setEditing(null); }}>Save</button>
+      <div className="share-toolbar"><button type="button" className="primary" disabled={!/^[A-Z0-9]{3,6}$/.test(editing.code)} onClick={() => { ctx.change(setModelColours(saveItem(state, { ...editing, variants: parseVariants(variants) }), editing.code.trim().toUpperCase(), parseColoursText(colourLines)), 'catalog edit'); setEditing(null); }}>Save</button>
         {itemFor(state, editing.code) && state.catalog.some(c => c.code === editing.code) && <button type="button" className="subtle-btn danger" onClick={() => { ctx.change(resetItem(state, editing.code), 'catalog reset'); setEditing(null); }}>Reset to built-in</button>}
         <button type="button" className="subtle-btn" onClick={() => setEditing(null)}>Cancel</button></div></section>}
   </div>;
