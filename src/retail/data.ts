@@ -127,7 +127,7 @@ export function cleanState(raw: unknown): RetailState {
       variants: arr(c.variants).map(obj).map(x => ({ sku: str(x.sku), ram: str(x.ram), storage: str(x.storage), colors: arr(x.colors).map(y => str(y)).filter(Boolean) })), custom: true
     })),
     corrections,
-    recordMeta: Object.fromEntries(Object.entries(obj(v.recordMeta)).map(([id, m]) => { const o = obj(m); return [id, { ...(isSegment(o.segment) ? { segment: o.segment } : {}), ...(str(o.ram) ? { ram: str(o.ram) } : {}), ...(str(o.storage) ? { storage: str(o.storage) } : {}), ...(str(o.color) ? { color: str(o.color) } : {}), ...(o.status === 'sold' || o.status === 'given' ? { status: o.status } : {}) }]; })),
+    recordMeta: Object.fromEntries(Object.entries(obj(v.recordMeta)).map(([id, m]) => { const o = obj(m); return [id, { ...(isSegment(o.segment) ? { segment: o.segment } : {}), ...(str(o.ram) ? { ram: str(o.ram) } : {}), ...(str(o.storage) ? { storage: str(o.storage) } : {}), ...(str(o.color) ? { color: str(o.color) } : {}), ...(o.status === 'sold' || o.status === 'given' || o.status === 'held' ? { status: o.status } : {}) }]; })),
     sales: arr(v.sales).map(cleanSale).filter((s): s is Sale => !!s),
     targets,
     rates: {

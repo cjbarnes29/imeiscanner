@@ -114,7 +114,7 @@ function CatalogTab(ctx: RetailCtx) {
   const [seg, setSeg] = useState<Segment | 'all'>('all');
   const [ids, setIds] = useState<string[]>([]);
   const [bulkSeg, setBulkSeg] = useState<Segment | ''>('');
-  const [bulkStatus, setBulkStatus] = useState<'' | 'in' | 'sold' | 'given'>('');
+  const [bulkStatus, setBulkStatus] = useState<'' | 'in' | 'sold' | 'given' | 'held'>('');
   const [bulkStorage, setBulkStorage] = useState('');
   const [bulkColor, setBulkColor] = useState('');
   const segOf = (r: RetailRecord) => segmentOf(state, r.model, month, state.recordMeta[r.id]);
@@ -138,7 +138,7 @@ function CatalogTab(ctx: RetailCtx) {
       {ids.length > 0 && <div className="retail-bulk" role="group" aria-label="Bulk edit selected phones">
         <strong>{ids.length} selected</strong>
         <select aria-label="Segment" value={bulkSeg} onChange={e => setBulkSeg(e.target.value)}><option value="">Keep segment</option>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select>
-        <select aria-label="Stock status" value={bulkStatus} onChange={e => setBulkStatus(e.target.value as typeof bulkStatus)}><option value="">Keep status</option><option value="in">In stock</option><option value="sold">Sold</option><option value="given">Given</option></select>
+        <select aria-label="Stock status" value={bulkStatus} onChange={e => setBulkStatus(e.target.value as typeof bulkStatus)}><option value="">Keep status</option><option value="in">In stock</option><option value="sold">Sold</option><option value="given">Given</option><option value="held">Held (store only)</option></select>
         <input aria-label="Storage" placeholder="Storage (256GB)" value={bulkStorage} onChange={e => setBulkStorage(e.target.value)} />
         <input aria-label="Colour" placeholder="Colour" value={bulkColor} onChange={e => setBulkColor(e.target.value)} />
         <button type="button" className="primary" onClick={() => applyBulk(false)}>Apply to these phones</button>

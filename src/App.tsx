@@ -2560,6 +2560,9 @@ export default function App() {
   /** Records already sent to WhatsApp for this person (remembered between visits). */
   const [waSent, setWaSent] = useState<string[]>([]);
   /** After a send: "Mark them as Sold?" (ids of the phones that went out; done = they were marked, Undo is offered). */
+  /** Store only: new scans are kept as "Held": they do not touch the report, targets or Sold until you decide. */
+  const [storeOnly, setStoreOnly] = useState(() => localStorage.getItem('imeilens.storeOnly') === 'on');
+  const seenIds = useRef<Set<string> | null>(null);
   const [soldOffer, setSoldOffer] = useState<{ ids: string[]; done: boolean } | null>(null);
   /** A send that was just opened: which pictures it carried, and how many the user says arrived. */
   const [waAttempt, setWaAttempt] = useState<{ ids: string[]; arrived: number; channel: 'whatsapp' | 'bluetooth' } | null>(null);
@@ -2679,23 +2682,26 @@ export default function App() {
   /** After a send: offer to mark the phones that went out as Sold (never automatic: a send can also be a transfer or a check). */
   function offerSold(ids: string[]) {
     if (localStorage.getItem('imeilens.askSoldAfterSend') === 'off') return;
-    const open = ids.filter(id => records.some(row => row.id === id) && retailRef.current.recordMeta[id]?.status !== 'sold');
+    const open = ids.filter(id => records.some(row => row.id === id) && !retailRef.current.recordMeta[id]?.status);
     if (open.length) setSoldOffer({ ids: open, done: false });
   }
   function soldOfferGroups(ids: string[]): { groups: SoldGroup[]; noOwner: number } {
-    const map = new Map<string, { model: string; owner: string; colours: Map<string, number> }>();
+    const map = new Map<string, SoldGroup>();
     let noOwner = 0;
     for (const id of ids) {
       const row = records.find(r => r.id === id); if (!row) continue;
       const v = retailVariantOf(retailRef.current, row), owner = personGroups.find(p => p.id === row.personId);
       if (!owner) noOwner++;
-      const model = [infoOf(row).name, v.storage].filter(Boolean).join(' '), who = owner ? personName(owner) : 'Unassigned', key = model + '|' + who;
-      const g = map.get(key) || { model, owner: who, colours: new Map<string, number>() };
-      const colour = retailCanonColour(v.color) || 'No colour';
-      g.colours.set(colour, (g.colours.get(colour) || 0) + 1); map.set(key, g);
+      const model = [infoOf(row).name, v.storage].filter(Boolean).join(' '), who = owner ? personName(owner) : 'Unassigned', colour = retailCanonColour(v.color) || 'No colour';
+      const key = model + '|' + who + '|' + colour;
+      const g = map.get(key) || { model, owner: who, colour, count: 0, ids: [], options: [] };
+      if (colour === 'No colour' && !g.options.length) g.options = retailModelColours(retailRef.current, modelCode4(row.model), colourSeen[modelCode4(row.model)] || []).slice(0, 8);
+      g.count++; g.ids.push(id); map.set(key, g);
     }
-    return { groups: [...map.values()].map(g => ({ model: g.model, owner: g.owner, colours: [...g.colours].map(([name, count]) => ({ name, count })) })), noOwner };
+    return { groups: [...map.values()], noOwner };
   }
+  /** A phone with no colour cannot take a colour off the report: the colour is picked here first. */
+  function setOfferColour(ids: string[], colour: string) { changeRetail(retailSetMeta(retailRef.current, ids, { color: colour }), ''); }
   function markOfferSold() {
     if (!soldOffer) return;
     changeRetail(retailSetMeta(retailRef.current, soldOffer.ids, { status: 'sold' as never }), 'sold after sending');
@@ -3076,6 +3082,14 @@ export default function App() {
   // phones leaving the stock change the report's colour counts and stock. Taking a sale back undoes it. See retail/soldsync.ts and retail/reportsync.ts.
   useEffect(() => {
     if (!retailLoaded || !inventoryLoaded) return;
+    // phones that appear while Store only is on are kept as Held
+    if (!seenIds.current) seenIds.current = new Set(retailRecords.map(r => r.id));
+    else {
+      const fresh = retailRecords.filter(r => !seenIds.current!.has(r.id));
+      for (const r of fresh) seenIds.current.add(r.id);
+      const hold = storeOnly ? fresh.filter(r => !retail.recordMeta[r.id]?.status).map(r => r.id) : [];
+      if (hold.length) { changeRetail(retailSetMeta(retail, hold, { status: 'held' as never }), ''); return; }
+    }
     const sold = syncSold(retail, retailRecords, todayKey);
     let next = sold.state;
     let scan = { added: 0, removed: 0, created: 0 };
@@ -3089,7 +3103,7 @@ export default function App() {
     if (scan.removed && !sold.added && !sold.undone) bits.push(`${scan.removed} taken out of the report stock`);
     if (scan.created) bits.push(`${scan.created} new report line${scan.created === 1 ? '' : 's'}`);
     if (bits.length) setToast(bits.join(', ') + '.');
-  }, [retail, retailRecords, retailLoaded, inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [retail, retailRecords, retailLoaded, inventoryLoaded, storeOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
   const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;
   function assignOwners(changes: { id: string; personId: string }[]) {
@@ -3373,6 +3387,8 @@ export default function App() {
   }
 
   /** The phones a bulk action applies to: the ticked ones, or everything shown when none are ticked. */
+  /** Phones kept as Held (store only): not in the report, targets or Sold. */
+  const heldIds = records.filter(r => retail.recordMeta[r.id]?.status === 'held').map(r => r.id);
   const bulkTargets = () => (selectedRows.length ? selectedRows : visible);
   const bulkCropRows = () => selectedRows.length ? selectedRows : records.some(needsCropping) ? records.filter(needsCropping) : visible;
   const bulkCropLabel = selectedRows.length ? `${selectedRows.length} ticked` : records.some(needsCropping) ? `${records.filter(needsCropping).length} need cropping` : `all ${visible.length} shown`;
@@ -4907,6 +4923,7 @@ export default function App() {
               </select>
             </label>}
             <QuickPerson onAdd={addPersonNamed} label="+ New person" />
+            <label className="settings-check store-only"><input type="checkbox" checked={storeOnly} onChange={e => { setStoreOnly(e.target.checked); localStorage.setItem('imeilens.storeOnly', e.target.checked ? 'on' : 'off'); setToast(e.target.checked ? 'Store only is on: new phones are kept as Held and do not touch the report or targets.' : 'Store only is off: new phones count in the report again.'); }} /> Store only: keep new scans as Held (report and targets are not changed){heldIds.length > 0 && <small> · {heldIds.length} held</small>}</label>
 
 {!simpleView && (<>
             {androidBridge && <div className="android-scan">
@@ -5308,6 +5325,7 @@ export default function App() {
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
 
+              {heldIds.length > 0 && <div className="held-bar" role="group" aria-label="Held phones"><span><b>{heldIds.length}</b> held phone{heldIds.length === 1 ? '' : 's'} · stored only, not in the report, targets or Sold</span><button type="button" className="subtle-btn" onClick={() => openSharing(heldIds)}>Release (share)</button></div>}
               {<div className="select-toggle"><button type="button" className="subtle-btn" aria-pressed={selectMode} onClick={() => { if (selectMode) { setSelectOn(false); setSelectedIds([]); } else setSelectOn(true); }}>{selectMode ? `Done${selectedRows.length ? ` (${selectedRows.length} selected)` : ''}` : 'Select'}</button></div>}
               <div className={`action-bar${selectMode ? ' show' : ''}`} role="group" aria-label="Actions for selected phones">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
@@ -5412,7 +5430,7 @@ export default function App() {
                     <label>Segment of this model<select aria-label={'Segment of ' + title} value={segOfRecord(r)} onChange={e => changeRetail(retailSetModelSegment(retail, r.model, e.target.value), 'segment')}>
                       {[...retailSegmentIds(retail), 'other' as RetailSegment].map(sg => <option key={sg} value={sg}>{retailSegLabel(retail, sg)}</option>)}</select></label>
                     <label>Stock<select aria-label={'Stock status of ' + title} value={retail.recordMeta[r.id]?.status || ''} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { status: e.target.value as never }), '')}>
-                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option></select></label></>}
+                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option><option value="held">Held (store only)</option></select></label></>}
                     <label>Model<input className="inline-edit model-edit" aria-label={'Model for record ' + r.number} value={r.model}
                       onFocus={e => { e.currentTarget.dataset.before = r.model; }}
                       onChange={e => { const model = e.target.value, ok = typedModelOk(r, model.trim()); updateRow(r.id, { model, modelNeedsReview: !ok, modelNote: typedModelNote(r, model.trim()) }); }}
@@ -5812,7 +5830,7 @@ export default function App() {
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}
       </nav>}
-      {soldOffer && (() => { const g = soldOfferGroups(soldOffer.ids); return <SoldOffer count={soldOffer.ids.length} groups={g.groups} noOwner={g.noOwner} done={soldOffer.done} onMark={markOfferSold} onUndo={undoOfferSold} onClose={() => setSoldOffer(null)} onNever={() => { localStorage.setItem('imeilens.askSoldAfterSend', 'off'); setSoldOffer(null); setToast('Will not ask again. Mark phones as Sold in Phones whenever you want.'); }} />; })()}
+      {soldOffer && (() => { const g = soldOfferGroups(soldOffer.ids); return <SoldOffer count={soldOffer.ids.length} groups={g.groups} noOwner={g.noOwner} done={soldOffer.done} onMark={markOfferSold} onColour={setOfferColour} onUndo={undoOfferSold} onClose={() => setSoldOffer(null)} onNever={() => { localStorage.setItem('imeilens.askSoldAfterSend', 'off'); setSoldOffer(null); setToast('Will not ask again. Mark phones as Sold in Phones whenever you want.'); }} />; })()}
       {toast && (
         <div className="toast">
           <AlertTriangle size={16} />

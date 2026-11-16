@@ -937,3 +937,7 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
 /* after sending: Mark them as Sold? */
 .sold-offer h3{margin:0 0 8px;font-size:18px}.sold-groups li{display:grid;gap:2px}.sold-groups span{font-size:14px}.sold-groups small{color:#9fb0c3}
 .sold-offer .share-toolbar{margin-top:10px}
+
+/* Store only: held phones */
+.store-only{margin-top:6px}.held-bar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;margin:0 0 8px;border:1px solid #5b4a1e;background:#2a2412;border-radius:12px;font-size:14px}.held-bar .subtle-btn{min-height:40px}
+.sold-colour{margin-top:6px;display:grid;gap:6px}

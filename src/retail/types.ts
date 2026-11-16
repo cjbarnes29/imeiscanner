@@ -51,7 +51,7 @@ export type CatalogItem = {
 };
 
 /** `status`: a phone the person marked as no longer in stock ('sold' / 'given'). Without it a scanned phone counts as in stock. */
-export type RecordMeta = { segment?: Segment; ram?: string; storage?: string; color?: string; status?: 'sold' | 'given' };
+export type RecordMeta = { segment?: Segment; ram?: string; storage?: string; color?: string; status?: 'sold' | 'given' | 'held' };
 
 /** A confirmed sale. A sale is attributed to the person who owned the phone when it was confirmed; see sales.ts for the rules. */
 export type Sale = {

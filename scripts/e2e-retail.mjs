@@ -378,6 +378,16 @@ try{
   await run(`history.back();true`);
   await waitFor(`document.querySelectorAll('.tg-seg').length>0`,'Back went to Targets, the screen before Phones');
   ok('Back closes a popup first, then goes to the screen before (it does not leave the app)');
+  // Store only: the switch is on the Scan screen and is remembered
+  await nav('Scan');
+  await waitFor(`!!document.querySelector('.store-only input')`,'Store only switch');
+  await run(`document.querySelector('.store-only input').click()`);
+  await waitFor(`localStorage.getItem('imeilens.storeOnly')==='on'`,'Store only on');
+  await run(`document.querySelector('.store-only input').click()`);
+  await waitFor(`localStorage.getItem('imeilens.storeOnly')==='off'`,'Store only off');
+  ok('Store only has a switch on the Scan screen (new scans are kept as Held; held phones are in no report number)');
+  await nav('Phones');
+  await waitFor(`!!document.querySelector('.select-toggle')`,'Phones once more');
   await nav('Phones');
   await waitFor(`!!document.querySelector('.select-toggle')`,'Phones again');
   await run(`navigator.share=async()=>{};true`);

@@ -358,6 +358,12 @@ const TS2 = await load('retail/targetsummary');
   const sold1 = SS.syncSold({ ...zero, recordMeta: { s1: { status: 'sold' } } }, ph, day);
   assert.equal(sold1.added, 1); assert.equal(ach(sold1.state), 3, 'the owner\'s Sold: 2 -> 3'); assert.equal(soldOf(sold1.state), 1, 'the report line says Sold 1');
   assert.match(P.buildReport(sold1.state.report), /^A07 64GB : 01\/15$/m);
+  // Store only: a Held phone is stored and nothing else (not in the report stock, not a sale, and the status survives saving)
+  const heldState = { ...zero, recordMeta: { s1: { status: 'held' } } };
+  const heldRun = SS.syncSold(heldState, ph, day);
+  assert.equal(heldRun.added, 0, 'a held phone is not a sale'); assert.equal(ach(heldRun.state), 2, 'the owner\'s Sold does not move');
+  assert.equal(D.cleanState(JSON.parse(JSON.stringify(heldState))).recordMeta.s1.status, 'held', 'held is saved and loaded');
+  assert.ok(!(await load('retail/inventory')).inStock(heldState, ph).some(r => r.id === 's1'), 'a held phone is not in the stock that the report is checked against');
   // what was sold on a day (the Targets screen shows it as "today N")
   const e1 = sold1.state.soldLedger.s1;
   assert.deepEqual(SS.soldOnDay(sold1.state, day), { [e1.personId]: { [e1.segment]: 1 } }, 'the sale is counted on the day it was marked');

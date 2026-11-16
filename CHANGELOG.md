@@ -2,6 +2,10 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — store only (Held), colour check before Sold (Android and web)
+- **Store only:** a switch on the Scan screen. New scans are kept as **Held**: stored only, not in the report, targets, Sold or Home. Phones has a Held bar with **Release (share)**; sharing never changes the report or the data. A phone can also be set to Held in its Stock menu.
+- **Colour check before Sold:** in the "Mark them as Sold?" prompt, phones with no colour show tap buttons (the model's colours), so the right colour comes off the report.
+
 ## Unreleased — after sending, Back button, today on Targets (Android and web)
 - **After you send phones:** "You sent N phones. Mark them as Sold?" lists the models, colours and owners that will change. Mark as Sold takes the stock off the right colour in the report and adds to the owner's Sold, with Undo. Not now changes nothing. Can be turned off (Don't ask again).
 - **Targets:** each segment and person shows what was sold today, and **Share summary: pieces per day** makes a text to copy and send.

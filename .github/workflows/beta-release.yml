@@ -50,6 +50,8 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **Store only:** keep new scans as Held (not in the report or targets) and release them to share later.
+          - **Colour check before Sold:** pick the colour in the prompt so the exact colour comes off the report.
           - **After sending:** "Mark them as Sold?" with what will change, and Undo.
           - **Targets:** sold today per person, and a copyable "pieces per day" summary.
           - **Back button** goes to the previous screen instead of leaving the app.
