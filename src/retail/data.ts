@@ -58,6 +58,16 @@ function cleanColours(value: unknown): RetailState['colours'] {
   }
   return Object.keys(out).length ? out : undefined;
 }
+function cleanLedger(value: unknown): RetailState['soldLedger'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out: NonNullable<RetailState['soldLedger']> = {};
+  for (const [id, raw] of Object.entries(obj(value)).slice(0, 5000)) {
+    const e = obj(raw);
+    if (!id || id.length > 80 || !isSegment(e.segment) || !isMonth(e.month)) continue;
+    out[id] = { personId: str(e.personId).slice(0, 80), segment: e.segment as string, month: e.month as string, code: str(e.code).slice(0, 8), storage: str(e.storage).slice(0, 12) };
+  }
+  return out;
+}
 function cleanSegments(value: unknown): SegmentDef[] | undefined {
   const list = arr(value).map(obj).filter(s => isSegment(s.id) && str(s.name)).map(s => ({ id: str(s.id), name: str(s.name).slice(0, 30) }));
   return list.length ? list : undefined;
@@ -106,7 +116,7 @@ export function cleanState(raw: unknown): RetailState {
   const aliases = Object.fromEntries(Object.entries(obj(v.aliases)).filter(([k, code]) => k.length <= 60 && /^[A-Z0-9]{3,6}$/.test(str(code))).map(([k, code]) => [k, str(code)]));
   return {
     ...base,
-    segments: cleanSegments(v.segments), aliases, report: cleanReport(v.report), colours: cleanColours(v.colours),
+    segments: cleanSegments(v.segments), soldLedger: cleanLedger(v.soldLedger), aliases, report: cleanReport(v.report), colours: cleanColours(v.colours),
     catalog: arr(v.catalog).map(obj).filter(c => /^[A-Z0-9]{3,6}$/.test(str(c.code))).map(c => ({
       code: str(c.code), name: str(c.name) || str(c.code), abbreviation: str(c.abbreviation) || str(c.name), segment: isSegment(c.segment) ? c.segment : 'other',
       monthly: Object.fromEntries(Object.entries(obj(c.monthly)).filter(([m, s]) => isMonth(m) && isSegment(s))) as Record<Month, never>,

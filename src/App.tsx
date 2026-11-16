@@ -3,6 +3,7 @@ import { RetailHub, type RetailRecord, type RetailSub } from './RetailHub';
 import { SheetHandle } from './SheetHandle';
 import { QuickPerson } from './QuickPerson';
 import { syncScans } from './retail/reportsync';
+import { syncSold } from './retail/soldsync';
 import { reconcile as reconcileReport } from './retail/reconcile';
 import { emptyState, rollover } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
@@ -3028,13 +3029,23 @@ export default function App() {
   const colourSeen = useMemo(() => { const out: Record<string, string[]> = {}; for (const r of retailRecords) { const code = modelCode4(r.model); const c = retailCanonColour(retailVariantOf(retail, r).color); if (code && c) (out[code] ||= []).push(c); } return out; }, [retail, retailRecords]);
   /** Report lines that need a look (shown as the badge on the Report button). */
   const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
-  // Phones scanned after the report was pasted go into the report by themselves (see retail/reportsync.ts)
+  // Numbers that follow the phones by themselves: a phone marked Sold adds to its owner's Sold (targets) and to the report's Sold; scanned phones and
+  // phones leaving the stock change the report's colour counts and stock. Taking a sale back undoes it. See retail/soldsync.ts and retail/reportsync.ts.
   useEffect(() => {
-    if (!retailLoaded || !inventoryLoaded || !retail.report) return;
-    const result = syncScans(retail, retail.report, retailRecords);
-    if (result.report === retail.report) return;
-    changeRetail({ ...retail, report: result.report }, '');
-    if (result.added + result.removed > 0) setToast(`${result.added ? `${result.added} scanned phone${result.added === 1 ? '' : 's'} added to the report` : ''}${result.added && result.removed ? ', ' : ''}${result.removed ? `${result.removed} taken out` : ''}${result.created ? ` (${result.created} new line${result.created === 1 ? '' : 's'})` : ''}.`);
+    if (!retailLoaded || !inventoryLoaded) return;
+    const sold = syncSold(retail, retailRecords, todayKey);
+    let next = sold.state;
+    let scan = { added: 0, removed: 0, created: 0 };
+    if (next.report) { const r = syncScans(next, next.report, retailRecords); if (r.report !== next.report) next = { ...next, report: r.report }; scan = r; }
+    if (next === retail) return;
+    changeRetail(next, '');
+    const bits: string[] = [];
+    if (sold.added) bits.push(`${sold.added} sale${sold.added === 1 ? '' : 's'} added to the targets and the report`);
+    if (sold.undone) bits.push(`${sold.undone} sale${sold.undone === 1 ? '' : 's'} taken back`);
+    if (scan.added && !sold.added) bits.push(`${scan.added} scanned phone${scan.added === 1 ? '' : 's'} added to the report`);
+    if (scan.removed && !sold.added && !sold.undone) bits.push(`${scan.removed} taken out of the report stock`);
+    if (scan.created) bits.push(`${scan.created} new report line${scan.created === 1 ? '' : 's'}`);
+    if (bits.length) setToast(bits.join(', ') + '.');
   }, [retail, retailRecords, retailLoaded, inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
   const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;

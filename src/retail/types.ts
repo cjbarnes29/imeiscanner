@@ -118,9 +118,14 @@ export type StockReport = {
 /** What the person typed or taught for one model: its colour names, and what a report abbreviation means (key = letters of the abbreviation, lower case). */
 export type ModelColours = { names: string[]; aliases: Record<string, string> };
 
+/** A phone that was marked Sold and already counted in the targets and the report (see soldsync.ts). */
+export type SoldEntry = { personId: string; segment: Segment; month: Month; code: string; storage: string };
+
 export type RetailState = {
   version: 1;
   catalog: CatalogItem[];
+  /** The sales already counted (record id -> who, which segment, which month, which model): a phone is never counted twice, and taking it back undoes it. */
+  soldLedger?: Record<string, SoldEntry>;
   /** Colours of each model, by model code. */
   colours?: Record<string, ModelColours>;
   /** The person's own segments (Fold 1, Fold 2…). Missing = the starting list. */

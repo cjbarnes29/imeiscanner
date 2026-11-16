@@ -325,6 +325,12 @@ try{
   // a phone taken out of stock lowers the matching report line by itself ("from scans since you pasted")
   assert.ok(await run(`[...document.querySelectorAll('.rep-row')].some(r=>r.innerText.includes('A17 5G 6/128GB')&&/-1 from scans since you pasted/.test(r.innerText))`),'the A17 line follows the scans');
   ok('a phone taken out of stock lowers the matching report line by itself, and the line says so');
+  // and the sale counts by itself: the Sold of the report line, and the owner's Sold in Targets
+  assert.ok(await run(`[...document.querySelectorAll('.rep-row')].some(r=>r.innerText.includes('A17 5G 6/128GB')&&/Sold 1/.test(r.innerText))`),'the report line says Sold 1');
+  await nav('Targets');
+  await waitFor(`[...document.querySelectorAll('.tg-seg')].some(b=>/^Low/.test(b.innerText.trim())&&/Sold 1 of 0/.test(b.innerText))`,'Low shows Sold 1');
+  await sub('Report');
+  ok('a phone marked Sold counts by itself: the report line says Sold 1 and the owner\'s Sold in Targets goes up');
 
   // ---------- Reload: everything persists, scan records untouched ----------
   await send('Page.navigate',{url:'http://localhost:4196/'});

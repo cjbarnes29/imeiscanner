@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/dashboard'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/dashboard'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -328,6 +328,55 @@ const R = await load('retail/reportsync'), H = await load('retail/dashboard');
   const own = { ...ov, segments: [{ id: 'low', name: 'Fold 1' }], settings: { ...ov.settings, myPersonId: 'p1' } };
   assert.equal(H.overallDashboard(own, ['p1'], '2026-11-16').lines[0].label, 'Fold 1');
   assert.match(H.todayDashboard(own, [], '2026-11-16').priorities[0].message, /Fold 1/);
+}
+
+
+// ---- 8. a phone marked Sold counts by itself (targets and report); taking it back undoes it ---------------------------------------------------------------
+const SS = await load('retail/soldsync');
+{
+  const tg = (id, lines) => ({ personId: id, month: '2026-11', lines, source: 'manual', importedAt: '2026-11-01T00:00:00.000Z' });
+  const base = { ...D.emptyState(), targets: { '2026-11': { p1: tg('p1', [{ segment: 'low', target: 10, achieved: 2 }]) } }, report: P.parseReport('A07 64GB : 00/15\n(02,00,13) Vlt,Grn,Blk') };
+  const ph = [{ ...phone('SM-A075F', '64GB', 'Violet'), id: 's1', personId: 'p1' }, { ...phone('SM-A075F', '64GB', 'Black'), id: 's2', personId: 'p1' }, { ...phone('SM-A075F', '64GB', 'Black'), id: 's3', personId: '' }];
+  const day = '2026-11-16';
+  const ach = st => st.targets['2026-11'].p1.lines.find(l => l.segment === 'low').achieved;
+  const soldOf = st => P.reportItems(st.report)[0].sold;
+
+  // the first run only records what is already marked (phones sold before this existed are taken as counted)
+  const first = SS.syncSold({ ...base, recordMeta: { s2: { status: 'sold' } } }, ph, day);
+  assert.equal(first.added, 0); assert.deepEqual(Object.keys(first.state.soldLedger), ['s2']); assert.equal(ach(first.state), 2, 'nothing changes on the first run'); assert.equal(soldOf(first.state), 0);
+  const zero = SS.syncSold(base, ph, day).state;
+
+  // marked Sold: the owner's Sold goes up in that segment, and the report's Sold goes up
+  const sold1 = SS.syncSold({ ...zero, recordMeta: { s1: { status: 'sold' } } }, ph, day);
+  assert.equal(sold1.added, 1); assert.equal(ach(sold1.state), 3, 'the owner\'s Sold: 2 -> 3'); assert.equal(soldOf(sold1.state), 1, 'the report line says Sold 1');
+  assert.match(P.buildReport(sold1.state.report), /^A07 64GB : 01\/15$/m);
+  assert.equal(SS.syncSold(sold1.state, ph, day).state, sold1.state, 'running it again changes nothing (same state object)');
+
+  // Given is not a sale
+  const given = SS.syncSold({ ...sold1.state, recordMeta: { s1: { status: 'sold' }, s2: { status: 'given' } } }, ph, day);
+  assert.equal(given.added, 0, 'a phone marked Given is not a sale'); assert.equal(ach(given.state), 3); assert.equal(soldOf(given.state), 1);
+  // a sold phone with no owner counts in the report only
+  const sold3 = SS.syncSold({ ...sold1.state, recordMeta: { s1: { status: 'sold' }, s3: { status: 'sold' } } }, ph, day);
+  assert.equal(ach(sold3.state), 3); assert.equal(soldOf(sold3.state), 2);
+  // taken back into stock: the numbers come off again
+  const back = SS.syncSold({ ...sold3.state, recordMeta: { s3: { status: 'sold' } } }, ph, day);
+  assert.equal(back.undone, 1); assert.equal(ach(back.state), 2); assert.equal(soldOf(back.state), 1);
+  // a phone that was deleted keeps its sale (it happened); it only leaves the ledger
+  const deleted = SS.syncSold({ ...sold1.state, recordMeta: { s1: { status: 'sold' } } }, ph.filter(p => p.id !== 's1'), day);
+  assert.equal(deleted.undone, 0); assert.equal(ach(deleted.state), 3); assert.equal(deleted.state.soldLedger.s1, undefined);
+  // a person with no target line gets one (Sold counted, target 0)
+  const other = SS.syncSold({ ...zero, recordMeta: { z1: { status: 'sold' } } }, [...ph, { ...phone('SM-A075F', '64GB', 'Black'), id: 'z1', personId: 'p2' }], day);
+  assert.deepEqual(other.state.targets['2026-11'].p2.lines, [{ segment: 'low', target: 0, achieved: 1 }]);
+  // no report at all: the targets still follow
+  const noReport = SS.syncSold({ ...D.emptyState(), targets: base.targets, soldLedger: {}, recordMeta: { s1: { status: 'sold' } } }, ph, day);
+  assert.equal(ach(noReport.state), 3);
+  // a model the report does not list: the target counts, the report is left alone
+  const unlisted = SS.syncSold({ ...zero, recordMeta: { u1: { status: 'sold' } } }, [{ ...phone('SM-A276B/DS', '256GB', 'Black'), id: 'u1', personId: 'p1' }], day);
+  assert.equal(soldOf(unlisted.state), 0); assert.equal(P.reportItems(unlisted.state.report).length, 1);
+  // saved and loaded: the ledger is kept, junk is dropped
+  assert.deepEqual(D.cleanState(JSON.parse(JSON.stringify(sold1.state))).soldLedger, sold1.state.soldLedger);
+  assert.deepEqual(D.cleanState({ soldLedger: { ok: { personId: 'p1', segment: 'low', month: '2026-11', code: 'A075', storage: '64GB' }, bad: { segment: '', month: 'x' }, '': {} } }).soldLedger, { ok: { personId: 'p1', segment: 'low', month: '2026-11', code: 'A075', storage: '64GB' } });
+  assert.equal(D.cleanState({}).soldLedger, undefined);
 }
 
 console.log('retail v2: all checks passed');

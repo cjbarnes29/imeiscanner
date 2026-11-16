@@ -50,11 +50,10 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
-          - **Report popup in the right place:** tapping a report line opens the popup over the whole screen, above the bottom bar (it was half hidden behind it).
-          - **Typed numbers:** in Targets, Target and Sold are typed or pasted (no − / + buttons) with **Copy target to everyone** (the target number only). In **Assign by model**, the number of phones per person is typed too, with **Copy to everyone**.
-          - **Report popup:** Previous / Next, a "How to fix this line" box, editable labels and colour names, **Match my scans**; Save line marks the line as checked.
-          - **Scanned phones go into the report by themselves**, with "+N from scans since you pasted" on changed lines.
-          - **Home looks at everyone** (the Everyone chip), with who needs help; **+ Person** on Phones and Scan.
+          - **Numbers follow the phones by themselves:** mark a phone **Sold** and the owner's **Sold** in Targets goes up, the report line's **Sold** goes up, and the report stock goes down. Mark it back to In stock and it all comes off again. **Given** only leaves the stock. Scanned phones go into the report by themselves, too.
+          - **Typed numbers:** Target and Sold are typed or pasted (no − / + buttons). **Copy target to everyone** copies the target only, never Sold. Assign by model is typed too, with **Copy to everyone**.
+          - **Report popup in the right place** (above the bottom bar), with Previous / Next, "How to fix this line", editable labels, **Match my scans**; Save line marks a line as checked.
+          - **Home looks at everyone**, with who needs help; **+ Person** on Phones and Scan.
           - Earlier in this beta line: colour themes (Settings > Colour), Simple mode as Scan / Phones / Send, colours of each model, the sliding bottom bar and the More sheet.
 
           ### Known limits

@@ -2,6 +2,11 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — numbers that follow the phones by themselves (Android and web)
+- **A phone marked Sold counts by itself:** the owner's Sold for that segment goes up (this month; a person with no target line for it gets one), and the Sold of the matching report line goes up. Marking it back to *In stock* takes the same numbers off. *Given* is not a sale: it only leaves the stock. A phone that is deleted keeps its sale. Phones marked Sold before this existed are taken as counted already.
+- Together with scans going into the report (stock and colour counts follow the phones), the report, the targets and the stock now move together without typing. Everything is marked or announced ("2 sales added to the targets and the report").
+- Target and Sold are typed or pasted (no − / + buttons); **Copy target to everyone** copies the target only, never Sold (it is each person's own).
+
 ## Unreleased — popup in the right place, typed numbers in Assign by model (Android and web)
 - **Report popup fixed:** it was drawn half behind the bottom bar (the screen's entrance animation kept it in a layer under the bar). Animations no longer leave a layer behind, and the popup is drawn at the top level of the page. A browser test and an emulator check make sure the popup covers the bottom bar and fits inside the screen.
 - **Assign by model:** the number of phones for each person is typed or pasted (digits only) instead of − / + buttons, and each person has **Copy to everyone**, which gives the same number to all as far as the phones go.
