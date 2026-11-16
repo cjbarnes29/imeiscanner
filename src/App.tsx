@@ -1931,7 +1931,7 @@ export default function App() {
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
   const [expectedProducts, setExpectedProducts] = useState(() => { try { const n = Number(localStorage.getItem('imei-lens-expected-products')); return Number.isInteger(n) && n >= 0 && n <= 12 ? n : 0; } catch { return 0; } });
-  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>(() => { try { const v = localStorage.getItem('imei-lens-scan-speed'); return v === 'fast' || v === 'detailed' ? v : 'standard'; } catch { return 'standard'; } });
+  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>(() => { try { return 'standard'; } catch { return 'standard'; } });
   // Camera scans use these in the page; Choose photos and scan uses them in the phone's own scanner (same two settings).
   useEffect(() => {
     try { localStorage.setItem('imei-lens-expected-products', String(expectedProducts)); localStorage.setItem('imei-lens-scan-speed', scanMode); } catch { /* storage full or blocked */ }
@@ -2052,8 +2052,8 @@ export default function App() {
   /** The title of the screen that is open, and a short status line under it. */
   const viewInfo = (() => {
     const back = recordsTab !== 'records' && !(recordsTab === 'retail' && ['today', 'report', 'targets'].includes(retailSub));
-    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'Gives', segments: 'Segments', catalog: 'Catalog', data: 'Backup and data' };
-    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' ? 'People' : recordsTab === 'models' ? 'Assign by model' : recordsTab === 'share' ? 'Share' : retailTitles[retailSub];
+    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'Give and share', segments: 'Segments', catalog: 'Catalog', data: 'Backup and data' };
+    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' ? 'People' : recordsTab === 'models' || recordsTab === 'share' ? 'Give and share' : retailTitles[retailSub];
     const unassigned = records.filter(r => r.personId === UNASSIGNED).length;
     const sub = recordsTab === 'records' ? (records.length ? `${records.length} scanned${unassigned ? ` · ${unassigned} unassigned` : ''}` : 'Nothing scanned yet')
       : recordsTab === 'retail' && retailSub === 'today' ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : '';
@@ -3127,11 +3127,12 @@ export default function App() {
           return <li key={group.key} className="give-card">
             <div className="give-head"><strong>{group.code || 'No model code read'}</strong><small>{phones.length} phone{phones.length === 1 ? '' : 's'}</small></div>
             <ul className="unknown-phones" aria-label={`Phones with ${group.code || 'no model code'}`}>
-              {phones.slice(0, 6).map(row => <li key={row.id}><button type="button" className="unknown-phone" onClick={() => openReview(row)}>
+              {phones.slice(0, 6).map(row => <li key={row.id} className="unknown-row"><button type="button" className="unknown-phone" onClick={() => openReview(row)}>
                 <img src={recordPhoto(row)} alt="" />
                 <span><b>{recordImeiPair(row).imei1 || recordSerial(row) || 'No number read'}</b><small>{row.name}</small></span>
-              </button></li>)}
+              </button><button type="button" className="iconbtn danger" aria-label={`Delete ${recordImeiPair(row).imei1 || recordSerial(row) || 'this phone'}`} onClick={() => setConfirmDelete({ ids: [row.id], fromReview: false })}><Trash2 size={16} /></button></li>)}
             </ul>
+            <button type="button" className="subtle-btn danger" aria-label={`Delete the ${phones.length} phones of ${group.code || 'no model code'}`} onClick={() => setConfirmDelete({ ids: group.ids, fromReview: false })}><Trash2 size={14} /> Delete {phones.length === 1 ? 'this phone' : `these ${phones.length} phones`}</button>
             {phones.length > 6 && <button type="button" className="subtle-btn" onClick={() => jumpTo('records', group.key)}>Show all {phones.length} phones</button>}
             {group.code
               ? <div className="unknown-fill">
@@ -4854,7 +4855,7 @@ export default function App() {
         <SheetHandle onClose={() => setMoreOpen(false)} />
         <div className="modal-head"><h2>More</h2><button className="iconbtn" aria-label="Close" onClick={() => setMoreOpen(false)}><X size={17} /></button></div>
         <ul className="more-list">
-          {([['people', 'People', `${personGroups.length} people · devices and targets`], ['gives', 'Gives', 'Suggested phones for each person'], ['segments', 'Segments', 'Fold 1, Fold 2 and your own'], ['catalog', 'Catalog', 'Models, abbreviations, colours'], ['models', 'Assign by model', 'Give phones out by model'], ['share', 'Share', 'Send phones or numbers'], ['data', 'Backup and data', 'Backup, restore, undo, history']] as const).map(([key, label, hint]) =>
+          {([['people', 'People', `${personGroups.length} people · devices and targets`], ['gives', 'Give and share', 'Suggest, give out by model, then send'], ['segments', 'Segments', 'Fold 1, Fold 2 and your own'], ['catalog', 'Catalog', 'Models, abbreviations, colours'], ['data', 'Backup and data', 'Backup, restore, undo, history']] as const).map(([key, label, hint]) =>
             <li key={key}><button type="button" onClick={() => openMore(key)}><strong>{label}</strong><small>{hint}</small></button></li>)}
           <li><button type="button" onClick={() => { setMoreOpen(false); setSettingsOpen(true); }}><strong>Settings</strong><small>Simple or Detailed mode, speed, language</small></button></li>
         </ul>
@@ -5012,27 +5013,14 @@ export default function App() {
             )}
 
             <label className="export-format-picker">
-              <span>Scan speed</span>
-              <select value={scanMode} disabled={busy} onChange={event => setScanMode(event.target.value as typeof scanMode)}>
-                <option value="fast">Fast · large batches</option>
-                <option value="standard">Standard · recommended</option>
-                <option value="detailed">Detailed · multiple boxes or difficult labels</option>
-              </select>
-            </label>
-            <label className="export-format-picker">
-              <span>Products in each photo</span>
+              <span>Products in each photo <small>(Auto is best; set a number only if several boxes are missed)</small></span>
               <select value={expectedProducts} disabled={busy} onChange={event => setExpectedProducts(Number(event.target.value))}>
                 <option value={0}>Auto · find them myself</option>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
+                {[...new Set([1, 2, 3, 4, 5, 6, ...(expectedProducts > 6 ? [expectedProducts] : [])])].map(count => <option key={count} value={count}>{count} product{count === 1 ? '' : 's'}</option>)}
               </select>
             </label>
             {expectedProducts > 1 && <p className="scan-mode-note">If fewer than {expectedProducts} are found the first time, the app reads the photo again in enlarged pieces to find the rest, then straightens each crop. Photos that still cannot be split are marked for review.</p>}
-            {androidBridge && <p className="scan-mode-note">{androidBridge.setScanOptions ? <>Both settings apply to <b>Scan with camera</b> and to <b>Choose photos and scan</b> (which keeps going in the background).</> : <>This installed app is older: the settings apply to <b>Scan with camera</b> only. Install the newest APK to use them for <b>Choose photos and scan</b> too.</>}</p>}
-            <p className="scan-mode-note">
-              {scanMode === 'fast' ? 'One OCR pass per photo. Review missed or unclear IMEIs manually.' :
-                scanMode === 'standard' ? 'Runs another pass only when the first result needs it.' :
-                  'Checks every photo twice and retries unclear crops. Best for photos with several labels.'}
-            </p>
+            {androidBridge && <p className="scan-mode-note">{androidBridge.setScanOptions ? <>This applies to <b>Scan with camera</b> and to <b>Choose photos and scan</b> (which keeps going in the background).</> : <>This installed app is older: the settings apply to <b>Scan with camera</b> only. Install the newest APK to use them for <b>Choose photos and scan</b> too.</>}</p>}
 
             {(!androidBridge || files.length > 0) && <button
               className="primary scan-button"
@@ -5310,6 +5298,9 @@ export default function App() {
             </div>
           </div>}
 
+          {!simpleView && (recordsTab === 'models' || recordsTab === 'share' || (recordsTab === 'retail' && retailSub === 'gives')) && <div className="give-tabs" role="tablist" aria-label="Give and share">
+            {([['gives', 'Suggested', recordsTab === 'retail'], ['models', 'By model', recordsTab === 'models'], ['share', 'Send', recordsTab === 'share']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={on ? 'on' : ''} onClick={() => openMore(key)}>{label}</button>)}
+          </div>}
           {!simpleView && recordsTab === 'models' && modelsTab}
           {!simpleView && recordsTab === 'records' && filter === 'Unknown' && unknownTab}
           {!simpleView && recordsTab === 'people' && peopleTab}

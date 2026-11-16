@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — simpler menus and scan settings (Android and web)
+- **Give and share** is one section in More with three tabs (Suggested, By model, Send) instead of three separate entries.
+- **Unknown models:** a Delete button for each phone and for the whole group (with the usual are-you-sure question).
+- **Catalog segment fix:** choosing a segment for a model now takes effect even when an older "this month only" choice existed (the menu used to jump back).
+- **Scan settings:** one scan speed (Standard). In label tests Fast missed labels and Detailed was slower with the same results. Products in each photo is Auto, or 1 to 6.
+
 ## Unreleased — store only (Held), colour check before Sold (Android and web)
 - **Store only:** a switch on the Scan screen. New scans are kept as **Held**: stored only, not in the report, targets, Sold or Home. Phones has a Held bar with **Release (share)**; sharing never changes the report or the data. A phone can also be set to Held in its Stock menu.
 - **Colour check before Sold:** in the "Mark them as Sold?" prompt, phones with no colour show tap buttons (the model's colours), so the right colour comes off the report.

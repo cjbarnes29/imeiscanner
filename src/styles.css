@@ -941,3 +941,10 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
 /* Store only: held phones */
 .store-only{margin-top:6px}.held-bar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;margin:0 0 8px;border:1px solid #5b4a1e;background:#2a2412;border-radius:12px;font-size:14px}.held-bar .subtle-btn{min-height:40px}
 .sold-colour{margin-top:6px;display:grid;gap:6px}
+.retail-list .retail-inline{flex-wrap:nowrap;align-items:center}.retail-list .retail-inline select{flex:1 1 auto;min-width:0}.retail-list .retail-inline .subtle-btn{white-space:nowrap;flex:0 0 auto}
+.unknown-row{display:flex;gap:8px;align-items:center}.unknown-row .unknown-phone{flex:1 1 auto;min-width:0}.unknown-row .iconbtn{min-width:44px;min-height:44px;flex:0 0 auto}
+
+/* Give and share: one section with three tabs */
+.give-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 12px;padding:4px;border:1px solid #2a3b4e;border-radius:14px;background:#0f1a27}
+.give-tabs button{min-height:44px;border:0;border-radius:10px;background:transparent;color:#c9d5e3;font:inherit;font-size:15px;cursor:pointer}
+.give-tabs button.on{background:#1f5f4b;color:#fff;font-weight:600}

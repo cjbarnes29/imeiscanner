@@ -93,7 +93,10 @@ export function resetItem<S extends Pick<RetailState, 'catalog'>>(state: S, code
 export function setModelSegment<S extends Pick<RetailState, 'catalog' | 'corrections'>>(state: S, model: string, segment: Segment, month?: Month): S {
   const item = itemFor(state, model);
   if (!item) return state;
-  const next: CatalogItem = month ? { ...item, monthly: { ...item.monthly, [month]: segment } } : { ...item, segment };
+  // Choosing a segment for the model must take effect now: a "this month only" choice made earlier would otherwise win and the menu would jump back.
+  const thisMonth = monthOf(new Date());
+  const monthly = { ...item.monthly }; if (!month) delete monthly[thisMonth];
+  const next: CatalogItem = month ? { ...item, monthly: { ...item.monthly, [month]: segment } } : { ...item, segment, monthly };
   const saved = saveItem(state, { ...next, custom: item.custom });
   return month ? saved : { ...saved, corrections: { ...saved.corrections, [item.code]: segment } };
 }

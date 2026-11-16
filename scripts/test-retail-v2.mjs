@@ -471,3 +471,17 @@ console.log('retail v2: all checks passed');
   assert.ok(TS2.targetSummary({ month: "2026-11", level: 100, days: 1, rows: [] }).includes("No targets set yet."));
   console.log('target summary ok');
 }
+
+// choosing a segment for a model works even when an older "this month only" choice exists (the menu used to jump back)
+{
+  const month = T.monthOf(new Date());
+  const base = D.emptyState();
+  const item = C.itemFor(base, 'A075');
+  const stuck = C.saveItem(base, { ...item, monthly: { [month]: 'other' } });
+  assert.equal(C.segmentOf(stuck, 'A075', month), 'other', 'the older choice wins (this is what looked like "cannot assign")');
+  const fixed = C.setModelSegment(stuck, 'A075', 'low');
+  assert.equal(C.segmentOf(fixed, 'A075', month), 'low', 'choosing a segment now takes effect');
+  const keepsOthers = C.saveItem(base, { ...item, monthly: { [month]: 'other', '2020-01': 'mid' } });
+  assert.equal(C.itemFor(C.setModelSegment(keepsOthers, 'A075', 'low'), 'A075').monthly['2020-01'], 'mid', 'other months keep their own choice');
+  console.log('catalog segment ok');
+}

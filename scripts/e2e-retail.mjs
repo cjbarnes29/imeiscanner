@@ -79,7 +79,7 @@ try{
   assert.ok(!/Scanned records/.test(await run(`document.querySelector('.results').innerText`)),'no "Scanned records" header on Home');
   await run(`document.querySelector('button[aria-label="More"]').click()`);
   await waitFor(`!!document.querySelector('.more-list')`,'More menu');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People','Gives','Segments','Catalog','Assign by model','Share','Backup and data','Settings'],'the More menu');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People','Give and share','Segments','Catalog','Backup and data','Settings'],'the More menu');
   await shot('10-more');
   await run(`document.querySelector('.more-sheet [aria-label="Close"]').click()`);
 
@@ -288,7 +288,7 @@ try{
   ok('"New scans go to" is on the Scan screen');
 
   // ---------- Gives: suggestions only ----------
-  await nav('Home'); await sub('Gives');
+  await nav('Home'); await sub('Give and share');
   await waitFor(`!!document.querySelector('.retail-gives')`,'gives');
   await run(`(()=>{const d=document.querySelector('.retail-gives details');d.open=true;return true;})()`);
   await setVal('.retail-gives details select',  'me');
@@ -307,7 +307,7 @@ try{
   assert.equal((await owners()).r8,'');
   ok('Undo puts the phone back');
   // Assign by model: typed numbers (no plus / minus), paste keeps the digits, and a number can be copied to everyone
-  await more('Assign by model');
+  await more('Give and share'); await click('.give-tabs button','By model');
   await waitFor(`!!document.querySelector('.models-list')`,'assign by model');
   assert.equal(await run(`!!document.querySelector('button[aria-label^="One more"],button[aria-label^="One less"]')`),false,'no plus and minus buttons');
   const giveBox='input[aria-label="How many Galaxy A17 5G for Carlou Test"]';

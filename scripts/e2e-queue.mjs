@@ -88,7 +88,7 @@ try{
   ok('Completed: "Select N records for export" selects them for Export');
   // ---------- 4. settings apply to queued jobs ----------
   const timing={};
-  for(const [speed,photo] of [['fast',2],['standard',2],['fast-blurry',3],['standard-blurry',3]]){
+  for(const [speed,photo] of [['standard',2],['standard-blurry',3]]){
     await fresh(`localStorage.setItem('imei-lens-scan-speed','${speed.split('-')[0]}');`);await seed([photos[photo]]);await open();
     await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
     const s=Date.now();await saveAllNow();
@@ -96,10 +96,9 @@ try{
     await sleep(2500);rows=await rowsOf();
     timing[speed]={seconds:Math.round((Date.now()-s)/1000),records:rows.length,imeis:rows.filter(r=>r.imei).length};
   }
-  ok('Scan speed applies to queued photos (clean 4-product photo, then a blurry pair): '+JSON.stringify(timing));
-  // Evidence that the setting reaches queued jobs: on the blurry photo Standard's extra passes read more than Fast's single pass.
-  // (Time is about the same in both: in this test it is spent mostly starting the reader and finding the labels, which both modes do.)
-  assert.ok(timing['standard-blurry'].imeis>timing['fast-blurry'].imeis,'Standard (extra passes) reads more on a blurry photo than Fast (one pass)');
+  ok('Queued photos are scanned at the one scan speed, Standard (clean 4-product photo, then a blurry pair): '+JSON.stringify(timing));
+  // Standard is the only speed the app offers now (Fast missed labels and Detailed was slower with no gain in the label tests).
+  assert.ok(timing['standard'].imeis>=3,'Standard reads the labels of a clean 4-product photo');
   // Products in each photo applies too: 5 expected on a 4-product photo -> every crop is flagged "Found 4 of 5" -> Needs review -> Approve.
   await fresh(`localStorage.setItem('imei-lens-expected-products','5');`);await seed([photos[2]]);await open();
   await clickText('button','Bulk crop');await waitFor(`!!document.querySelector('.studio')`,'studio');
