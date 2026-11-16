@@ -58,6 +58,17 @@ check(results, 'Targets has the level chips 70 to 120', JSON.stringify(chips) ==
 check(results, 'the new segment is a line in Targets', await eval_(`[...document.querySelectorAll('.tg-seg')].some(b=>b.innerText.includes('Fold 1'))`));
 shot('targets');
 
+// a report line opens as a popup that sits on top of the bottom bar and inside the screen
+await tab('Report');
+await waitJs(`document.querySelectorAll('.rep-row').length>0`, 'report rows');
+await eval_(`document.querySelector('.rep-row').click();true`);
+await sleep(1300);
+const place = await eval_(`(()=>{const m=document.querySelector('.rep-modal');if(!m)return null;const r=m.getBoundingClientRect(),nav=document.querySelector('.bottom-nav').getBoundingClientRect();const over=document.elementFromPoint(nav.left+nav.width/2,nav.top+nav.height/2);return {bottom:Math.round(r.bottom),h:innerHeight,coversNav:!!over&&!!over.closest('.modal-backdrop')};})()`);
+check(results, 'the report line popup is above the bottom bar and inside the screen', !!place && place.coversNav && place.bottom <= place.h + 1, JSON.stringify(place));
+shot('report-popup');
+await eval_(`document.querySelector('.rep-modal [aria-label="Close"]').click();true`);
+await sleep(400);
+
 // the ⋯ More menu is a bottom sheet with a handle
 await eval_(`document.querySelector('button[aria-label="More"]').click();true`);
 await sleep(900);

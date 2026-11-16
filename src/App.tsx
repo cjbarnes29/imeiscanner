@@ -2515,6 +2515,16 @@ export default function App() {
     const now = giveValue(group, personId), value = Math.max(0, Math.min(Math.floor(wanted) || 0, now + giveRest(group)));
     setGiveDraft(old => ({ ...old, [group.key]: { ...Object.fromEntries(personGroups.map(person => [person.id, giveValue(group, person.id)])), [personId]: value } }));
   }
+  /** The number typed for one person is given to everyone else too, as far as the phones go (the person typed for keeps theirs). */
+  function giveCopy(group: { key: string; ids: string[]; byPerson: Record<string, number>; label: string }, personId: string) {
+    const wanted = giveValue(group, personId);
+    let left = group.ids.length - Math.min(wanted, group.ids.length);
+    const next: Record<string, number> = { [personId]: Math.min(wanted, group.ids.length) };
+    let short = 0;
+    for (const person of personGroups) { if (person.id === personId) continue; const give = Math.min(wanted, left); next[person.id] = give; left -= give; if (give < wanted) short++; }
+    setGiveDraft(old => ({ ...old, [group.key]: next }));
+    setToast(short ? `Only ${group.ids.length} ${group.label} phone${group.ids.length === 1 ? '' : 's'}: ${short} ${short === 1 ? 'person gets' : 'people get'} fewer than ${wanted}.` : `${wanted} ${group.label} for everyone. Press Confirm to save.`);
+  }
   function giveAll(group: { key: string; ids: string[]; byPerson: Record<string, number> }, personId: string) {
     setGiveDraft(old => ({ ...old, [group.key]: Object.fromEntries(personGroups.map(person => [person.id, person.id === personId ? group.ids.length : 0])) }));
   }
@@ -2922,7 +2932,7 @@ export default function App() {
   const panelGroups = modelGroups.filter(group => !reviewPerson || (reviewPerson === UNASSIGNED_FILTER ? group.ids.length - personGroups.reduce((sum, person) => sum + (group.byPerson[person.id] || 0), 0) > 0 : (group.byPerson[reviewPerson] || 0) > 0));
   const modelsTab = (
     <div className="give-tab">
-      <button type="button" className="subtle-btn" onClick={() => openView('people')}><Users size={14} /> Manage people ({personGroups.length})</button>
+      <button type="button" className="subtle-btn manage-people" onClick={() => openView('people')}><Users size={14} /> Manage people ({personGroups.length})</button>
       <label className="models-filter">Show models of
         <select aria-label="Show models of a person" value={reviewPerson} onChange={event => setReviewPerson(event.target.value)}>
           <option value="">Everyone</option>
@@ -2930,7 +2940,7 @@ export default function App() {
           <option value={UNASSIGNED_FILTER}>Unassigned</option>
         </select>
       </label>
-      <p className="settings-help">Tap − or + to change how many of each model a person gets. Phones nobody gets stay Unassigned. Then press Confirm.</p>
+      <p className="settings-help">Type how many of each model a person gets (paste works). Copy to everyone gives the same number to all. Phones nobody gets stay Unassigned. Then press Confirm.</p>
       <ul className="models-list">
         {panelGroups.length === 0 && <li><em>{modelGroups.length ? 'That person holds no models yet.' : 'Scan some phones first and their models appear here.'}</em></li>}
         {panelGroups.map(group => <li key={group.key} className={`give-card${focusedModel === group.key ? ' focused' : ''}`} data-model-key={group.key}>
@@ -2938,9 +2948,8 @@ export default function App() {
           <ul className="split-list">
             {personGroups.map(person => <li key={person.id}>
               <span>{personName(person)}</span>
-              <button type="button" className="subtle-btn" aria-label={`One less ${group.label} for ${personName(person)}`} disabled={giveValue(group, person.id) <= 0} onClick={() => giveSet(group, person.id, giveValue(group, person.id) - 1)}>−</button>
-              <input type="number" inputMode="numeric" min={0} max={group.ids.length} aria-label={`How many ${group.label} for ${personName(person)}`} value={giveValue(group, person.id)} onChange={event => giveSet(group, person.id, Number(event.target.value))} />
-              <button type="button" className="subtle-btn" aria-label={`One more ${group.label} for ${personName(person)}`} disabled={giveRest(group) <= 0} onClick={() => giveSet(group, person.id, giveValue(group, person.id) + 1)}>+</button>
+              <input type="text" inputMode="numeric" aria-label={`How many ${group.label} for ${personName(person)}`} value={giveValue(group, person.id)} onFocus={event => event.currentTarget.select()} onChange={event => giveSet(group, person.id, Number(event.target.value.replace(/[^\d]/g, '')))} />
+              {personGroups.length > 1 && <button type="button" className="subtle-btn" aria-label={`Copy the number of ${group.label} for ${personName(person)} to everyone`} disabled={giveValue(group, person.id) <= 0} onClick={() => giveCopy(group, person.id)}>Copy to everyone</button>}
             </li>)}
             <li className="split-rest"><span>Unassigned (the rest)</span><b>{giveRest(group)}</b></li>
           </ul>

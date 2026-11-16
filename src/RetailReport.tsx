@@ -3,6 +3,7 @@
 // src/retail/stockreport.ts and reconcile.ts (unit-tested); this file only shows them. Nothing changes by itself: a difference is marked and the
 // person decides. Saving a line marks it as checked, so it leaves the "to check" list even when it still differs from the scans.
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { itemFor, saveItem, segmentOf, setModelSegment } from './retail/catalog';
 import { reconcile, searchModels, teachAlias, type LineResult } from './retail/reconcile';
 import { canonColour, modelColourNames, teachColour } from './retail/colours';
@@ -156,7 +157,7 @@ export function ReportTab(ctx: RetailCtx) {
       <ul className="rep-list">{sorted.map(row)}{!sorted.length && <li className="settings-help">{only === 'problems' ? 'No problems: every line agrees or was checked by you.' : 'No model lines.'}</li>}</ul>
       {rest.length > 0 && <details className="retail-card"><summary>Rest of the report (kept as you typed it)</summary><pre className="rep-rest">{rest.join('\n')}</pre></details>}
 
-      {open && openItem && d && <div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) setOpen(null); }}><section className="modal retail-card rep-sheet rep-modal" role="dialog" aria-modal="true" aria-label={`Edit ${openItem.name}`}>
+      {open && openItem && d && createPortal(<div className="modal-backdrop" onClick={event => { if (event.target === event.currentTarget) setOpen(null); }}><section className="modal retail-card rep-sheet rep-modal" role="dialog" aria-modal="true" aria-label={`Edit ${openItem.name}`}>
         <SheetHandle onClose={() => setOpen(null)} />
         <div className="rep-nav">
           <button type="button" className="subtle-btn" disabled={!prevItem} aria-label="Previous line" onClick={() => go(openItem, prevItem)}>‹ Previous</button>
@@ -194,7 +195,7 @@ export function ReportTab(ctx: RetailCtx) {
           <small>Sets {openItem.kind === 'none' ? 'the stock' : 'the colour counts'} to what you scanned. You can still change it before saving.{noColour > 0 ? ` ${noColour} scanned phone${noColour === 1 ? ' has' : 's have'} no colour: set it in Phones.` : ''}</small></div>}
         <label className="check-row"><input type="checkbox" checked={d.remember} disabled={!d.code} onChange={e => setOpen({ id: open.id, draft: { ...d, remember: e.target.checked } })} /> Remember “{d.name}” for the next reports</label>
         <div className="share-toolbar rep-actions"><button type="button" className="primary" onClick={() => save(openItem)}>Save line</button>{nextProblem && <button type="button" className="subtle-btn" onClick={() => saveNext(openItem)}>Save and next</button>}<button type="button" className="subtle-btn" onClick={() => setOpen(null)}>Cancel</button></div>
-      </section></div>}
+      </section></div>, document.body)}
     </>}
   </div>;
 }

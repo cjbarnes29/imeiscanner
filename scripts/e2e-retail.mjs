@@ -119,6 +119,13 @@ try{
   const openRow=text=>run(`(()=>{const r=[...document.querySelectorAll('.rep-row')].find(x=>x.innerText.includes(${JSON.stringify(text)}));if(!r)return false;r.click();return true;})()`);
   assert.equal(await openRow('S26U 256GB'),true);
   await waitFor(`!!document.querySelector('.modal-backdrop .rep-sheet')`,'the line opens as a popup');
+  // the popup is in the right place: on top of the bottom bar, inside the screen, nothing of it hidden behind the bar
+  await sleep(800); // the popup slides up first
+  const place=await run(`(()=>{const m=document.querySelector('.rep-modal').getBoundingClientRect();const nav=document.querySelector('.bottom-nav').getBoundingClientRect();const top=(x,y)=>document.elementFromPoint(x,y);
+    const overNav=top(nav.left+nav.width/2,nav.top+nav.height/2);const atBottom=top(m.left+m.width/2,Math.min(m.bottom,innerHeight)-12);
+    return {bottom:Math.round(m.bottom),h:innerHeight,navTop:Math.round(nav.top),coversNav:!!overNav&&!!overNav.closest('.modal-backdrop'),lowestPartIsPopup:!!atBottom&&!!atBottom.closest('.rep-modal')};})()`);
+  assert.ok(place.coversNav,'the popup layer is above the bottom bar: '+JSON.stringify(place));
+  assert.ok(place.lowestPartIsPopup&&place.bottom<=place.h+1,'the popup sits inside the screen: '+JSON.stringify(place));
   assert.equal(await run(`!!document.querySelector('.rep-sheet [aria-label="Previous line"]')&&!!document.querySelector('.rep-sheet [aria-label="Next line"]')`),true,'Previous and Next are in the popup');
   assert.match(await run(`document.querySelector('.rep-sheet .rep-help')?.innerText||''`),/How to fix this line/,'the popup says how to fix the line');
   assert.match(await run(`document.querySelector('.rep-sheet').innerText`),/Matches[\s\S]*Galaxy S26 Ultra/);
@@ -278,6 +285,17 @@ try{
   for(let i=0;i<40;i++){if((await owners()).r8==='')break;await sleep(250);}
   assert.equal((await owners()).r8,'');
   ok('Undo puts the phone back');
+  // Assign by model: typed numbers (no plus / minus), paste keeps the digits, and a number can be copied to everyone
+  await more('Assign by model');
+  await waitFor(`!!document.querySelector('.models-list')`,'assign by model');
+  assert.equal(await run(`!!document.querySelector('button[aria-label^="One more"],button[aria-label^="One less"]')`),false,'no plus and minus buttons');
+  const giveBox='input[aria-label="How many Galaxy A17 5G for Carlou Test"]';
+  await setVal(giveBox,'2 pcs');
+  await waitFor(`document.querySelector('${giveBox}').value==='2'`,'digits only');
+  await run(`document.querySelector('button[aria-label="Copy the number of Galaxy A17 5G for Carlou Test to everyone"]').click()`);
+  await waitFor(`document.querySelector('input[aria-label="How many Galaxy A17 5G for Asha Test"]').value==='2'`,'the number was copied to the next person');
+  await click('.confirm-bar button','Reset');
+  ok('Assign by model: numbers are typed or pasted (no plus / minus), and "Copy to everyone" gives the same number to all as far as the phones go');
 
   // ---------- Catalog: a phone marked sold is no longer in stock for the report ----------
   await sub('Catalog');

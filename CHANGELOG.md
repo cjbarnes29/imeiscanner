@@ -2,6 +2,11 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — popup in the right place, typed numbers in Assign by model (Android and web)
+- **Report popup fixed:** it was drawn half behind the bottom bar (the screen's entrance animation kept it in a layer under the bar). Animations no longer leave a layer behind, and the popup is drawn at the top level of the page. A browser test and an emulator check make sure the popup covers the bottom bar and fits inside the screen.
+- **Assign by model:** the number of phones for each person is typed or pasted (digits only) instead of − / + buttons, and each person has **Copy to everyone**, which gives the same number to all as far as the phones go.
+- Bigger "Manage people" button; the layout test now also opens the segment and Assign by model screens.
+
 ## Unreleased — typed targets (Android and web)
 - **Targets, one segment:** Target and Sold are typed (paste works; only the digits count) instead of − / + buttons, and each person has **Copy target to everyone**, which copies the target number only (levels and sold stay each person's own). The segment screen is covered by the layout test at 320 to 411 px and large text.
 
