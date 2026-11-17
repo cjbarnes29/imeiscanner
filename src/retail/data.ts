@@ -31,7 +31,8 @@ function cleanLine(value: unknown): TargetLine | null {
   const levels: Partial<Record<Level, number>> = {};
   const given = obj(v.levels);
   for (const level of LEVELS) if (typeof given[level] === 'number' && Number.isFinite(given[level] as number) && (given[level] as number) >= 0) levels[level] = Math.floor(given[level] as number);
-  return { segment: v.segment, target: count(v.target), achieved: count(v.achieved), ...(Object.keys(levels).length ? { levels } : {}) };
+  const cap = LEVELS.find(level => level === v.cap);
+  return { segment: v.segment, target: count(v.target), achieved: count(v.achieved), ...(Object.keys(levels).length ? { levels } : {}), ...(cap ? { cap } : {}) };
 }
 function cleanReport(value: unknown): StockReport | undefined {
   const v = obj(value);
@@ -120,6 +121,9 @@ export function cleanState(raw: unknown): RetailState {
   const aliases = Object.fromEntries(Object.entries(obj(v.aliases)).filter(([k, code]) => k.length <= 60 && /^[A-Z0-9]{3,6}$/.test(str(code))).map(([k, code]) => [k, str(code)]));
   return {
     ...base,
+    giveMode: v.giveMode === 'auto' ? 'auto' as const : undefined,
+    giveLimits: Object.fromEntries(Object.entries(obj(v.giveLimits)).filter(([id]) => id.length > 0 && id.length <= 60).map(([id, l]) => { const o = obj(l); const min = count(o.min), max = typeof o.max === 'number' && Number.isFinite(o.max) && o.max >= 0 ? Math.floor(o.max) : undefined; return [id, { ...(min > 0 ? { min } : {}), ...(max !== undefined ? { max } : {}), ...(o.off === true ? { off: true } : {}) }]; }).filter(([, l]) => Object.keys(l as object).length > 0)),
+    targetAliases: Object.fromEntries(Object.entries(obj(v.targetAliases)).filter(([k, id]) => k.length >= 2 && k.length <= 60 && str(id)).map(([k, id]) => [k, str(id)])),
     segments: cleanSegments(v.segments), soldLedger: cleanLedger(v.soldLedger), aliases, report: cleanReport(v.report), colours: cleanColours(v.colours), colourAliases: cleanColourAliases(v.colourAliases),
     catalog: arr(v.catalog).map(obj).filter(c => /^[A-Z0-9]{3,6}$/.test(str(c.code))).map(c => ({
       code: str(c.code), name: str(c.name) || str(c.code), abbreviation: str(c.abbreviation) || str(c.name), segment: isSegment(c.segment) ? c.segment : 'other',
@@ -135,7 +139,7 @@ export function cleanState(raw: unknown): RetailState {
       multiplier: { 70: Math.max(0, num(mult['70'], 0.5)), 100: Math.max(0, num(mult['100'], 1)), 120: Math.max(0, num(mult['120'], 1.5)) }, currency: str(rates.currency, '₹').slice(0, 4) || '₹'
     },
     allocations: arr(v.allocations).map(obj).filter(a => str(a.id)).map(a => ({
-      id: str(a.id), at: str(a.at), month: isMonth(a.month) ? a.month : '', source: a.source === 'recommended' ? 'recommended' as const : 'manual' as const,
+      id: str(a.id), at: str(a.at), month: isMonth(a.month) ? a.month : '', source: a.source === 'recommended' ? 'recommended' as const : a.source === 'auto' ? 'auto' as const : 'manual' as const,
       status: a.status === 'undone' ? 'undone' as const : 'applied' as const, undoneAt: str(a.undoneAt) || undefined, note: str(a.note) || undefined,
       items: arr(a.items).map(obj).filter(i => str(i.recordId)).map(i => ({ recordId: str(i.recordId), imei: str(i.imei), segment: isSegment(i.segment) ? i.segment : 'other' as const, from: str(i.from), to: str(i.to) }))
     })),

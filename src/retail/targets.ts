@@ -117,9 +117,10 @@ export function summarizeTarget(target: PersonTarget, pending: Partial<Record<Se
     const extra = pending[l.segment] || 0, fromApp = since[l.segment] || 0, achieved = l.achieved + fromApp;
     const at = {} as LineSummary['at'];
     for (const t of LEVELS) {
-      // the pieces typed from the Promoter screen win; blank = target x level, rounded up
-      const typed = l.levels?.[t];
-      const needed = typeof typed === 'number' && typed >= 0 ? typed : Math.ceil(l.target * t / 100);
+      // the pieces typed from the Promoter screen win; blank = target x level, rounded up. A segment that stops at 100 % counts 100 % for every higher level.
+      const level = effectiveLevel(l, t);
+      const typed = l.levels?.[level];
+      const needed = typeof typed === 'number' && typed >= 0 ? typed : Math.ceil(l.target * level / 100);
       const remaining = Math.max(0, needed - achieved - extra);
       at[t] = { needed, remaining, perDay: perDay(remaining, days) };
     }
@@ -129,7 +130,7 @@ export function summarizeTarget(target: PersonTarget, pending: Partial<Record<Se
   const totalPct = totalTarget > 0 ? Math.round(totalAchieved / totalTarget * 1000) / 10 : 0;
   const tier: TargetSummary['tier'] = totalPct >= 120 ? 120 : totalPct >= 100 ? 100 : totalPct >= 70 ? 70 : 0;
   const ifReached = { 70: 0, 100: 0, 120: 0 } as Record<Threshold, number>;
-  for (const t of THRESHOLDS) ifReached[t] = Math.round(lines.reduce((sum, l) => sum + Math.ceil(l.target * t / 100) * (rates.perUnit[l.segment] || 0), 0) * rates.multiplier[t]);
+  for (const t of THRESHOLDS) ifReached[t] = Math.round(target.lines.filter(l => l.target > 0 || l.achieved > 0).reduce((sum, l) => sum + Math.ceil(l.target * effectiveLevel(l, t) / 100) * (rates.perUnit[l.segment] || 0), 0) * rates.multiplier[t]);
   const now = tier ? Math.round(lines.reduce((sum, l) => sum + l.achieved * (rates.perUnit[l.segment] || 0), 0) * rates.multiplier[tier]) : 0;
   return { lines, daysLeft: days, totalTarget, totalAchieved, totalPct, tier, ifReached, now };
 }
@@ -143,10 +144,16 @@ export const overallPct = (target?: PersonTarget) => {
 export const emptyTarget = (personId: string, month: Month, source: PersonTarget['source'] = 'manual', at = new Date().toISOString(), segments: Segment[] = SEGMENTS): PersonTarget =>
   ({ personId, month, lines: segments.map(segment => ({ segment, target: 0, achieved: 0 })), source, importedAt: at });
 
+/** The level a line really counts: the asked level, or the line's top level when it stops lower (some segments stop at 100 %). */
+export const effectiveLevel = (line: Pick<TargetLine, 'cap'>, level: Level): Level => (line.cap !== undefined && level > line.cap ? line.cap : level);
+/** True when this line stops below the asked level. */
+export const isCapped = (line: Pick<TargetLine, 'cap'>, level: Level): boolean => line.cap !== undefined && level > line.cap;
+
 /** Pieces still needed at a level for one line of a target (sold counted), and per day for the days left. */
 export function needAt(line: TargetLine, level: Level, days: number): { needed: number; remaining: number; perDay: number } {
-  const typed = line.levels?.[level];
-  const needed = typeof typed === 'number' && typed >= 0 ? typed : Math.ceil(line.target * level / 100);
+  const used = effectiveLevel(line, level);
+  const typed = line.levels?.[used];
+  const needed = typeof typed === 'number' && typed >= 0 ? typed : Math.ceil(line.target * used / 100);
   const remaining = Math.max(0, needed - line.achieved);
   return { needed, remaining, perDay: perDay(remaining, days) };
 }
@@ -183,11 +190,86 @@ export function startFromLastMonth<S extends { targets: Record<Month, Record<str
       if (!(line.target > 0)) continue;
       const have = lines.find(l => l.segment === line.segment);
       if (have && have.target > 0) continue;
-      const copy = { segment: line.segment, target: line.target, achieved: have?.achieved || 0, ...(line.levels ? { levels: { ...line.levels } } : {}) };
+      const copy = { segment: line.segment, target: line.target, achieved: have?.achieved || 0, ...(line.levels ? { levels: { ...line.levels } } : {}), ...(line.cap ? { cap: line.cap } : {}) };
       lines = have ? lines.map(l => (l.segment === line.segment ? copy : l)) : [...lines, copy];
       added++;
     }
     if (lines !== base.lines) next = putTarget(next, { ...base, lines });
   }
   return { state: next, added };
+}
+
+// ---- one line of a target, set in one place (the Targets screens and the Edit all grid both use it) -----------------------------------------------------
+
+/** Sets values on one segment line of a person's target for a month. Creates the person's target and the line when they are missing. An undefined value removes it. */
+export function setTargetLine<S extends { targets: Record<Month, Record<string, PersonTarget>> }>(state: S, month: Month, personId: string, segment: Segment, patch: Partial<TargetLine>): S {
+  const base = state.targets[month]?.[personId] || emptyTarget(personId, month, 'manual', new Date().toISOString(), []);
+  const merge = (line: TargetLine): TargetLine => {
+    const out = { ...line, ...patch } as TargetLine;
+    if (out.cap === undefined) delete out.cap;
+    if (out.levels === undefined) delete out.levels;
+    return out;
+  };
+  const exists = base.lines.some(l => l.segment === segment);
+  const lines = exists ? base.lines.map(l => (l.segment === segment ? merge(l) : l)) : [...base.lines, merge({ segment, target: 0, achieved: 0 })];
+  return putTarget(state, { ...base, lines });
+}
+
+// ---- who a screenshot or pasted text is for -------------------------------------------------------------------------------------------------------------
+
+/** Lower case, letters and digits only, single spaces: how names and IDs are compared. */
+export const normKey = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+const LABEL = /^\s*(?:name|promoter(?:\s*(?:name|id|code))?|employee(?:\s*(?:name|id|code))?|emp(?:loyee)?\.?\s*(?:name|id|code)|user(?:\s*(?:name|id))?|id|code)\s*[:#\-]\s*(.+)$/i;
+
+export type WhoGuess = { personId: string; /** The name or ID printed on the text (lower case), so a confirmed choice can be remembered. */ key: string; how: 'learned' | 'name' | 'none' };
+
+/**
+ * Finds which person a Promoter screenshot (or pasted text) is for, from the name or ID printed on it. A choice the person confirmed earlier (aliases)
+ * wins; a whole name of exactly one person found anywhere in the text counts too. When it is not sure it says 'none': it never picks someone.
+ */
+export function findWho(text: string, people: { id: string; name: string }[], aliases: Record<string, string> = {}): WhoGuess {
+  const known = (id: string | undefined) => (id && people.some(p => p.id === id) ? id : '');
+  const keys: string[] = [];
+  for (const line of text.split(/\r?\n/)) { const m = line.match(LABEL); if (m) { const key = normKey(m[1]); if (key.length >= 2) keys.push(key); } }
+  for (const key of keys) { const id = known(aliases[key]); if (id) return { personId: id, key, how: 'learned' }; }
+  const flat = ` ${normKey(text)} `;
+  const learnedHits = new Set(Object.entries(aliases).filter(([k, id]) => k.length >= 3 && known(id) && flat.includes(` ${k} `)).map(([, id]) => id));
+  if (learnedHits.size === 1) { const id = [...learnedHits][0]; return { personId: id, key: Object.keys(aliases).find(k => aliases[k] === id && flat.includes(` ${k} `)) || '', how: 'learned' }; }
+  for (const key of keys) { const id = matchPerson(key, people); if (id) return { personId: id, key, how: 'name' }; }
+  const named = people.filter(p => { const n = normKey(p.name); return n.length >= 3 && flat.includes(` ${n} `); });
+  if (named.length === 1) return { personId: named[0].id, key: normKey(named[0].name), how: 'name' };
+  return { personId: '', key: keys[0] || '', how: 'none' };
+}
+
+export type ImportBlock = { text: string; who: WhoGuess; parsed: ParsedTargets };
+
+/**
+ * Reads a screenshot's text, or a pasted text that may hold several people (a name or ID line starts each person's part), into one block per person.
+ * Each block is read with parseTargetText and gets its own guess of who it is for. Parts with no target line are dropped when there are several.
+ */
+export function readTargets(text: string, people: { id: string; name: string }[], aliases: Record<string, string> = {}): ImportBlock[] {
+  const names = new Set(people.map(p => normKey(p.name)));
+  const isHeader = (line: string) => {
+    if (LABEL.test(line)) return true;
+    const key = normKey(line);
+    return !!key && !segmentInLine(line) && !/\d/.test(line) && (names.has(key) || !!aliases[key]);
+  };
+  const parts: string[][] = [[]];
+  let previousHeader = false;
+  for (const line of text.split(/\r?\n/)) {
+    const header = isHeader(line);
+    if (header && !previousHeader && parts[parts.length - 1].some(l => segmentInLine(l))) parts.push([]);
+    parts[parts.length - 1].push(line);
+    if (line.trim()) previousHeader = header;
+  }
+  const blocks = parts.map(lines => lines.join('\n')).map(chunk => ({ text: chunk, who: findWho(chunk, people, aliases), parsed: parseTargetText(chunk) }));
+  const useful = blocks.filter(b => b.parsed.lines.length);
+  return blocks.length > 1 && useful.length ? useful : blocks;
+}
+
+/** Remembers that the name or ID printed on a screenshot belongs to this person (only when it is a real key and not already known). */
+export function learnWho<S extends { targetAliases?: Record<string, string> }>(state: S, key: string, personId: string): S {
+  const k = normKey(key);
+  if (k.length < 2 || !personId || state.targetAliases?.[k] === personId) return state;
+  return { ...state, targetAliases: { ...(state.targetAliases || {}), [k]: personId } };
 }

@@ -64,13 +64,15 @@ export type Sale = {
 };
 
 /** `achieved` is the person's own sold count; `levels` = the pieces needed IN TOTAL at each level, typed from the Promoter screen (blank = target x level, rounded up). */
-export type TargetLine = { segment: Segment; target: number; achieved: number; levels?: Partial<Record<Level, number>> };
+export type TargetLine = { segment: Segment; target: number; achieved: number; levels?: Partial<Record<Level, number>>; /** The highest level this line counts (some segments stop at 100 %): asking for more shows this level instead. Missing = no limit. */ cap?: Level };
 export type PersonTarget = { personId: string; month: Month; lines: TargetLine[]; source: 'screenshot' | 'manual'; importedAt: string; note?: string };
 
 export type IncentiveRates = { perUnit: Record<Segment, number>; multiplier: { 70: number; 100: number; 120: number }; currency: string };
 
 export type AllocationItem = { recordId: string; imei: string; segment: Segment; from: string; to: string };
-export type AllocationEvent = { id: string; at: string; month: Month; source: 'recommended' | 'manual'; items: AllocationItem[]; status: 'applied' | 'undone'; undoneAt?: string; note?: string };
+/** What one person may be given a day: at least `min` (when there are phones), at most `max` (blank = no limit); `off` = leave this person out of suggestions and automatic gives. */
+export type GiveLimit = { min?: number; max?: number; off?: boolean };
+export type AllocationEvent = { id: string; at: string; month: Month; source: 'recommended' | 'manual' | 'auto'; items: AllocationItem[]; status: 'applied' | 'undone'; undoneAt?: string; note?: string };
 
 export type DayLog = {
   activations: number; scPlus: number;
@@ -132,6 +134,8 @@ export type RetailState = {
   colours?: Record<string, ModelColours>;
   /** The person's own segments (Fold 1, Fold 2…). Missing = the starting list. */
   segments?: SegmentDef[];
+  /** Who a Promoter screenshot or pasted text is for: the name or ID printed on it (lower case) -> person id. Learned when a person confirms an import. */
+  targetAliases?: Record<string, string>;
   /** What the report calls a model: normalised report name -> catalog model code. Learned when a line is saved ("remember"). */
   aliases: Record<string, string>;
   /** The last saved pasted report (stock and sold of the store). The one before it is in the Undo snapshots. */
@@ -143,6 +147,10 @@ export type RetailState = {
   targets: Record<Month, Record<string, PersonTarget>>;
   rates: IncentiveRates;
   allocations: AllocationEvent[];
+  /** 'auto' = phones that need an owner are given by themselves (each give is in the history and can be undone). Missing = suggestions only. */
+  giveMode?: 'suggest' | 'auto';
+  /** Per person: minimum and maximum phones a day, and whether the person is left out. */
+  giveLimits?: Record<string, GiveLimit>;
   days: Record<DateKey, DayLog>;
   stockAdjust: StockAdjust[];
   template?: ReportTemplate;

@@ -9,6 +9,7 @@ import { canonColour, coloursText as colourBox, parseColoursText, setModelColour
 import { segLabel, segmentIds } from './retail/segments';
 import { reportItems } from './retail/stockreport';
 import { overallDashboard, todayDashboard } from './retail/dashboard';
+import { perDayText } from './retail/pace';
 import { daysInMonth, localDay, monthOf, type CatalogItem, type Segment } from './retail/types';
 import { GivesTab, DataTab } from './RetailHub2';
 import { ReportTab } from './RetailReport';
@@ -68,7 +69,7 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
       <section className="retail-card"><h3>Sell first: everyone</h3>
         {!people.length && <p className="settings-help">Add people in More, then People, to see what everyone has to sell.</p>}
         {people.length > 0 && !overall && <p className="settings-help">No targets for this month yet. Set them in Targets.</p>}
-        {overall && overall.lines.map(l => <p key={l.segment} className="retail-priority">Sell {l.perDay}/day of {l.label}: {l.remaining} more for {overall.threshold}% <small>(sold {l.achieved} of {l.target})</small></p>)}
+        {overall && overall.lines.map(l => <p key={l.segment} className="retail-priority">Sell {perDayText(l.remaining, overall.daysLeft)} of {l.label}: {l.remaining} more for {overall.threshold}% <small>(sold {l.achieved} of {l.target})</small></p>)}
         {overall && !overall.lines.length && <p className="settings-help">Everyone’s {overall.threshold}% target is reached in every segment.</p>}
       </section>
       {overall && overall.needHelp.length > 0 && <section className="retail-card"><h3>Who needs help</h3>

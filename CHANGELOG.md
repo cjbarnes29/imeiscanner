@@ -2,6 +2,17 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — Give and share: Auto give and limits per person
+- **Suggest only / Auto give** switch on Give and share. In Auto give, phones without an owner are given by themselves when a scan finishes, with the same rules as the suggestions (my target first, then everyone under 70%, then toward 100%). Phones that need review, are held (Store only), repeated or have a bad number are never given automatically. Every automatic give is one entry in History (marked "automatic") and can be undone; an undone phone is not given again by itself.
+- **Limits per person:** a minimum and a maximum phones a day, and "Leave out for now". The maximum counts what the person was already given today; what the limits leave over stays without an owner and is given on the next run (a late upload, or tomorrow). The minimum is filled before anyone is lifted toward 100%.
+
+## Unreleased — Targets: pace, finish dates, highest level, Edit all, who an import is for
+- **Pace in whole numbers.** "0.1/day" is gone. Targets, Today, the Everyone view and the shared summary now say "2 a day" or, under one a day, "1 every 3 days".
+- **Finish dates.** Every segment and person shows when 70%, 100% and 120% are reached at this month's pace (sold so far / days gone): "100% by 24 Nov", "120% not by month end (needs 3 a day)", or "too early to tell" in the first days.
+- **Highest level per segment.** Some segments stop at 100%: set **Highest level** in Edit levels (**Same for everyone** copies it). The app then shows "The top level here is 100%" instead of asking for 120%, and the example incentive counts that line at 100%. Last month's setting comes over with **Start from last month**.
+- **Who an import is for.** A Promoter screenshot or pasted text is matched to a person from the name or ID printed on it, and a name you confirm once is remembered. If it is not sure, nobody is picked (it no longer defaults to the first person). Several screenshots, or several people in one pasted text, are checked on one screen. New **Paste text** button.
+- **Edit all.** One screen with every person and every segment: type target (T) and sold (S) in each box, totals follow, **Copy to all** copies a column's target, **Levels** opens the segment.
+
 ## Unreleased — documentation and release signing
 - README rewritten for accuracy: export before every update, archive (not delete) wording for crops and duplicates, a privacy line that names every place data can live, and one table of what each send method sends. Build, test, release and Render steps moved to DEVELOPERS.md; each code folder now has a README.
 - The crop-review hint now says the original photo is archived, not deleted.

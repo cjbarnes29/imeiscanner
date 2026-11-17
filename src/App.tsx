@@ -4,6 +4,7 @@ import { SheetHandle } from './SheetHandle';
 import { QuickPerson } from './QuickPerson';
 import { syncScans } from './retail/reportsync';
 import { syncSold } from './retail/soldsync';
+import { autoGiveSignature, runAutoGive } from './retail/autogive';
 import { SoldOffer, type SoldGroup } from './SoldOffer';
 import { useBackNav } from './backnav';
 import { reconcile as reconcileReport } from './retail/reconcile';
@@ -3082,6 +3083,7 @@ export default function App() {
   const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
   // Numbers that follow the phones by themselves: a phone marked Sold adds to its owner's Sold (targets) and to the report's Sold; scanned phones and
   // phones leaving the stock change the report's colour counts and stock. Taking a sale back undoes it. See retail/soldsync.ts and retail/reportsync.ts.
+  const autoGiveSeen = useRef('');
   useEffect(() => {
     if (!retailLoaded || !inventoryLoaded) return;
     // phones that appear while Store only is on are kept as Held
@@ -3096,6 +3098,19 @@ export default function App() {
     let next = sold.state;
     let scan = { added: 0, removed: 0, created: 0 };
     if (next.report) { const r = syncScans(next, next.report, retailRecords); if (r.report !== next.report) next = { ...next, report: r.report }; scan = r; }
+    // Give and share in Automatic mode: phones without an owner are given by themselves (never while a scan is still running, and never a phone that
+    // needs review). It is done here, with the changes above, so two updates can never overwrite each other. Each give is in the history and can be undone.
+    let given = 0;
+    const day = dateKey();
+    const scanningNow = !!androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing');
+    if (next.giveMode === 'auto' && !scanningNow) {
+      const sig = autoGiveSignature(next, retailMonth(day), day, retailRecords);
+      if (autoGiveSeen.current !== sig) {
+        autoGiveSeen.current = sig;
+        const auto = runAutoGive(next, retailMonth(day), day, retailPeople, retailRecords);
+        if (auto) { next = auto.state; given = auto.changes.length; assignOwners(auto.changes); }
+      }
+    }
     if (next === retail) return;
     changeRetail(next, '');
     const bits: string[] = [];
@@ -3104,8 +3119,9 @@ export default function App() {
     if (scan.added && !sold.added) bits.push(`${scan.added} scanned phone${scan.added === 1 ? '' : 's'} added to the report`);
     if (scan.removed && !sold.added && !sold.undone) bits.push(`${scan.removed} taken out of the report stock`);
     if (scan.created) bits.push(`${scan.created} new report line${scan.created === 1 ? '' : 's'}`);
+    if (given) bits.push(`${given} phone${given === 1 ? '' : 's'} given automatically (Give and share > History to undo)`);
     if (bits.length) setToast(bits.join(', ') + '.');
-  }, [retail, retailRecords, retailLoaded, inventoryLoaded, storeOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [retail, retailRecords, retailLoaded, inventoryLoaded, storeOnly, androidJob]); // eslint-disable-line react-hooks/exhaustive-deps
   const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
   const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;
   function assignOwners(changes: { id: string; personId: string }[]) {

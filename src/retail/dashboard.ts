@@ -7,6 +7,7 @@ import { liveSales, pendingSubmissions } from './sales';
 import { segmentOf } from './catalog';
 import { summarizeTarget, type TargetSummary } from './targets';
 import { segLabel } from './segments';
+import { perDayText } from './pace';
 import { daysLeft, monthOf, type DateKey, type RetailState, type Sale, type Segment } from './types';
 
 export type Priority = { segment: Segment; label: string; remaining: number; perDay: number; holding: number; shortBy: number; message: string };
@@ -43,7 +44,7 @@ export function todayDashboard(state: RetailState, records: StockSource[], date:
     const holding = mine.filter(r => segmentOf(state, r.model, month, state.recordMeta[r.id]) === line.segment).length;
     const shortBy = Math.max(0, at.remaining - holding);
     const message = at.remaining <= 0 ? `${segLabel(state, line.segment)}: ${state.settings.myThreshold}% reached` :
-      `Sell ${at.perDay}/day of ${segLabel(state, line.segment)}: ${at.remaining} more for ${state.settings.myThreshold}%${shortBy ? ` (you hold ${holding}, ${shortBy} short)` : ''}`;
+      `Sell ${perDayText(at.remaining, summary!.daysLeft)} of ${segLabel(state, line.segment)}: ${at.remaining} more for ${state.settings.myThreshold}%${shortBy ? ` (you hold ${holding}, ${shortBy} short)` : ''}`;
     return { segment: line.segment, label: segLabel(state, line.segment), remaining: at.remaining, perDay: at.perDay, holding, shortBy, message };
   }).filter(p => p.remaining > 0).sort((a, b) => b.perDay - a.perDay || b.remaining - a.remaining);
   const waiting = pendingSubmissions(state, me || undefined);

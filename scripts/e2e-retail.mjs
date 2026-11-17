@@ -238,9 +238,96 @@ try{
   await click('button','← All segments');
   await waitFor(`!!document.querySelector('.tg-segs')`,'back to the list');
   assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Sold 1 of 10/);
-  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Carlou Test[\s\S]*\/day/,'each person and per day under the segment');
+  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`),/Carlou Test[\s\S]*(?:a day|every \d+ days)/,'each person and per day under the segment (whole numbers)');
   ok('the segment line adds everyone up: sold 1 of 10 (two people with a target of 5 each)');
   await shot('4-targets-lines');
+
+  // ---------- 1.39: whole-number pace, finish dates, the highest level, who an import is for, Edit all ----------
+  assert.ok(!/\d\.\d+\s*\/day/.test(await run(`document.querySelector('.retail-targets').innerText`)), 'no 0.1/day style numbers anywhere on Targets');
+  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`), /(a day|every \d+ days)/, 'whole-number pace under the segment');
+  assert.match(await run(`[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).innerText`), /70%[\s\S]*100%[\s\S]*120%/, 'a finish line for 70, 100 and 120 under the segment');
+  ok('pace is in whole numbers ("2 a day" / "1 every 3 days") and every segment says when 70%, 100% and 120% are reached at this month\'s pace');
+
+  // the highest level (some segments stop at 100%)
+  await run(`(()=>{[...document.querySelectorAll('.tg-seg')].find(b=>b.innerText.includes('Fold 1')).click();return true;})()`);
+  await waitFor(`!!document.querySelector('input[aria-label="Target of Carlou Test"]')`, 'segment open again');
+  await click('button', '120');
+  await click('button', 'Edit levels');
+  assert.ok(!/The top level here/.test(await run(`document.querySelector('.retail-targets').innerText`)), 'no limit at first');
+  await setVal('select[aria-label="Highest level for Carlou Test"]', '100');
+  await waitFor(`/The top level here is 100%/.test(document.querySelector('.retail-targets').innerText)`, 'the highest level shows');
+  await run(`document.querySelector('button[aria-label="Copy the highest level of Carlou Test to everyone"]').click()`);
+  await waitFor(`(document.querySelector('.retail-targets').innerText.match(/The top level here is 100%/g)||[]).length===2`, 'the highest level was copied to Asha');
+  await click('button', '70');
+  await waitFor(`!/The top level here/.test(document.querySelector('.retail-targets').innerText)`, 'asking for 70 is below the top, so it is a normal line');
+  await click('button', '120');
+  await setVal('select[aria-label="Highest level for Carlou Test"]', '');
+  await run(`document.querySelector('button[aria-label="Copy the highest level of Carlou Test to everyone"]').click()`);
+  await waitFor(`!/The top level here/.test(document.querySelector('.retail-targets').innerText)&&/For 120%/.test(document.querySelector('.retail-targets').innerText)`, 'no limit again');
+  await click('button', '90');
+  ok('a segment can stop at 100%: 120 then shows "The top level here is 100%", it copies to everyone, and "No limit" puts it back');
+  await click('button', '← All segments');
+  await waitFor(`!!document.querySelector('.tg-segs')`, 'back to the list');
+
+  // who an import is for: pasted text and a screenshot (both read offline), nobody picked unless the text says who
+  const dlg = `document.querySelector('[aria-label="Check the imported targets"]')`;
+  const paste = async text => { await click('button', 'Paste text'); await setVal('textarea[aria-label="Pasted targets text"]', text); await click('button', 'Read text'); await waitFor(`!!${dlg}`, 'the check screen'); };
+  const who = () => run(`[...${dlg}.querySelectorAll('.tg-import select:not([aria-label])')].map(s=>s.value)`);
+  await paste('Name: Asha Test\nTablet  Target 4  Achieved 1');
+  assert.deepEqual(await who(), ['asha'], 'the name on the text picks Asha');
+  assert.match(await run(`${dlg}.innerText`), /Found the name on it/);
+  await click('button', 'Discard');
+  await paste('Name: Zed Nobody\nTablet  Target 4  Achieved 1');
+  assert.deepEqual(await who(), [''], 'an unknown name: nobody is picked');
+  assert.match(await run(`${dlg}.innerText`), /Could not tell who this is for/);
+  await click('button', 'Save targets');
+  await sleep(500);
+  assert.equal(await run(`!!${dlg}`), true, 'saving without a person does nothing');
+  await setVal('.tg-import select:not([aria-label])', 'me');
+  await click('button', 'Save targets');
+  await waitFor(`!${dlg}`, 'saved');
+  await paste('Name: Zed Nobody\nTablet  Target 4  Achieved 1');
+  assert.deepEqual(await who(), ['me'], 'a name that was confirmed once is recognised next time');
+  assert.match(await run(`${dlg}.innerText`), /Recognised from the name or ID/);
+  await click('button', 'Discard');
+  await paste('Name: Asha Test\nTablet  Target 4  Achieved 1\n\nName: Carlou Test\nWearables  Target 2  Achieved 0');
+  assert.deepEqual(await who(), ['asha', 'me'], 'two people in one text: one part each');
+  assert.match(await run(`${dlg}.querySelector('button.primary').innerText`), /Save targets \(2 of 2\)/);
+  await click('button', 'Discard');
+  ok('pasted text finds the person from the name (several people per text too); an unknown name is never guessed, and is remembered once confirmed');
+  const shotPath = join(tmpdir(), 'e2e-promoter-shot.png');
+  (await import('node:fs')).writeFileSync(shotPath, Buffer.from(screenshot, 'base64'));
+  const docNode = (await send('DOM.getDocument')).result;
+  const fileNode = (await send('DOM.querySelector', { nodeId: docNode.root.nodeId, selector: '.retail-targets input[type=file]' })).result;
+  await send('DOM.setFileInputFiles', { files: [shotPath], nodeId: fileNode.nodeId });
+  await waitFor(`!!${dlg}`, 'the screenshot was read', 180000);
+  assert.deepEqual(await who(), ['me'], 'the Promoter screenshot says Name: Carlou Test, so it is for Carlou');
+  assert.ok(await run(`${dlg}.querySelectorAll('.tg-draft').length>=2`), 'the lines were read');
+  await click('button', 'Discard');
+  ok('a Promoter screenshot is read offline and is matched to the person named on it');
+
+  // Edit all: every person and segment on one screen
+  await click('button', 'Edit all targets and sold');
+  await waitFor(`!!document.querySelector('.tg-grid')`, 'the Edit all grid');
+  const head = await run(`[...document.querySelectorAll('.tg-grid thead th')].map(t=>t.childNodes[0].textContent.trim())`);
+  assert.ok(head.includes('Fold 1') && head.includes('Tablet') && head.includes('Total'), 'a column per segment: ' + head.join(','));
+  assert.deepEqual(await run(`[...document.querySelectorAll('.tg-grid tbody th')].map(t=>t.textContent.trim())`), ['Carlou Test', 'Asha Test'], 'a row per person');
+  await setVal('input[aria-label="Target of Asha Test in Fold 1"]', '6');
+  await waitFor(`document.querySelector('.tg-grid tfoot').textContent.replace(/\\s+/g,'').includes('1/11')`, 'column total follows (1 sold of 5 + 6)');
+  await setVal('input[aria-label="Sold of Asha Test in Fold 1"]', '2');
+  await waitFor(`document.querySelector('.tg-grid tfoot').textContent.replace(/\\s+/g,'').includes('3/11')`, 'sold total follows');
+  await setVal('input[aria-label="Target of Asha Test in Fold 1"]', '5');
+  await setVal('input[aria-label="Sold of Asha Test in Fold 1"]', '0');
+  await waitFor(`document.querySelector('.tg-grid tfoot').textContent.replace(/\\s+/g,'').includes('1/10')`, 'put back');
+  await setVal('input[aria-label="Target of Carlou Test in Tablet"]', '0');
+  await setVal('input[aria-label="Sold of Carlou Test in Tablet"]', '0');
+  await waitFor(`document.querySelector('input[aria-label="Target of Carlou Test in Tablet"]').value==='0'`, 'the test line is cleared again');
+  assert.equal(await run(`!!document.querySelector('.tg-cell-fin')`), true, 'a finish line under cells that have a target');
+  await run(`document.querySelector('button[aria-label="Levels of Carlou Test in Fold 1"]').click()`);
+  await waitFor(`!!document.querySelector('input[aria-label="Target of Carlou Test"]')&&!document.querySelector('.tg-grid')`, 'Levels opens that segment');
+  await click('button', '← All segments');
+  await waitFor(`!!document.querySelector('.tg-segs')`, 'back to the list');
+  ok('Edit all: one row per person and one column per segment; typing target and sold saves at once and the totals follow; Levels opens the segment');
 
   // the Records screen shows the person's own segment name
   await nav('Phones');
@@ -297,6 +384,41 @@ try{
   assert.equal((await owners()).r8,'','nothing is given until approved');
   await shot('6-gives');
   ok('Gives suggests the unassigned Fold 1 phone to me (my target first) and changes nothing until approved');
+
+  // ---------- Give and share: limits per person, Suggest only / Auto give ----------
+  assert.equal(await run(`document.querySelector('.give-tabs.two button[aria-pressed="true"]').innerText`), 'Suggest only', 'Suggest only is the starting mode');
+  await run(`(()=>{const d=[...document.querySelectorAll('.retail-gives details')].find(x=>/Limits per person/.test(x.innerText));d.open=true;return true;})()`);
+  await waitFor(`!!document.querySelector('input[aria-label="Maximum a day for Carlou Test"]')`, 'the limits');
+  await setVal('input[aria-label="Maximum a day for Carlou Test"]', '0');
+  await waitFor(`!/→ Carlou Test/.test(document.querySelector('.gv-list').innerText)`, 'a maximum of 0 keeps new phones from me');
+  await run(`document.querySelector('input[aria-label="Leave Asha Test out"]').click()`);
+  await waitFor(`/Suggested \\(0\\)/.test(document.querySelector('.retail-gives').innerText)`, 'with me at 0 and Asha left out nothing is suggested');
+  await setVal('input[aria-label="Minimum a day for Asha Test"]', '2');
+  await setVal('input[aria-label="Maximum a day for Asha Test"]', '1');
+  await waitFor(`/the maximum wins/.test(document.querySelector('.retail-gives').innerText)`, 'a minimum above the maximum is explained');
+  await setVal('input[aria-label="Minimum a day for Asha Test"]', '');
+  await setVal('input[aria-label="Maximum a day for Asha Test"]', '');
+  await run(`document.querySelector('input[aria-label="Leave Asha Test out"]').click()`);
+  await setVal('input[aria-label="Maximum a day for Carlou Test"]', '');
+  await waitFor(`/Suggested \\(1\\)/.test(document.querySelector('.retail-gives').innerText)&&/→ Carlou Test/.test(document.querySelector('.gv-list').innerText)`, 'limits cleared: the suggestion is back');
+  assert.equal(await run(`document.querySelector('input[aria-label="Maximum a day for Carlou Test"]').value`), '', 'an empty box means no limit');
+  ok('each person has a minimum and a maximum a day and can be left out: a maximum of 0 or "left out" stops suggestions, and an empty box means no limit');
+
+  await click('.give-tabs.two button', 'Auto give');
+  for (let i = 0; i < 80; i++) { if ((await owners()).r8 === 'me') break; await sleep(250); }
+  assert.equal((await owners()).r8, 'me', 'Auto give gave the waiting phone to me by itself');
+  assert.equal(await run(`document.querySelector('.give-tabs.two button[aria-pressed="true"]').innerText`), 'Auto give');
+  await run(`(()=>{const d=[...document.querySelectorAll('.retail-gives details')].find(x=>/History/.test(x.innerText));d.open=true;return true;})()`);
+  await waitFor(`/automatic/.test([...document.querySelectorAll('.retail-gives details')].find(x=>/History/.test(x.innerText)).innerText)`, 'the history says automatic');
+  ok('Auto give gives a waiting phone by itself (my target first); the history says "automatic"');
+  await click('.retail-gives button', 'Undo');
+  for (let i = 0; i < 40; i++) { if ((await owners()).r8 === '') break; await sleep(250); }
+  assert.equal((await owners()).r8, '', 'Undo hands the phone back');
+  await sleep(4000);
+  assert.equal((await owners()).r8, '', 'a phone whose automatic give was undone is not given again by itself');
+  ok('Undo of an automatic give sticks: the phone is not given again by itself');
+  await click('.give-tabs.two button', 'Suggest only');
+  await waitFor(`/Suggested \\(1\\)/.test(document.querySelector('.retail-gives').innerText)`, 'still suggested by hand');
   await click('button','Approve');
   for(let i=0;i<40;i++){if((await owners()).r8==='me')break;await sleep(250);}
   assert.equal((await owners()).r8,'me');

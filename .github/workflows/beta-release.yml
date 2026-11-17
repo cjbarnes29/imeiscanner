@@ -50,6 +50,8 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **Give and share:** a **Suggest only / Auto give** switch (Auto gives waiting phones by itself, with History and Undo), and **Limits per person**: minimum and maximum phones a day, or leave a person out.
+          - **Targets:** pace in whole numbers ("2 a day", "1 every 3 days") with the day 70%, 100% and 120% are reached at this month's pace; a **Highest level** per segment for segments that stop at 100%; **Edit all** (every person and segment on one screen); screenshots and pasted text find the person from the name or ID and never guess.
           - **Fixes:** the sales record is no longer cut at 5,000 sales; a phone of a model that is not in the report no longer makes a new report line when it comes back from Sold; colours taught for every model no longer override a model whose own colours already fit; Same as last month ignores levels-only lines; Start from last month skips deleted people; Held phones can be put back in stock.
           - **Give and share** is one section with three tabs.
           - **Unknown models** can be deleted; the Catalog segment menu works again.

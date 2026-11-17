@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -16,7 +16,7 @@ for (const name of files) {
 }
 const load = name => import(pathToFileURL(join(dir, `${name}.mjs`)).href);
 const T = await load('retail/types'), C = await load('retail/catalog'), D = await load('retail/data'), G = await load('retail/targets'),
-  P = await load('retail/stockreport'), X = await load('retail/reconcile'), SG = await load('retail/segments');
+  P = await load('retail/stockreport'), PC = await load('retail/pace'), X = await load('retail/reconcile'), SG = await load('retail/segments');
 
 const luhn = body => { let sum = 0; for (let i = 0; i < body.length; i++) { let n = +body[body.length - 1 - i]; if (i % 2 === 0) { n *= 2; if (n > 9) n -= 9; } sum += n; } return String((10 - sum % 10) % 10); };
 let seq = 300000;
@@ -471,9 +471,9 @@ console.log('retail v2: all checks passed');
   const text = TS2.targetSummary({ month: '2026-11', level: 90, days: 15, rows: [
     row('Fold 1', 10, 1, 8, 0.6, [{ name: 'Carlou Test', target: 5, sold: 1, remaining: 4, perDay: 0.3, today: 1 }, { name: 'Asha Test', target: 5, sold: 0, remaining: 4, perDay: 0.3 }]),
     row('Mid', 6, 6, 0, 0, [{ name: 'Carlou Test', target: 6, sold: 6, remaining: 0, perDay: 0 }]), row('Tablet', 0, 0, 0, 0, [])] });
-  assert.ok(text.startsWith("Targets 2026-11 · 90% · 15 days left")); assert.ok(text.includes("Fold 1: sold 1 of 10 · needs 8 more · 0.6/day"), "Fold 1: sold 1 of 10 · needs 8 more · 0.6/day");
-  assert.ok(text.includes("  Carlou Test: 1/5 (today 1) · needs 4 · 0.3/day"), "  Carlou Test: 1/5 (today 1) · needs 4 · 0.3/day"); assert.ok(text.includes("Mid: sold 6 of 6 · 90% reached"), "Mid: sold 6 of 6 · 90% reached");
-  assert.ok(!text.includes('Tablet'), 'a segment with no target is not listed'); assert.ok(text.includes("Total: 8 more pieces · about 0.6 a day"), "Total: 8 more pieces · about 0.6 a day");
+  assert.ok(text.startsWith("Targets 2026-11 · 90% · 15 days left")); assert.ok(text.includes("Fold 1: sold 1 of 10 · needs 8 more · 1 a day"), "Fold 1 line: whole numbers, no 0.6/day");
+  assert.ok(text.includes("  Carlou Test: 1/5 (today 1) · needs 4 · 1 every 3 days"), "less than one a day says how many days one piece takes"); assert.ok(text.includes("Mid: sold 6 of 6 · 90% reached"), "Mid: sold 6 of 6 · 90% reached");
+  assert.ok(!text.includes('Tablet'), 'a segment with no target is not listed'); assert.ok(text.includes("Total: 8 more pieces · 1 a day"), "total line");
   assert.ok(TS2.targetSummary({ month: "2026-11", level: 100, days: 1, rows: [] }).includes("No targets set yet."));
   console.log('target summary ok');
 }
@@ -512,4 +512,88 @@ console.log('retail v2: all checks passed');
   assert.equal(G.lastMonthLine(st, '2026-11', 'here', 'mid'), undefined, 'a levels-only line is not a last-month target');
   assert.equal(G.lastMonthLine(st, '2026-11', 'here', 'low').target, 7);
   console.log('review fixes ok');
+}
+
+// ---- targets 1.39: pace wording, finish dates, the highest level, one-place editing, who a screenshot is for ----------------------------------------------
+{
+  // per day: whole numbers rounded up; under one a day says how many days one piece takes
+  assert.equal(PC.perDayText(0, 10), '', 'nothing to sell, nothing to say');
+  assert.equal(PC.perDayText(6, 14), '1 every 2 days', '6 pieces in 14 days');
+  assert.equal(PC.perDayText(1, 14), '1 every 14 days');
+  assert.equal(PC.perDayText(14, 14), '1 a day'); assert.equal(PC.perDayText(15, 14), '2 a day', 'rounded up, never 1.1/day');
+  assert.equal(PC.perDayText(11, 10), '2 a day', '1.1 a day becomes 2: pieces cannot be half'); assert.equal(PC.perDayText(3, 2), '2 a day', '1.5 becomes 2'); assert.equal(PC.perDayText(21, 10), '3 a day', '2.1 becomes 3'); assert.equal(PC.perDayText(20, 10), '2 a day', 'exactly 2 stays 2');
+  assert.equal(PC.perDayText(31, 10), '4 a day'); assert.equal(PC.perDayText(5, 0), '5 now', 'month over');
+  assert.equal(PC.perDayText(3, 14), '1 every 4 days'); assert.ok(!/\d\.\d/.test(PC.perDayText(7, 20)), 'never a decimal');
+  // dates
+  assert.equal(PC.shortDate('2026-11-24'), '24 Nov'); assert.equal(PC.addDays('2026-11-28', 5), '2026-12-03'); assert.equal(PC.addDays('2028-02-28', 2), '2028-03-01', 'leap year');
+  // finish dates: pace so far this month = sold / days gone
+  const F = (remaining, achieved, today, month = '2026-11') => PC.finishAt(remaining, achieved, month, today);
+  assert.deepEqual(F(0, 3, '2026-11-10'), { kind: 'reached' });
+  assert.deepEqual(F(4, 5, '2026-11-10'), { kind: 'date', date: '2026-11-18' }, '5 sold in 10 days = 0.5 a day; 4 more = 8 days from the 10th');
+  assert.deepEqual(F(10, 5, '2026-11-10'), { kind: 'date', date: '2026-11-30' }, 'exactly the last day still counts');
+  assert.equal(F(12, 5, '2026-11-10').kind, 'late'); assert.equal(F(12, 5, '2026-11-10').perDay, PC.perDayText(12, 20), 'too slow for the month: says the pace that still makes it (20 days left after today)');
+  assert.equal(F(3, 2, '2026-11-02').kind, 'early', 'two days gone is too little to tell'); assert.equal(F(3, 0, '2026-11-12').kind, 'none', 'no sales yet');
+  assert.equal(F(3, 2, '2026-12-05').kind, 'over', 'the month is over'); assert.equal(F(3, 2, '2026-10-20', '2026-11').kind, 'early', 'next month has no pace yet');
+  assert.equal(PC.finishText(100, { kind: 'date', date: '2026-11-24' }), '100% by 24 Nov'); assert.equal(PC.finishText(70, { kind: 'reached' }), '70% reached');
+  assert.match(PC.finishText(120, { kind: 'late', perDay: '3 a day' }), /120% not by month end \(needs 3 a day\)/);
+  assert.equal(PC.finishLine({ 70: 0, 100: 4, 120: 12 }, 5, '2026-11', '2026-11-10'), '70% reached · 100% by 18 Nov · 120% not by month end (needs ' + PC.perDayText(12, 20) + ')');
+
+  // the highest level: a segment that stops at 100 % counts 100 % for 110 and 120
+  const line = { segment: 'tablet', target: 5, achieved: 5, cap: 100 };
+  assert.equal(G.effectiveLevel(line, 120), 100); assert.equal(G.effectiveLevel(line, 70), 70); assert.equal(G.isCapped(line, 120), true); assert.equal(G.isCapped(line, 100), false);
+  assert.equal(G.isCapped({ segment: 'low', target: 5, achieved: 0 }, 120), false, 'no cap = no limit');
+  assert.deepEqual(G.needAt(line, 120, 14), { needed: 5, remaining: 0, perDay: 0 }, 'capped: 120 % asks for the 100 % pieces, so a finished tablet line is finished');
+  assert.deepEqual(G.needAt({ ...line, cap: undefined }, 120, 14), { needed: 6, remaining: 1, perDay: 0.1 }, 'without the cap the same line is still 1 short for 120 %');
+  assert.deepEqual(G.needAt({ ...line, achieved: 3, levels: { 100: 6 }, cap: 100 }, 120, 14), { needed: 6, remaining: 3, perDay: 0.3 }, 'a typed 100 % number is used for the capped levels');
+  const tgt = { personId: 'a', month: '2026-11', source: 'manual', importedAt: '2026-11-01T00:00:00.000Z', lines: [{ segment: 'tablet', target: 5, achieved: 0, cap: 100 }, { segment: 'low', target: 10, achieved: 0 }] };
+  const sum = G.summarizeTarget(tgt, {}, '2026-11-05', { perUnit: { tablet: 100, low: 10 }, multiplier: { 70: 1, 100: 1, 120: 1 }, currency: '' });
+  assert.equal(sum.lines[0].at[120].needed, 5, 'summary: capped tablet needs 5 at 120 %'); assert.equal(sum.lines[1].at[120].needed, 12, 'summary: the others still need 12');
+  assert.equal(sum.ifReached[120], 5 * 100 + 12 * 10, 'incentive example counts the capped line at 100 %');
+
+  // one place to set a line (the grid and the segment screen)
+  let st = D.emptyState();
+  st = G.setTargetLine(st, '2026-11', 'a', 'low', { target: 7 });
+  assert.deepEqual(st.targets['2026-11'].a.lines, [{ segment: 'low', target: 7, achieved: 0 }], 'creates the person, month and line');
+  st = G.setTargetLine(st, '2026-11', 'a', 'low', { achieved: 2, cap: 100 });
+  assert.deepEqual(st.targets['2026-11'].a.lines[0], { segment: 'low', target: 7, achieved: 2, cap: 100 });
+  st = G.setTargetLine(st, '2026-11', 'a', 'low', { cap: undefined });
+  assert.equal('cap' in st.targets['2026-11'].a.lines[0], false, 'an undefined cap removes it');
+  assert.equal(G.setTargetLine(st, 'bad', 'a', 'low', { target: 1 }), st, 'a bad month changes nothing');
+  // the cap and the learned names survive cleaning (a saved backup is cleaned when restored)
+  const cleaned = D.cleanState({ ...st, targets: { '2026-11': { a: { ...st.targets['2026-11'].a, lines: [{ segment: 'tablet', target: 5, achieved: 1, cap: 100 }, { segment: 'low', target: 1, achieved: 0, cap: 95 }] } } }, targetAliases: { 'asha k': 'a', x: 'b', ok: '' } });
+  assert.equal(cleaned.targets['2026-11'].a.lines[0].cap, 100, 'a valid cap is kept'); assert.equal('cap' in cleaned.targets['2026-11'].a.lines[1], false, 'a cap that is not a level is dropped');
+  assert.deepEqual(cleaned.targetAliases, { 'asha k': 'a' }, 'only real learned names are kept');
+  // last month copies the cap
+  const lm = G.startFromLastMonth({ ...D.emptyState(), targets: { '2026-10': { a: { personId: 'a', month: '2026-10', source: 'manual', importedAt: 'x', lines: [{ segment: 'tablet', target: 5, achieved: 5, cap: 100 }] } } } }, '2026-11', ['a']);
+  assert.equal(lm.state.targets['2026-11'].a.lines[0].cap, 100); assert.equal(lm.state.targets['2026-11'].a.lines[0].achieved, 0, 'sold starts again');
+
+  // who a screenshot or text is for (synthetic names)
+  const people = [{ id: 'p1', name: 'Asha Test' }, { id: 'p2', name: 'Bilal Test' }, { id: 'p3', name: 'Carlou Test' }];
+  const body = 'Flagship 1  Target 3  Achieved 2\nMid  Target 10  Achieved 7';
+  assert.deepEqual(G.findWho('Name: Asha Test\n' + body, people), { personId: 'p1', key: 'asha test', how: 'name' }, 'a Name line');
+  assert.equal(G.findWho('Promoter: bilal test\n' + body, people).personId, 'p2', 'case does not matter');
+  assert.equal(G.findWho('Good morning Carlou Test\n' + body, people).personId, 'p3', 'a whole name anywhere counts');
+  assert.deepEqual(G.findWho('Employee ID: 90017\n' + body, people), { personId: '', key: '90017', how: 'none' }, 'an ID it does not know: it does not guess');
+  assert.equal(G.findWho(body, people).personId, '', 'no name at all: nobody is picked');
+  assert.equal(G.findWho('Asha Test and Bilal Test\n' + body, people).personId, '', 'two people named: not sure');
+  assert.deepEqual(G.findWho('Employee ID: 90017\n' + body, people, { '90017': 'p2' }), { personId: 'p2', key: '90017', how: 'learned' }, 'a learned ID');
+  assert.equal(G.findWho('ID: 90017\n' + body, people, { '90017': 'gone' }).personId, '', 'a learned person who was deleted is ignored');
+  let learned = G.learnWho(D.emptyState(), 'Employee 90017', 'p2');
+  assert.deepEqual(learned.targetAliases, { 'employee 90017': 'p2' }); assert.equal(G.learnWho(learned, 'Employee 90017', 'p2'), learned, 'already known: unchanged');
+  assert.equal(G.learnWho(D.emptyState(), 'x', 'p2').targetAliases, undefined, 'a one-letter key is not learned');
+  // several people in one pasted text
+  const many = G.readTargets('Name: Asha Test\n' + body + '\n\nName: Bilal Test\nFlagship 2  Target 5  Achieved 1\nName: Zed Nobody\nLow  Target 9  Achieved 4', people);
+  assert.equal(many.length, 3); assert.deepEqual(many.map(b => b.who.personId), ['p1', 'p2', ''], 'each part has its own person; an unknown name stays unassigned');
+  assert.deepEqual(many.map(b => b.parsed.lines.map(l => l.segment)), [['flagship1', 'mid'], ['flagship2'], ['low']]);
+  const one = G.readTargets('Name: Asha Test\nEmployee ID: 55\n' + body, people);
+  assert.equal(one.length, 1, 'a name and an ID line together are one person'); assert.equal(one[0].parsed.lines.length, 2);
+  assert.equal(G.readTargets(body, people).length, 1); assert.equal(G.readTargets('', people).length, 1, 'empty text gives one empty part with a warning');
+  assert.ok(G.readTargets('', people)[0].parsed.warnings.length > 0);
+  // the shared summary carries the whole-number pace and the finish lines
+  const fin = { label: 'Fold 1', target: 10, sold: 4, remaining: 6, perDay: 0.4, finish: '70% reached · 100% by 24 Nov · 120% not by month end (needs 1 a day)', each: [{ name: 'Asha Test', target: 5, sold: 2, remaining: 3, perDay: 0.2, finish: '100% by 26 Nov' }] };
+  const sumText = TS2.targetSummary({ month: '2026-11', level: 100, days: 14, rows: [fin] });
+  assert.ok(sumText.includes('Fold 1: sold 4 of 10 · needs 6 more · 1 every 2 days')); assert.ok(sumText.includes('  70% reached · 100% by 24 Nov'));
+  assert.ok(sumText.includes('  Asha Test: 2/5 · needs 3 · 1 every 4 days')); assert.ok(sumText.includes('    100% by 26 Nov')); assert.ok(sumText.includes('Total: 6 more pieces · 1 every 2 days'));
+  assert.ok(!/\d\.\d\/day/.test(sumText), 'no decimal pace in the summary');
+  console.log('targets 1.39 ok');
 }

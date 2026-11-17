@@ -1,12 +1,11 @@
 // RetailLens screens, part 2: Gives and Data. Rules are in src/retail/*.ts; see RetailHub.tsx for the first part.
 import { useEffect, useMemo, useState } from 'react';
-import { applyAllocation, recommend, undoAllocation, type Proposal } from './retail/allocation';
-import { segmentOf } from './retail/catalog';
+import { applyAllocation, givenToday, undoAllocation, type Proposal } from './retail/allocation';
+import { allocView, recommendFor } from './retail/autogive';
 import { makeBackup, readBackup, restoreBackup, withAudit } from './retail/data';
-import { pendingBySegment, submittedSince } from './retail/dashboard';
 import { listSnapshots, type Snapshot } from './retail/retail-store';
 import { segLabel } from './retail/segments';
-import { monthOf, type Segment } from './retail/types';
+import { monthOf, type GiveLimit } from './retail/types';
 import { last4, who, type RetailCtx } from './retail/ui-helpers';
 
 // ---- Gives -------------------------------------------------------------------------------------------------------------------------------
@@ -15,10 +14,8 @@ export function GivesTab(ctx: RetailCtx) {
   const { state, records, people, today } = ctx;
   const month = monthOf(today);
   const [skipped, setSkipped] = useState<string[]>([]);
-  // units a person has sold but not submitted, plus those submitted since their screenshot: both already count toward what they need
-  const creditOf = (id: string) => { const out: Partial<Record<Segment, number>> = { ...pendingBySegment(state, id) }; for (const [s, n] of Object.entries(submittedSince(state, id, state.targets[month]?.[id]))) out[s as Segment] = (out[s as Segment] || 0) + (n || 0); return out; };
-  const view = () => records.map(r => ({ id: r.id, imei: r.imei, personId: r.personId, segment: segmentOf(state, r.model, month, state.recordMeta[r.id]), duplicate: r.duplicate }));
-  const rec = useMemo(() => recommend({ state, month, people, records: view(), pending: Object.fromEntries(people.map(p => [p.id, creditOf(p.id)])) }), [state, month, people, records]); // eslint-disable-line react-hooks/exhaustive-deps
+  const view = () => allocView(state, month, records);
+  const rec = useMemo(() => recommendFor(state, month, today, people, records), [state, month, today, people, records]);
   const open = rec.proposals.filter(p => !skipped.includes(p.id));
   const approve = (list: Proposal[]) => {
     const result = applyAllocation(view(), rec.proposals, new Set(list.map(p => p.id)), 'recommended', month);
@@ -35,8 +32,31 @@ export function GivesTab(ctx: RetailCtx) {
     ctx.change({ ...state, allocations: state.allocations.map(a => a.id === id ? result.event : a) }, 'undo allocation');
     ctx.notify(`${result.restored.length} phone${result.restored.length === 1 ? '' : 's'} returned${result.kept.length ? `; ${result.kept.length} stay where they are now` : ''}.`);
   };
+  const mode = state.giveMode === 'auto' ? 'auto' : 'suggest';
+  const setMode = (next: 'auto' | 'suggest') => { if (next === mode) return; ctx.change({ ...state, giveMode: next === 'auto' ? 'auto' : undefined }, ''); ctx.notify(next === 'auto' ? 'Auto give is on. New phones are given by themselves; every give is in History and can be undone.' : 'Suggest only is on. Nothing moves until you approve it.'); };
+  const limits = state.giveLimits || {};
+  const limitOf = (id: string): GiveLimit => limits[id] || {};
+  const today_ = useMemo(() => givenToday(state, today), [state, today]);
+  /** Changes one person's limit. A blank box clears it (no minimum / no maximum); only digits count; an empty limit is not kept. */
+  const setLimit = (id: string, patch: Partial<GiveLimit>) => {
+    const merged: GiveLimit = { ...limitOf(id), ...patch };
+    if (!merged.min) delete merged.min;
+    if (merged.max === undefined) delete merged.max;
+    if (!merged.off) delete merged.off;
+    const next = { ...limits };
+    if (Object.keys(merged).length) next[id] = merged; else delete next[id];
+    ctx.change({ ...state, giveLimits: Object.keys(next).length ? next : undefined }, '');
+  };
+  const digits = (value: string): number | undefined => { const d = value.replace(/[^\d]/g, ''); return d === '' ? undefined : Math.min(999, Number(d)); };
   const byId = new Map(records.map(r => [r.id, r]));
   return <div className="retail-gives">
+    <section className="retail-card"><h3>How phones are given</h3>
+      <div className="give-tabs two" role="group" aria-label="How phones are given">
+        <button type="button" className={mode === 'suggest' ? 'on' : ''} aria-pressed={mode === 'suggest'} onClick={() => setMode('suggest')}>Suggest only</button>
+        <button type="button" className={mode === 'auto' ? 'on' : ''} aria-pressed={mode === 'auto'} onClick={() => setMode('auto')}>Auto give</button>
+      </div>
+      <p className="settings-help">{mode === 'auto' ? 'New phones are given by themselves when a scan finishes, with the same rules as the suggestions and each person’s limits below. Phones that still need review, are held or are repeated wait. Every give is in History and can be undone.' : 'Phones are only suggested. Nothing moves until you approve it.'}</p>
+    </section>
     <section className="retail-card"><h3>Suggested ({open.length})</h3>
       {rec.notes.map((n, i) => <p key={i} className="amber">{n}</p>)}
       <ul className="retail-list gv-list">{open.map(p => <li key={p.id} className="gv-item"><span className="gv-main"><strong>{p.recordIds.length} × {segLabel(state, p.segment)} → {who(ctx, p.personId)}</strong><small>{p.reason}</small><small>{p.recordIds.map(id => last4(byId.get(id)?.imei || '')).join(' ')}</small></span>
@@ -45,6 +65,19 @@ export function GivesTab(ctx: RetailCtx) {
       {open.length > 1 && <div className="share-toolbar"><button type="button" className="primary" onClick={() => approve(open)}>Approve all {open.length}</button>{skipped.length > 0 && <button type="button" className="subtle-btn" onClick={() => setSkipped([])}>Show skipped</button>}</div>}
       {Object.keys(rec.leftover).length > 0 && <p className="settings-help">Not suggested (stay unassigned): {Object.entries(rec.leftover).map(([s, n]) => `${n} ${segLabel(state, s)}`).join(', ')}.</p>}
     </section>
+    <details className="retail-card"><summary><strong>Limits per person</strong></summary>
+      <p className="settings-help">Minimum: this person gets at least this many phones a day when there are phones. Maximum: never more than this many a day; the rest stays without an owner for later (a late upload, or tomorrow). Leave a box empty for no limit.</p>
+      {people.map(p => { const lim = limitOf(p.id); return <div key={p.id} className="gl-person">
+        <div className="tg-top"><strong>{p.name}</strong><small>Given today: {today_[p.id] || 0}</small></div>
+        <div className="tg-fields">
+          <label>Minimum a day<input aria-label={`Minimum a day for ${p.name}`} inputMode="numeric" placeholder="None" value={lim.min ?? ''} onChange={e => setLimit(p.id, { min: digits(e.target.value) })} onFocus={e => e.currentTarget.select()} /></label>
+          <label>Maximum a day<input aria-label={`Maximum a day for ${p.name}`} inputMode="numeric" placeholder="No limit" value={lim.max ?? ''} onChange={e => setLimit(p.id, { max: digits(e.target.value) })} onFocus={e => e.currentTarget.select()} /></label>
+        </div>
+        <label className="gl-off"><input type="checkbox" aria-label={`Leave ${p.name} out`} checked={!!lim.off} onChange={e => setLimit(p.id, { off: e.target.checked })} /> Leave {p.name} out for now (no suggestions, no automatic gives)</label>
+        {lim.max !== undefined && (lim.min || 0) > lim.max && <p className="amber">The minimum is more than the maximum, so the maximum wins.</p>}
+      </div>; })}
+      {!people.length && <p className="settings-help">Add people in More &gt; People first.</p>}
+    </details>
     <details className="retail-card" open={!state.settings.myPersonId}><summary><strong>My target</strong></summary>
       <div className="retail-inline">
         <label>I am<select value={state.settings.myPersonId} onChange={e => ctx.change({ ...state, settings: { ...state.settings, myPersonId: e.target.value } }, '')}><option value="">Choose…</option>{people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
@@ -53,8 +86,8 @@ export function GivesTab(ctx: RetailCtx) {
       <p className="settings-help">Suggestions reserve the units I need for this target first, then help everyone below 70%.</p>
     </details>
     <details className="retail-card"><summary><strong>History ({state.allocations.length})</strong></summary>
-      <ul className="retail-list">{[...state.allocations].reverse().slice(0, 15).map(a => <li key={a.id}><span>{a.at.slice(0, 16).replace('T', ' ')} · {a.items.length} phone{a.items.length === 1 ? '' : 's'} · {a.source === 'manual' ? 'by you' : 'suggested'} · {[...new Set(a.items.map(i => who(ctx, i.to)))].join(', ')}{a.status === 'undone' ? ' · undone' : ''}</span>
-        {a.status === 'applied' && <button type="button" className="subtle-btn" onClick={() => undo(a.id)}>Undo</button>}</li>)}{!state.allocations.length && <li className="settings-help">Approved suggestions appear here.</li>}</ul>
+      <ul className="retail-list">{[...state.allocations].reverse().slice(0, 15).map(a => <li key={a.id}><span>{a.at.slice(0, 16).replace('T', ' ')} · {a.items.length} phone{a.items.length === 1 ? '' : 's'} · {a.source === 'manual' ? 'by you' : a.source === 'auto' ? 'automatic' : 'suggested'} · {[...new Set(a.items.map(i => who(ctx, i.to)))].join(', ')}{a.status === 'undone' ? ' · undone' : ''}</span>
+        {a.status === 'applied' && <button type="button" className="subtle-btn" onClick={() => undo(a.id)}>Undo</button>}</li>)}{!state.allocations.length && <li className="settings-help">Approved suggestions and automatic gives appear here.</li>}</ul>
     </details>
   </div>;
 }
