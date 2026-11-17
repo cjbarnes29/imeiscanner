@@ -1271,7 +1271,7 @@ function CropResults({ groups, setGroups, busy, onBack, onApply }: { groups: Cro
       <button className="primary" disabled={busy || badFormat} onClick={onApply}>Save {total} picture{total === 1 ? '' : 's'} and archive the original{groups.length === 1 ? '' : 's'}</button>
       <button className="subtle-btn" disabled={busy} onClick={onBack}>← Back to the boxes</button>
     </footer>
-    <p className="studio-hint">The original photo is deleted for good. Each picture keeps its own IMEI, serial, model and person.</p>
+    <p className="studio-hint">The original photo is moved to the archive, not deleted; restore it with Undo or View / restore. Each picture keeps its own IMEI, serial, model and person.</p>
   </section></div>;
 }
 

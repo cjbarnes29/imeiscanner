@@ -2,6 +2,11 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — documentation and release signing
+- README rewritten for accuracy: export before every update, archive (not delete) wording for crops and duplicates, a privacy line that names every place data can live, and one table of what each send method sends. Build, test, release and Render steps moved to DEVELOPERS.md; each code folder now has a README.
+- The crop-review hint now says the original photo is archived, not deleted.
+- The Android release workflow signs the APK with a permanent key when the four `IMEI_KEYSTORE_*` secrets are set (steps in DEVELOPERS.md); without them it builds the debug APK as before.
+
 ## Unreleased — fixes from a code review (Android and web)
 - A colour taught for every model no longer overrides a model whose own colours already fit.
 - A phone sold or held and later brought back keeps its place; a deleted phone no longer hides a later real scan of the same kind.

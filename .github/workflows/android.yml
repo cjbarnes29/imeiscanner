@@ -30,11 +30,32 @@ jobs:
           gradle-version: '8.13'
       - run: npm ci && npm run build
       - run: mkdir -p android/app/src/main/assets && cp -R dist/. android/app/src/main/assets/
-      - run: gradle --project-dir android :app:assembleDebug --stacktrace
+      - name: Build APK
+        env:
+          # Optional repository secrets. With all four set, the APK is signed with your permanent release key,
+          # so every new version installs over the old one. Without them the build falls back to the debug key
+          # (a fresh debug key on each run, so users may have to uninstall before updating).
+          IMEI_KEYSTORE_B64: ${{ secrets.IMEI_KEYSTORE_B64 }}
+          IMEI_KEYSTORE_PASSWORD: ${{ secrets.IMEI_KEYSTORE_PASSWORD }}
+          IMEI_KEY_ALIAS: ${{ secrets.IMEI_KEY_ALIAS }}
+          IMEI_KEY_PASSWORD: ${{ secrets.IMEI_KEY_PASSWORD }}
+        run: |
+          mkdir -p out
+          if [ -n "$IMEI_KEYSTORE_B64" ] && [ -n "$IMEI_KEYSTORE_PASSWORD" ] && [ -n "$IMEI_KEY_ALIAS" ] && [ -n "$IMEI_KEY_PASSWORD" ]; then
+            echo "$IMEI_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export IMEI_KEYSTORE="$RUNNER_TEMP/release.jks"
+            gradle --project-dir android :app:assembleRelease --stacktrace
+            cp android/app/build/outputs/apk/release/app-release.apk out/IMEI-Lens-Android.apk
+            echo "APK_SIGNING=release" >> "$GITHUB_ENV"
+          else
+            gradle --project-dir android :app:assembleDebug --stacktrace
+            cp android/app/build/outputs/apk/debug/app-debug.apk out/IMEI-Lens-Android.apk
+            echo "APK_SIGNING=debug" >> "$GITHUB_ENV"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: IMEI-Lens-Android-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: out/IMEI-Lens-Android.apk
       - name: Publish direct APK download
         if: startsWith(github.ref, 'refs/tags/android-v')
         env:
@@ -49,12 +70,16 @@ jobs:
             echo "2. To update, install it over the old app. If Android refuses (a different signature), **export your records first**, uninstall the old app, then install this one. Records live inside the app and are removed by uninstalling."
             echo "3. Open **Settings**: the last line shows the version (${VERSION}); the website shows the same one."
             echo
-            echo "The file is debug-signed. Photos and IMEIs stay on the phone."
+            if [ "$APK_SIGNING" = "release" ]; then
+              echo "The file is signed with the release key, so it installs over earlier versions signed with the same key. Photos and IMEIs stay on the phone."
+            else
+              echo "The file is debug-signed. Photos and IMEIs stay on the phone."
+            fi
             echo
             echo "## What changed in ${VERSION}"
             if [ -s changes.md ]; then cat changes.md; else echo "See CHANGELOG.md."; fi
           } > release-notes.md
-          gh release create "$GITHUB_REF_NAME" "android/app/build/outputs/apk/debug/app-debug.apk#IMEI-Lens-Android.apk" \
+          gh release create "$GITHUB_REF_NAME" "out/IMEI-Lens-Android.apk#IMEI-Lens-Android.apk" \
             --title "IMEI Lens for Android $GITHUB_REF_NAME" \
             --prerelease \
             --notes-file release-notes.md
