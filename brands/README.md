@@ -9,7 +9,7 @@ Brand profiles: the data that tells the scanner how to recognise a phone maker f
   - `samsung`: active; evidence word `SAMSUNG` and the `SM-xxxxx` code shape; one `shared-digits` IMEI rule (trust `observed`).
   - `generic`: active fallback with no brand rules.
   - `apple`: draft, inactive placeholder.
-- `conformance/samsung.json` (data) - shared test cases (`evidence`, `editShape`) that both the web and Java tests must satisfy.
+- `conformance/samsung.json` (data) - shared test cases. The file has 7 keys: `note`, `brand`, `evidence`, `modelReads`, `repairs`, `editShape`, `sameDeviceImei1`. The Java test (`BrandConformanceTest`) checks `evidence`, `modelReads`, `repairs`, `editShape` and `sameDeviceImei1`; the web test (`scripts/test-brand-conformance.mjs`) checks only `evidence` and `editShape`.
 - [SAMPLES.md](./SAMPLES.md) - the process for collecting 20 verified label samples before a draft brand may become active.
 
 ## Invariants

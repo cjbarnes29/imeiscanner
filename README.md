@@ -1,6 +1,6 @@
 # RetailLens — Scan. Sell. Track. Achieve.
 
-**RetailLens** is an offline retail app for phone sellers: it scans label photos (IMEI Lens is the scanning engine), sorts phones into segments, tracks targets and stock, recommends who should get which phones, and writes your WhatsApp report. See the **Retail** tab and [docs/RETAILLENS-PROGRESS.md](docs/RETAILLENS-PROGRESS.md). Everything below describes the scanning engine, which works as before.
+**RetailLens** is an offline retail app for phone sellers: it scans label photos (IMEI Lens is the scanning engine), sorts phones into segments, tracks targets and stock, recommends who should get which phones, and writes your WhatsApp report. See [docs/RETAILLENS-PROGRESS.md](docs/RETAILLENS-PROGRESS.md) for what RetailLens does and how far it has got. RetailLens appears in Detailed mode only, and it is not in the tab table below. Everything below describes the scanning engine, which works as before.
 
 # IMEI Lens — Photo Scanner (the scanning engine)
 
@@ -34,13 +34,14 @@ A bar at the bottom switches between six sections (Detailed mode):
 | **Share** | Send a person's pictures and numbers, one by one, or save them to your phone. |
 | **Export** | Excel, Word, Google Sheets and CSV reports. |
 
-The top bar has the **Simple | Detailed** switch, **Reset** (the trash button: deletes every scanned record and photo after you confirm; people, model names and settings are kept) and **Settings**. Simple mode shows only the essentials; nothing is removed in either mode.
+The top bar has the **Simple | Detailed** switch, **Reset** (the trash button: deletes every scanned record and photo after you confirm; people, model names and settings are kept) and **Settings**. Simple mode hides the **More** menu and most of the detailed panels and keeps scanning and a simple send and export screen; switching modes removes no data. Some sections below call the **Records** tab "Scanned records".
 
 ### Scanning
 - **Android app:** choose up to **1000 photos** per batch. They scan in the background with a progress notification. The app measures the phone (cores, memory, heat, battery saver) and scans several photos at once. In **Settings → Phone scanning power** you can pick **Auto** (starts gently and speeds up while the phone stays cool), **Turbo**, **Balanced** or **Safe**. If a photo has no readable IMEI, the scanner also tries it turned 90°, 270° and 180° and keeps the best result (about 6 to 8 extra seconds, only for photos where nothing was read).
 - **Share into the app:** from WhatsApp, Gallery or any app, share photos to **IMEI Lens**. They are copied into the app and scanned automatically and added to the person last selected, so check the person before you send. Photos shared during a running scan wait and scan next.
 - **Web:** choose photos and tap **Extract IMEI**, or use **Scan with camera**. Browser scans run only while the page stays open.
 - **Laptop or Render server:** see the sections further down.
+- **Three scan settings, three different jobs.** **Phone scanning power** (Settings, Android only) sets how many photos the phone scans at once. **Scan speed** (Fast, Standard, Detailed) and **Products in each photo** (Auto or 1 to 12) are on the Scan tab; they set how hard the scanner works on each photo. "Detailed" here is a scan speed, not the Detailed screen mode.
 - Saved pictures in the Android app are kept at up to 1800 px.
 
 ### Reviewing a picture
@@ -76,6 +77,7 @@ Open **Share** and pick a person. Each person has these buttons:
 | Bluetooth / nearby | None | `numbers.txt` |
 | One by one | None | Copy IMEI / Copy S/N buttons |
 | Save to my phone | None | `numbers.txt` |
+| Text only / Copy | None (plain text) | The text itself |
 
 Records marked **Needs review** are still sent if you select them. Check them first.
 
@@ -87,7 +89,7 @@ Records marked **Needs review** are still sent if you select them. Check them fi
 The **Export** tab makes Excel, Word, Google Sheets and CSV reports. The default export has IMEI 1, IMEI 2, serial and a picture. See Features for the layouts. Picture links in Excel exported from the website only open in the browser that scanned the photo.
 
 ## Limits (also listed in Settings → What this app can handle)
-- One scan batch: up to **1000 photos**; records are shown a page at a time.
+- One scan batch: up to **1000 photos** in the Android app; **500** on the laptop or Render server. Records are shown a page at a time.
 - 1000 IMEI numbers as text are about 17 KB: one message. Long lists open the phone's share menu.
 - WhatsApp: about 30 pictures per send (an estimate, not measured on every phone). Use Continue, or Bluetooth.
 - Excel or Word with the pictures inside: about 40 pictures per GB of phone memory, between 100 and 600 (an estimate, not measured on a phone); the app warns. For more, export numbers only or use the folder export.
@@ -96,7 +98,7 @@ The **Export** tab makes Excel, Word, Google Sheets and CSV reports. The default
 
 ## Backups and safety
 - **Export before** uninstalling the app, clearing its data, or using **Reset**.
-- IMEI numbers are sensitive. Your photos and IMEIs stay on the phone or in the browser. If you use the laptop server, they are also stored in `server-data\` on that laptop. If you use the Render option, they are stored on Render's disk.
+- IMEI numbers are sensitive. Your photos and IMEIs stay on the phone or in the browser. If you use the laptop server, they are also stored in `server-data\` on that laptop. If you use the Render option, they are stored on Render's disk. The phone-on-Wi-Fi laptop mode sends data without encryption (see that section).
 
 
 ## Features
@@ -181,11 +183,16 @@ Exports work without Google authorization. To use a report in Google Sheets, imp
 - OCR is not guaranteed. Glare, blur, small print, curved labels, and low resolution can cause errors. Always compare extracted digits against the original label before relying on them.
 - The browser scanner saves records in IndexedDB; the laptop scanner saves jobs and original photos under `server-data/`. Export regularly and keep a backup of that folder if relying on background jobs.
 - IMEI values are sensitive device identifiers. Use a trusted device and Google account, and avoid sharing exported sheets publicly.
+- The scanner is built for Samsung labels first; other brands are best-effort. Brand rules live in `brands/`.
 - The model classifier is heuristic and currently contains common Samsung Galaxy S/A/Z families plus selected iPhone and Pixel models. It uses OCR text and filenames; an unknown result needs manual correction.
 - IMEI 1 cannot always be distinguished from IMEI 2 if the photo contains multiple unlabeled numbers. The tool deliberately sends ambiguous cases to review rather than guessing.
 - Barcodes need enough pixels: on photos around 1000 px wide, small S/N and IMEI 2 barcodes often cannot be read and fall back to OCR or review. Full-resolution camera photos work best.
 - If a second device shows only an IMEI 2 or serial close under another device's IMEI 1 with no visible sticker edge between them, the scanner cannot tell them apart from the text alone, so it asks **"Is this 1 device or N?"** instead of deciding.
 - Picture links in Excel exported from the website open the picture saved in the browser that scanned it; on another phone or browser they show *Picture not found*.
+
+---
+
+*The sections below are for developers and AI assistants working on the code. If you only use the app, you can stop here.*
 
 ## Local Interface & Invariants
 Direct source files in the repository root:

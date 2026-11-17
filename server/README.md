@@ -23,13 +23,13 @@ The "laptop scanner": a dependency-light Node HTTP server that queues photo-scan
 - Manifests and records are written atomically (temp file then `rename`, `atomicJson`).
 - One queue run at a time (`processing` flag). Duplicate photos (SHA-256 fingerprint) and duplicate 15-digit IMEIs within a job are skipped. A job that errors is set back to `queued` with an error message and retried on restart.
 - Stopping a job is honoured between photos (`stoppedJobs` set plus manifest status `stopped`).
-- Binds `127.0.0.1` by default; `0.0.0.0` only with `--lan` or `IMEI_HOST`.
+- Binds `127.0.0.1` by default; `0.0.0.0` with `--lan`; `IMEI_HOST` can set any address.
 - `scan.mjs` never invents numbers: an IMEI is only reported if it passes the Luhn check (`luhnValid`) or is barcode-confirmed; unreadable labels get status `Review`.
 
 ## Side Effects
 - Creates and writes `server-data/` (override with `IMEI_DATA_DIR`): `jobs/<id>/manifest.json`, `records.json`, `input/<n>.bin` (uploaded photos) and `output/<uuid>.jpg` (result crops), plus `access-code.txt`. This folder holds real device data and is git-ignored.
 - Listens on `PORT` (default 8787) on `IMEI_HOST` (default 127.0.0.1).
-- Starts Tesseract.js workers (a second one on machines with 4+ CPUs) and reads photos with `sharp`; CPU heavy. Logs errors to the console.
+- Starts Tesseract.js workers (a second one, created only when a photo has 2 or more devices, the mode is not `fast` and the machine has 4+ CPUs) and reads photos with `sharp`; CPU heavy. Logs errors to the console.
 - Reads `dist/` (build the app first with `npm run build`).
 
 ## Verification

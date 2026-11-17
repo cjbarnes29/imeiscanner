@@ -19,7 +19,7 @@ Entry point: `main.tsx` mounts `App.tsx` (`export default App`). Styling is in `
 | `CropStudio.tsx` | `CropStudio`; types `StudioItem`, `StudioPlan`, `PhotoEdit` |
 | `BulkReview.tsx` | `BulkReview`; type `BulkRow` |
 | `QueuePanel.tsx`, `ScanReport.tsx` | `QueuePanel`, `ScanReport` |
-| `ModelPicker.tsx`, `CatalogDialog.tsx`, `SamsungCatalog.tsx` | `ModelPicker`, `CatalogDialog`, `SamsungCatalog`. The catalog file also exports `readCatalogRows`, `renameCatalogRow`, `deleteCatalogRow`, `addCatalogRow`, `countDeletedCatalogRows`, `restoreDeletedCatalogRows`, `catalogModel`, `readCatalogEntries`, `fetchSamsungCatalog`, `loadSamsungCatalog`, `CATALOG_AUTO_KEY`. |
+| `ModelPicker.tsx`, `CatalogDialog.tsx`, `SamsungCatalog.tsx` | `ModelPicker`, `CatalogDialog`, `SamsungCatalog`. The catalog file also exports `readCatalogRows`, `renameCatalogRow`, `deleteCatalogRow`, `addCatalogRow`, `countDeletedCatalogRows`, `restoreDeletedCatalogRows`, `catalogModel`, `readCatalogEntries`, `fetchSamsungCatalog`, `loadSamsungCatalog`, `CATALOG_AUTO_KEY`, and the type `CatalogRow`. |
 | `SettingsPanel.tsx`, `Guide.tsx` | `SettingsPanel`; `WhatsNewDialog`, `TutorialsDialog`, `TrollImage`, `AuthorCredit`, `TUTORIALS`, `hasSeenWhatsNew`, `markWhatsNewSeen`, `SEEN_KEY` |
 | `RetailHub.tsx`, `RetailHub2.tsx`, `RetailReport.tsx`, `RetailTargets.tsx` | `RetailHub` (type `RetailSub`); `GivesTab`, `DataTab`; `ReportTab`; `TargetsTab`, `SegmentsTab` |
 | `SoldOffer.tsx` | `SoldOffer`; type `SoldGroup` |
@@ -29,7 +29,7 @@ Entry point: `main.tsx` mounts `App.tsx` (`export default App`). Styling is in `
 
 | File | Public symbols |
 | --- | --- |
-| `ocr-config.ts` | `OCR_START_TIMEOUT_MS`, `ocrWorkerOptions`, `startOcrWorker` (tesseract.js worker start-up with a timeout) |
+| `ocr-config.ts` | `OCR_START_TIMEOUT_MS`, `ocrWorkerOptions`, `startOcrWorker` (tesseract.js worker start-up with a timeout); type `OcrWorkerOptions` |
 | `ocr-preprocess.ts` | `toGray`, `percentile`, `pictureStats`, `stretchLevels`, `unsharp`, `evenLight`, `adaptiveThreshold`, `invertGray`, `planPasses`, `applyVariant`, `renderVariant`, `canvasStats`; types `Gray`, `Variant`, `PicStats` |
 | `ocr-retry.ts` | `retryLowConfidence`, `isSettled`; types `RetryOptions`, `RetryResult` |
 | `barcode-reader.ts` | `readImageBarcodes`, `readDataUrlBarcodes` |
@@ -51,7 +51,7 @@ Entry point: `main.tsx` mounts `App.tsx` (`export default App`). Styling is in `
 | `product-bands.ts` | `productBands` |
 | `multi-detect.ts` | `estimateSkewFromGray`, `straightenCanvas`, `straightenDataUrl`, `gridTileRects`, `medianLineHeight`, `tileRects`, `mergeOcrLines`, `shouldTurn`, `needsOrientationCheck`, `countModelLabels`, `skewOfCanvas`, `levelledPoint`, `originalPoint`, `unlevelBox`; type `Rect` |
 | `crop-boxes.ts` | `clampBox`, `boxFromPoints`, `isUsableBox`, `overlapShare`, `duplicateOf`, `addBox`, `hitTest`, `moveBox`, `resizeBox`, `removeBoxes`, `moveBoxes`, `sortReadingOrder`, `boxToPixels`, `turnBox`, `boxesAreSound`, `MIN_EDGE`, `OVERLAP_LIMIT`; types `Box`, `Part`, `Hit` |
-| `crop-draft.ts` | `parseDraft`, `draftHasWork`, `draftSummary`, `writeDraft`, `readDraft`, `clearDraft`, `DRAFT_KEY`; types `CropDraft`, `DraftItem`, `DraftStorage` |
+| `crop-draft.ts` | `parseDraft`, `draftHasWork`, `draftSummary`, `writeDraft`, `readDraft`, `clearDraft`, `DRAFT_KEY`, `cleanBox`; types `CropDraft`, `DraftItem`, `DraftStorage` |
 | `crop-queue.ts` | `parseQueue`, `newItem`, `mergeQueue`, `nextPending`, `counts`, `setLater`, `promoteLater`, `markFailed`, `retryItem`, `retryAllFailed`, `removeItem`, `writeQueue`, `readQueue`, `readLog`, `writeLog`, `addLog`, `classifyLog`, `QUEUE_KEY`, `LOG_KEY`; types `QueueItem`, `QueueStatus`, `QueueLogEntry` |
 | `rescan-pair.ts` | `planReplacements`, `DIFFERENT_READING_NOTE`; types `PairRecord`, `PairAdded`, `PairPlan` |
 | `scan-report.ts` | `EMPTY_SUMMARY`, `readSummary`, `parseReport`, `isBalanced`, `summaryLine`, `photoStatus`, `orderPhotos`, `retakePhotos`; types `ReportSummary`, `ReportPhoto`, `ScanReportData`, `PhotoStatus` |
@@ -71,11 +71,11 @@ Entry point: `main.tsx` mounts `App.tsx` (`export default App`). Styling is in `
 | `back-layer.ts`, `backnav.ts` | `useBackLayer`, `useBackNav` (hooks for the Android/browser back button) |
 | `text-size.ts`, `theme.ts` | `TEXT_SIZE_KEY`, `TEXT_SIZES`, `readTextSize`, `applyTextSize`, `saveTextSize`, `TextSizeId`; `THEME_KEY`, `THEMES`, `readTheme`, `applyTheme`, `saveTheme`, `ThemeId` |
 
-`vite-env.d.ts` only holds Vite type references. `.gitkeep` is a placeholder.
+`version.ts` (generated) exports `APP_VERSION` and `APP_COMMIT`. `vite-env.d.ts` only holds Vite type references. `.gitkeep` is a placeholder.
 
 ## Invariants
 
-- A valid IMEI is 15 digits and passes the Luhn check (`imei-validate.ts:luhnValid`, `luhnCheckDigit`). `judgeImei` returns a `Judgement` that flags `needsReview` when the reading is unsure, and `ocr-retry.ts:isSettled` only accepts a result that has an IMEI, no review flag and enough confidence.
+- A valid IMEI is 15 digits and passes the Luhn check (`imei-validate.ts:luhnValid`, `luhnCheckDigit`). `judgeImei` returns a `Judgement` that flags `needsReview` when the reading is unsure, and `ocr-retry.ts:isSettled` only accepts a result that has an IMEI, no review flag, a confidence of at least 75 by default (the `goodEnough` argument), and a method other than `'repair'`.
 - Failure reasons are the closed set in `fail-reason.ts:FAIL_KINDS`. Label issues are `'cut-edge' | 'partial-number' | 'unreadable'` (`label-issue.ts`).
 - `crop-boxes.ts:MIN_EDGE` is the minimum box edge and `OVERLAP_LIMIT` (0.6) is the largest allowed overlap, and `addBox` returns `{ error }` for a rejected box.
 - `crop-draft.ts` and `crop-queue.ts` take a `DraftStorage` argument, so they are testable without a browser. They drop saved entries whose record ids no longer exist when `existingIds` is passed.
@@ -86,9 +86,15 @@ Entry point: `main.tsx` mounts `App.tsx` (`export default App`). Styling is in `
 ## Side Effects
 
 - **IndexedDB**: database `imei-lens-v2` (opened by `record-store.ts`, `archive-store.ts` and `retail/retail-store.ts`).
-- **localStorage keys**: `imei-camera-mode`, `imei-lens-crop-draft-v1`, `imei-lens-crop-queue-v1`, `imei-lens-crop-log-v1`, `imei-lens-custom-models`, `imei-lens-learned-models-v1`, `imei-lens-text-size-v1`, `retaillens-theme-v1`, `imei-lens-seen-version-v1`, `imei-lens-catalog-auto`, plus `samsung-catalog` and related `samsung-catalog-*` keys. The crop draft and queue are written through the `DraftStorage` argument.
-- **Network**: `SamsungCatalog.tsx:fetchSamsungCatalog` fetches the catalog (with a 20 s timeout and a bundled fallback). `App.tsx` calls the Google Drive API, `/api/health` and the user-configured laptop server URL.
-- **DOM**: `text-size.ts:applyTextSize` and `theme.ts:applyTheme` change the page's appearance. `camera-mode.ts` reads camera events.
+- **localStorage keys** (this list is the ones found by search; it may not be complete):
+  - Modules: `imei-camera-mode`, `imei-lens-crop-draft-v1`, `imei-lens-crop-queue-v1`, `imei-lens-crop-log-v1`, `imei-lens-custom-models`, `imei-lens-learned-models-v1`, `imei-lens-text-size-v1`, `retaillens-theme-v1`, `imei-lens-seen-version-v1`, `imei-lens-catalog-auto`, plus `samsung-catalog` and related `samsung-catalog-*` keys. The crop draft and queue are written through the `DraftStorage` argument.
+  - `App.tsx`: `imei-lens-records-v1`, `imei-lens-people-v1`, `imei-lens-native-imported-v1`, `imei-lens-wa-progress-v1`, `imei-lens-onebyone-v1`, `imei-lens-auto-retried-v1`, `imei-collapsed-panels`, `imei-lens-expected-products`, `imei-lens-scan-speed`, `imei-lens-laptop-url`, `imei-lens-laptop-key`, `imei-lens-laptop-job`, `imei-lens-simple-view`, `imei-lens-emptied-people`, `imeilens.storeOnly`, `imeilens.askSoldAfterSend`, `imei-lens-protect-before`, `imei-lens-debug` (only read, to expose debug data).
+  - `CameraCapture.tsx`: `imei-camera-full-size`, `imei-camera-placement`.
+- **Network**:
+  - `SamsungCatalog.tsx:fetchSamsungCatalog` loads the catalog. The hard-coded remote URL `https://cjbarnes29.github.io/imeiscanner/samsung-catalog.json` is used only when the page host is `appassets.androidplatform.net` (the Android app). On the web it fetches the bundled `samsung-catalog.json` directly, and a failure is thrown with no fallback. In the Android case, if the remote fetch throws, it falls back to the bundled copy. The 20 s `AbortSignal.timeout` applies only to the first fetch.
+  - `App.tsx` calls Google Drive at `https://www.googleapis.com/upload/drive/v3/files` (upload) and `https://www.googleapis.com/drive/v3/files`, plus `/api/health` and the laptop server.
+  - Laptop server URL: the saved `imei-lens-laptop-url` if set, otherwise `http://127.0.0.1:8787` when the host is `cjbarnes29.github.io`, otherwise the page's own origin. A hosted scanner build (`VITE_HOSTED_SCANNER` or an `.onrender.com` host) always uses the page's own origin.
+- **DOM**: `text-size.ts:applyTextSize` and `theme.ts:applyTheme` change the page's appearance.
 - **Camera and OCR**: `CameraCapture.tsx` uses the device camera. `ocr-config.ts` starts a tesseract.js worker.
 - The rest of the `.ts` files are pure and have no side effects.
 
