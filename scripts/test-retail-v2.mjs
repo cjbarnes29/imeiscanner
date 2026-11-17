@@ -485,3 +485,11 @@ console.log('retail v2: all checks passed');
   assert.equal(C.itemFor(C.setModelSegment(keepsOthers, 'A075', 'low'), 'A075').monthly['2020-01'], 'mid', 'other months keep their own choice');
   console.log('catalog segment ok');
 }
+
+// the sales ledger is not cut at 5000 sales (a cut would make the newest sales count twice)
+{
+  const ledger = {};
+  for (let i = 0; i < 6000; i++) ledger['r' + i] = { personId: 'p1', segment: 'low', month: '2026-11', code: 'A075', storage: '64GB' };
+  assert.equal(Object.keys(D.cleanState({ soldLedger: ledger }).soldLedger).length, 6000, 'all 6000 sales are kept');
+  console.log('ledger size ok');
+}

@@ -32,3 +32,6 @@ phase2-results/
 # Emulator test output and generated synthetic photos
 e2e/reports/
 e2e/fixtures/out/
+
+# local Claude Code settings and hooks
+.claude/

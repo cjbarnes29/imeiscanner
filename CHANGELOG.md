@@ -2,6 +2,9 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — safety (Android and web)
+- **Sales record:** it is no longer cut off at 5,000 sales when saving (the newest sales could have been counted twice). It now keeps up to 100,000.
+
 ## Unreleased — simpler menus and scan settings (Android and web)
 - **Give and share** is one section in More with three tabs (Suggested, By model, Send) instead of three separate entries.
 - **Unknown models:** a Delete button for each phone and for the whole group (with the usual are-you-sure question).
