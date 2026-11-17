@@ -9,8 +9,17 @@ import { evaluate, webState } from '../scripts/cdp-state.mjs';
 
 export { check, finish, webState, adb };
 const here = dirname(fileURLToPath(import.meta.url));
-/** Opens a section from the ⋯ More menu (People, Gives, Segments, Catalog, Share, Backup). */
+/** Opens a section from the ⋯ More menu (People, Give and share, Segments, Catalog, Backup). The old names Gives, Assign by model and Share still work: they open that tab. */
 export async function openMore(c, label) {
+  // Gives, Assign by model and Share are one section now: Give and share, with the tabs Suggested, By model and Send.
+  const tabOf = { Gives: 'Suggested', 'Assign by model': 'By model', Share: 'Send' }[label];
+  if (tabOf) {
+    const opened = await openMore(c, 'Give and share');
+    await sleep(500);
+    const clicked = await js(c, `(()=>{const b=[...document.querySelectorAll('.give-tabs button')].find(x=>x.textContent.trim()===${JSON.stringify(tabOf)});if(!b)return false;b.click();return true;})()`);
+    await sleep(700);
+    return opened && clicked;
+  }
   await js(c, `document.querySelector('button[aria-label="More"]').click();true`);
   await sleep(700);
   const ok = await js(c, `(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(label)}));if(!b)return false;b.click();return true;})()`);
