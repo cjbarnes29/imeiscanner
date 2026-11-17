@@ -428,6 +428,14 @@ try{
   for(let i=0;i<40;i++){if((await owners()).r8==='')break;await sleep(250);}
   assert.equal((await owners()).r8,'');
   ok('Undo puts the phone back');
+  // Home: the month outlook (where the month ends at this pace, what to push and what not)
+  await nav('Home');
+  await waitFor(`!!document.querySelector('.fc-card')`, 'the month outlook');
+  const fcText = await run(`document.querySelector('.fc-card').innerText`);
+  assert.match(fcText, /Month outlook/); assert.match(fcText, /Too early to project|ends at about \d+%/, 'it says where the month ends, or that it is too early');
+  assert.ok(await run(`document.querySelectorAll('.fc-card .fc-line').length>=1`), 'at least one segment line');
+  assert.match(fcText, /Push these|Keep the pace|Hard to reach|Done: stop pushing/, 'the lines are grouped by what to do');
+  ok('Home shows a month outlook: where each segment ends at this pace and which ones to push or leave');
   // Assign by model: typed numbers (no plus / minus), paste keeps the digits, and a number can be copied to everyone
   await more('Give and share'); await click('.give-tabs button','By model');
   await waitFor(`!!document.querySelector('.models-list')`,'assign by model');

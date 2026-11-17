@@ -2,6 +2,9 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — Home: month outlook
+- **Month outlook** on Home (everyone, or the person chosen): where the month most likely ends if sales keep the pace so far (sold and sold-not-submitted / days gone), and what to do with each segment: **Push these** (the next level is within reach if the pace goes up by at most 2 times), **Keep the pace**, **Hard to reach: focus elsewhere**, **Done: stop pushing** (the top level, or the segment's highest level, is reached). In the first 2 days of the month it only says what each next level needs. It is a guess from the pace so far, not a promise.
+
 ## Unreleased — Give and share: Auto give and limits per person
 - **Suggest only / Auto give** switch on Give and share. In Auto give, phones without an owner are given by themselves when a scan finishes, with the same rules as the suggestions (my target first, then everyone under 70%, then toward 100%). Phones that need review, are held (Store only), repeated or have a bad number are never given automatically. Every automatic give is one entry in History (marked "automatic") and can be undone; an undone phone is not given again by itself.
 - **Limits per person:** a minimum and a maximum phones a day, and "Leave out for now". The maximum counts what the person was already given today; what the limits leave over stays without an owner and is given on the next run (a late upload, or tomorrow). The minimum is filled before anyone is lifted toward 100%.

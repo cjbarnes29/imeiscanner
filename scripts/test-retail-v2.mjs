@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -16,7 +16,7 @@ for (const name of files) {
 }
 const load = name => import(pathToFileURL(join(dir, `${name}.mjs`)).href);
 const T = await load('retail/types'), C = await load('retail/catalog'), D = await load('retail/data'), G = await load('retail/targets'),
-  P = await load('retail/stockreport'), PC = await load('retail/pace'), X = await load('retail/reconcile'), SG = await load('retail/segments');
+  P = await load('retail/stockreport'), PC = await load('retail/pace'), FC = await load('retail/forecast'), X = await load('retail/reconcile'), SG = await load('retail/segments');
 
 const luhn = body => { let sum = 0; for (let i = 0; i < body.length; i++) { let n = +body[body.length - 1 - i]; if (i % 2 === 0) { n *= 2; if (n > 9) n -= 9; } sum += n; } return String((10 - sum % 10) % 10); };
 let seq = 300000;
@@ -596,4 +596,56 @@ console.log('retail v2: all checks passed');
   assert.ok(sumText.includes('  Asha Test: 2/5 · needs 3 · 1 every 4 days')); assert.ok(sumText.includes('    100% by 26 Nov')); assert.ok(sumText.includes('Total: 6 more pieces · 1 every 2 days'));
   assert.ok(!/\d\.\d\/day/.test(sumText), 'no decimal pace in the summary');
   console.log('targets 1.39 ok');
+}
+
+// ---- Home: month outlook (where each segment ends at this pace, what to push and what not) --------------------------------------------------------
+{
+  const inp = (label, target, sold, needed, top = 120) => ({ segment: label, label, target, sold, needed: { 70: needed[0], 100: needed[1], 120: needed[2] }, top });
+  const out = FC.forecast([
+    inp('A on track', 10, 5, [7, 10, 12]),          // pace 0.5/day -> 15 by the end: 120 %
+    inp('B push', 20, 6, [14, 20, 24]),             // pace 0.6 -> 18: 70 %, and 100 % needs 14 more = 0.7 a day (1.2 x the pace)
+    inp('C far', 20, 2, [14, 20, 24]),              // pace 0.2 -> 6: not even 70 %, which needs 3 x the pace
+    inp('D done', 10, 12, [7, 10, 12]),             // 120 % reached
+    inp('E capped done', 5, 5, [4, 5, 5], 100),     // stops at 100 %, reached
+    inp('F capped on track', 5, 3, [4, 5, 5], 100),
+    inp('G not worth', 20, 7, [14, 20, 60]),        // 100 % likely; 120 % (60) needs about 4 x the pace
+    inp('H none', 0, 0, [0, 0, 0])
+  ], '2026-11', '2026-11-10');
+  const by = label => out.lines.find(l => l.label === label);
+  assert.equal(out.early, false); assert.equal(out.daysAfter, 20, 'from tomorrow to the 30th');
+  assert.equal(by('H none'), undefined, 'a segment with no target is not listed');
+  assert.equal(by('A on track').advice, 'keep'); assert.match(by('A on track').text, /On track for 120%: about 15 by the end \(150% of 10\)/);
+  assert.equal(by('B push').advice, 'push'); assert.match(by('B push').text, /^Push 100%: 14 more \(1 a day\)\. About 18 by the end \(90% of 20\)/); assert.deepEqual(by('B push').next, { level: 100, remaining: 14 });
+  assert.equal(by('C far').advice, 'far'); assert.match(by('C far').text, /Unlikely to reach 70%: it needs 12 more \(1 a day\), about 3 times the current pace\. Put the effort on the others/);
+  assert.equal(by('D done').advice, 'stop'); assert.match(by('D done').text, /top level \(120%\) is reached\. More sales here add nothing/);
+  assert.equal(by('E capped done').advice, 'stop'); assert.match(by('E capped done').text, /top level \(100%\)/, 'a segment that stops at 100% is done at 100%');
+  assert.equal(by('F capped on track').advice, 'keep'); assert.match(by('F capped on track').text, /On track for 100%/, 'the cap is the top, so 120% is never asked');
+  assert.equal(by('G not worth').advice, 'keep'); assert.match(by('G not worth').text, /Likely 100%\. 120% needs 53 more .*about 4 times the current pace: not worth chasing/);
+  assert.deepEqual(out.lines.map(l => l.advice), ['push', 'keep', 'keep', 'keep', 'far', 'stop', 'stop'], 'push first, then keep, then far, then done');
+  assert.equal(out.target, 90); assert.equal(out.sold, 40); assert.equal(out.projected, 15 + 18 + 6 + 36 + 15 + 9 + 21, 'the total adds the lines (a finished line keeps going at its own pace)');
+  assert.equal(out.projectedPct, Math.round(out.projected / out.target * 100));
+  // the first days of the month: no projection, only what the next level needs
+  const early = FC.forecast([inp('A', 10, 1, [7, 10, 12])], '2026-11', '2026-11-02');
+  assert.equal(early.early, true); assert.equal(early.projected, undefined); assert.equal(early.lines[0].projected, undefined);
+  assert.match(early.lines[0].text, /70% needs 6 more \(1 every 4 days\)\. Too early in the month to project\./); assert.equal(early.lines[0].advice, 'keep');
+  // nothing sold yet: a small gap is worth pushing, a big one is not
+  assert.equal(FC.forecast([inp('A', 3, 0, [2, 3, 4])], '2026-11', '2026-11-10').lines[0].advice, 'push');
+  const none = FC.forecast([inp('A', 30, 0, [21, 30, 36])], '2026-11', '2026-11-10').lines[0];
+  assert.equal(none.advice, 'far'); assert.match(none.text, /a pace of selling nothing so far cannot reach/);
+  // the last day of the month: today is all that is left
+  assert.equal(FC.forecast([inp('A', 10, 8, [7, 10, 12])], '2026-11', '2026-11-30').daysAfter, 1);
+  // from the real targets: two people added up; a highest level of 100% makes 100% the top
+  const mk = (id, cap) => ({ personId: id, month: '2026-11', source: 'manual', importedAt: '2026-11-01T00:00:00.000Z', lines: [{ segment: 'low', target: 10, achieved: 5, ...(cap ? { cap } : {}) }] });
+  let st = D.emptyState();
+  st = G.putTarget(G.putTarget(st, mk('p1')), mk('p2'));
+  let o = FC.outlookFor(st, ['p1', 'p2'], '2026-11-10');
+  assert.equal(o.target, 20); assert.equal(o.sold, 10); assert.equal(o.lines.length, 1); assert.match(o.lines[0].text, /On track for 120%/);
+  assert.equal(FC.outlookFor(st, ['p1'], '2026-11-10').target, 10, 'one person only');
+  assert.equal(FC.outlookFor(st, ['nobody'], '2026-11-10'), undefined, 'no target: no outlook');
+  st = G.putTarget(G.putTarget(D.emptyState(), mk('p1', 100)), mk('p2', 100));
+  o = FC.outlookFor(st, ['p1', 'p2'], '2026-11-10');
+  assert.match(o.lines[0].text, /On track for 100%/, 'both capped at 100%: the top is 100%');
+  st = G.putTarget(G.putTarget(D.emptyState(), mk('p1', 100)), mk('p2'));
+  assert.match(FC.outlookFor(st, ['p1', 'p2'], '2026-11-10').lines[0].text, /On track for 120%/, 'one of them has no limit: 120% still counts');
+  console.log('month outlook ok');
 }

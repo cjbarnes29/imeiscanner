@@ -967,3 +967,7 @@ html[data-theme=rose]{--g1:#e05c8c;--g2:#d64278;--g3:#d9608c;--g4:#d75887;--g5:#
 .gl-person{border-top:1px solid #1f2f44;padding-top:10px;margin-top:10px;display:grid;gap:8px}
 .gl-person label{display:grid;gap:4px}.gl-person .tg-fields input{width:100%;text-align:center;font-size:18px}
 .gl-off{display:flex!important;align-items:center;gap:8px;font-size:14px;color:#c9d5e3}.gl-off input{width:22px;height:22px}
+/* Home: month outlook */
+.fc-group h4{margin:12px 0 4px;font-size:14px;color:#c9d5e3;font-weight:600}
+.fc-line{display:grid!important;gap:2px;padding:6px 0;border-top:1px solid #1f2f44}.fc-line small{color:#9fb3c8;line-height:1.45}
+.fc-push h4{color:#7fd6b0}.fc-far h4{color:#f2c879}.fc-stop h4{color:#9fb3c8}

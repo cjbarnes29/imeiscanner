@@ -9,7 +9,8 @@ import { canonColour, coloursText as colourBox, parseColoursText, setModelColour
 import { segLabel, segmentIds } from './retail/segments';
 import { reportItems } from './retail/stockreport';
 import { overallDashboard, todayDashboard } from './retail/dashboard';
-import { perDayText } from './retail/pace';
+import { perDayText, MIN_PACE_DAYS } from './retail/pace';
+import { outlookFor, type Advice } from './retail/forecast';
 import { daysInMonth, localDay, monthOf, type CatalogItem, type Segment } from './retail/types';
 import { GivesTab, DataTab } from './RetailHub2';
 import { ReportTab } from './RetailReport';
@@ -34,6 +35,8 @@ export function RetailHub(ctx: RetailCtx & { sub?: RetailSub; openSub?: (sub: Re
   </div>;
 }
 
+const FC_TITLE: Record<Advice, string> = { push: 'Push these', keep: 'Keep the pace', far: 'Hard to reach: focus elsewhere', stop: 'Done: stop pushing' };
+
 // ---- Today -------------------------------------------------------------------------------------------------------------------------------
 function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
   const { state, records, today } = ctx;
@@ -48,6 +51,7 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
   const overall = useMemo(() => overallDashboard(state, people.map(p => p.id), today), [state, people, today]);
   const forWho = useMemo(() => ({ ...state, settings: { ...state.settings, myPersonId: who } }), [state, who]);
   const dash = useMemo(() => todayDashboard(forWho, records, today, ctx.counts), [forWho, records, today, ctx.counts]);
+  const outlook = useMemo(() => outlookFor(state, everyone ? people.map(p => p.id) : [who], today), [state, people, today, everyone, who]);
   const check = useMemo(() => (state.report ? reconcile(state, state.report, records).summary : null), [state, records]);
   const low = useMemo(() => (state.report ? reportItems(state.report).filter(i => i.stock > 0 && i.stock <= state.settings.lowStock) : []), [state]);
   const tick = (id: string, done: boolean) => ctx.change(updateDay(state, today, d => ({ ...d, checklist: { ...d.checklist, [id]: !done }, custom: d.custom.map(c => c.id === id ? { ...c, done: !done } : c) })), '');
@@ -80,6 +84,11 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
       {who && !dash.summary && <p className="settings-help">No target for {whoName} this month yet. Set it in Targets.</p>}
       {dash.priorities.map(p => <p key={p.segment} className="retail-priority">{p.message}</p>)}
       {dash.summary && !dash.priorities.length && <p className="settings-help">{whoName}’s {state.settings.myThreshold}% target is reached in every segment.</p>}
+    </section>}
+    {outlook && <section className="retail-card fc-card" aria-label="Month outlook"><h3>Month outlook: {everyone ? 'everyone' : whoName}</h3>
+      <p className="settings-help">{outlook.early ? `Too early to project (the first ${MIN_PACE_DAYS - 1} days of the month): each line only says what its next level needs.` : `If sales keep the pace of the month so far, ${everyone ? 'everyone ends' : `${whoName} ends`} at about ${outlook.projectedPct}% (${outlook.projected} of ${outlook.target}). A guess from the pace so far, not a promise.`}</p>
+      {(['push', 'keep', 'far', 'stop'] as Advice[]).map(group => { const rows = outlook.lines.filter(l => l.advice === group); return rows.length > 0 && <div key={group} className={`fc-group fc-${group}`}><h4>{FC_TITLE[group]}</h4>
+        <ul className="retail-list">{rows.map(l => <li key={l.segment} className="fc-line"><strong>{l.label} <small>{l.sold} of {l.target}</small></strong><small>{l.text}</small></li>)}</ul></div>; })}
     </section>}
     <section className="retail-card"><h3>Report</h3>
       {!state.report && <p className="settings-help">No report yet. Paste your WhatsApp report in Report: it is checked against the phones you scanned.</p>}
