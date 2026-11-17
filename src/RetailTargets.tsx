@@ -54,7 +54,7 @@ export function TargetsTab(ctx: RetailCtx) {
   };
   /** A new month starts from the last one: targets and levels come over for everyone, sold starts at 0. */
   const startMonth = () => {
-    const r = startFromLastMonth(state, month);
+    const r = startFromLastMonth(state, month, people.map(p => p.id));
     if (!r.added) { ctx.notify('Nothing to copy: this month already has its targets (or last month had none).'); return; }
     ctx.change(r.state, 'targets from last month');
     ctx.notify(`${r.added} target line${r.added === 1 ? '' : 's'} copied from last month. Sold starts at 0.`);

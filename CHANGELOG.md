@@ -2,6 +2,12 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — fixes from a code review (Android and web)
+- A colour taught for every model no longer overrides a model whose own colours already fit.
+- A phone sold or held and later brought back keeps its place; a deleted phone no longer hides a later real scan of the same kind.
+- Start from last month skips people who were deleted; Same as last month ignores levels-only lines.
+- Held phones have a **Put back in stock** button. The Back button no longer gets stuck after a screen restore. The Sold prompt is faster with 1,000 phones.
+
 ## Unreleased — safety (Android and web)
 - **Sales record:** it is no longer cut off at 5,000 sales when saving (the newest sales could have been counted twice). It now keeps up to 100,000.
 

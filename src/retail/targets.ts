@@ -166,16 +166,17 @@ export const suggestedLevels = (target: number): Partial<Record<Level, number>> 
 
 /** This person's line for a segment in the month before (target and levels; never sold), when there is one. */
 export const lastMonthLine = (state: { targets: Record<Month, Record<string, PersonTarget>> }, month: Month, personId: string, segment: Segment): TargetLine | undefined =>
-  state.targets[prevMonth(month)]?.[personId]?.lines.find(l => l.segment === segment && (l.target > 0 || !!l.levels));
+  state.targets[prevMonth(month)]?.[personId]?.lines.find(l => l.segment === segment && l.target > 0);
 
 /**
  * A new month starts from the last one: every person's target and levels of last month are copied into this month where this month has none yet.
  * Sold always starts at 0 (it is counted again from the phones). Nothing that is already typed for this month is touched.
  */
-export function startFromLastMonth<S extends { targets: Record<Month, Record<string, PersonTarget>> }>(state: S, month: Month): { state: S; added: number } {
+export function startFromLastMonth<S extends { targets: Record<Month, Record<string, PersonTarget>> }>(state: S, month: Month, knownPeople?: string[]): { state: S; added: number } {
   const last = state.targets[prevMonth(month)] || {};
   let next = state, added = 0;
   for (const [personId, person] of Object.entries(last)) {
+    if (knownPeople && !knownPeople.includes(personId)) continue; // a person who was deleted since
     const base = next.targets[month]?.[personId] || emptyTarget(personId, month, 'manual', new Date().toISOString(), []);
     let lines = base.lines;
     for (const line of person.lines) {

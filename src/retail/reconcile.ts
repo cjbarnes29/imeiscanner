@@ -157,12 +157,11 @@ function checkLine(state: RetailState, index: Map<string, CatalogItem>, byCode: 
     else if (scans.length !== item.stock) issues.push({ kind: 'stock-differs', text: `Report stock ${item.stock}, scanned ${scans.length}${scans.length > item.stock ? ' (more than the report)' : ''}.` });
   }
 
+  const names = item.kind === 'colour' ? modelColourNames(state, model.code, scanned.colours.map(c => c.name).filter(n => n !== 'No colour')) : [];
   if (item.kind === 'colour') {
-    const names = modelColourNames(state, model.code, scanned.colours.map(c => c.name).filter(n => n !== 'No colour'));
     partMatch = item.parts.map(p => (p.label ? resolveColour(state, model.code, p.label, names) : null));
   }
   if (item.kind === 'colour' && scans.length && scanned.colours.some(c => c.name !== 'No colour')) {
-    const names = modelColourNames(state, model.code, scanned.colours.map(c => c.name).filter(n => n !== 'No colour'));
     const seen = new Set<string>();
     item.parts.forEach((p, k) => {
       const name = partMatch[k];

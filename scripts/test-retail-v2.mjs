@@ -297,10 +297,16 @@ const R = await load('retail/reportsync'), H = await load('retail/dashboard');
   // a phone of a model the report does not list leaves the stock (sold) and comes back (undo): it is not a new scan, so no new line appears
   const other = phone('SM-A175F', '128GB', 'Black');
   const repOther = R.withBaseline(st7, P.parseReport(text7), [...before7, other]);
-  const goneO = R.syncScans(st7, repOther, before7);
-  assert.equal(goneO.report, repOther, 'a phone that is not in the report leaving the stock changes nothing and does not loop');
+  const soldState = { ...st7, recordMeta: { [other.id]: { status: 'sold' } } };
+  const goneO = R.syncScans(soldState, repOther, [...before7, other]);
+  assert.equal(goneO.report, repOther, 'a phone that is not in the report leaving the stock (sold) changes nothing and does not loop');
   const back = R.syncScans(st7, goneO.report, [...before7, other]);
   assert.equal(back.created, 0, 'coming back from Sold does not make a new line'); assert.equal(back.report, repOther, 'and nothing changes');
+  // a phone that was DELETED is forgotten: a later real scan of the same kind is a new scan, not hidden by the old one
+  const deleted = R.syncScans(st7, repOther, before7);
+  assert.equal(deleted.report.scanBase['A175|128GB|Black'], undefined, 'a deleted phone leaves the baseline');
+  const again = R.syncScans(st7, deleted.report, [...before7, phone('SM-A175F', '128GB', 'Black')]);
+  assert.equal(again.created, 1, 'a new scan of the same model, storage and colour is counted'); 
   // a colour the line does not have gets its own entry
   const more7b = [...more7, phone('SM-A075F', '64GB', 'Mint')];
   const r2 = R.syncScans(st7, r1.report, more7b);
@@ -492,4 +498,18 @@ console.log('retail v2: all checks passed');
   for (let i = 0; i < 6000; i++) ledger['r' + i] = { personId: 'p1', segment: 'low', month: '2026-11', code: 'A075', storage: '64GB' };
   assert.equal(Object.keys(D.cleanState({ soldLedger: ledger }).soldLedger).length, 6000, 'all 6000 sales are kept');
   console.log('ledger size ok');
+}
+
+// review fixes: a colour taught for every model does not override a model whose own colours fit; last-month copies skip deleted people and levels-only lines
+{
+  const t = K.teachColourEverywhere(D.emptyState(), 'BLK', 'Phantom Black', 'X999');
+  assert.deepEqual(K.resolveColourWhy(t, 'Y111', 'BLK', ['Black']), { name: 'Black', source: 'fit' }, "the model's own colour fits, so the global answer does not override it");
+  assert.deepEqual(K.resolveColourWhy(t, 'Y111', 'BLK', []), { name: 'Phantom Black', source: 'taught' }, 'with nothing to fit, the answer given for every model is used');
+  const tg = (month, id, lines) => ({ personId: id, month, lines, source: 'manual', importedAt: '2026-01-01T00:00:00.000Z' });
+  const st = { ...D.emptyState(), targets: { '2026-10': { gone: tg('2026-10', 'gone', [{ segment: 'low', target: 5, achieved: 1 }]), here: tg('2026-10', 'here', [{ segment: 'low', target: 7, achieved: 0 }, { segment: 'mid', target: 0, achieved: 0, levels: { 70: 3 } }]) } } };
+  const r = G.startFromLastMonth(st, '2026-11', ['here']);
+  assert.equal(r.added, 1, 'only the person who still exists'); assert.equal(r.state.targets['2026-11'].gone, undefined, 'a deleted person is not copied');
+  assert.equal(G.lastMonthLine(st, '2026-11', 'here', 'mid'), undefined, 'a levels-only line is not a last-month target');
+  assert.equal(G.lastMonthLine(st, '2026-11', 'here', 'low').target, 7);
+  console.log('review fixes ok');
 }

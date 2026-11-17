@@ -28,6 +28,19 @@ export function scanCounts(state: RetailState, records: StockSource[]): Record<s
   return out;
 }
 
+/** model | storage | colour -> how many phones exist at all (in stock or not): tells a phone that left the stock from one that was deleted. */
+function existCounts(state: RetailState, records: StockSource[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const source of records) {
+    const item = itemFor(state, source.model);
+    if (!item) continue;
+    const v = variantOf(state, source);
+    const key = `${item.code}|${unit(v.storage)}|${canonColour(v.color) || NO_COLOUR}`;
+    out[key] = (out[key] || 0) + 1;
+  }
+  return out;
+}
+
 /** The report with the phones scanned so far taken as already in it (used right after pasting). */
 export const withBaseline = (state: RetailState, report: StockReport, records: StockSource[]): StockReport => ({ ...report, scanBase: scanCounts(state, records) });
 
@@ -96,7 +109,8 @@ export function syncScans(state: RetailState, report: StockReport, records: Stoc
     else if (delta > 0) { const k = `${code}|${storage}`; const m = fresh.get(k) || new Map<string, number>(); m.set(colour, (m.get(colour) || 0) + delta); fresh.set(k, m); }
   }
   const nextBase: Record<string, number> = { ...cur };
-  for (const key of unabsorbed) nextBase[key] = base[key];
+  // a phone that only left the stock (sold, held) keeps its baseline, so it is not a "new scan" when it comes back; a deleted one is forgotten
+  if (unabsorbed.size) { const exist = existCounts(state, records); for (const key of unabsorbed) if ((exist[key] || 0) >= base[key]) nextBase[key] = base[key]; }
   if (!added && !removed && !fresh.size && sameCounts(nextBase, base)) return { report, added: 0, removed: 0, created: 0 };
   let entries = report.entries.map(e => (e.t === 'item' ? works.get(e.id)!.item : e));
   let created = 0;

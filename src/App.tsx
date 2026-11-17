@@ -1931,7 +1931,7 @@ export default function App() {
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
   const [expectedProducts, setExpectedProducts] = useState(() => { try { const n = Number(localStorage.getItem('imei-lens-expected-products')); return Number.isInteger(n) && n >= 0 && n <= 12 ? n : 0; } catch { return 0; } });
-  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>(() => { try { return 'standard'; } catch { return 'standard'; } });
+  const [scanMode, setScanMode] = useState<'fast' | 'standard' | 'detailed'>('standard'); // one speed: Standard (see CHANGELOG)
   // Camera scans use these in the page; Choose photos and scan uses them in the phone's own scanner (same two settings).
   useEffect(() => {
     try { localStorage.setItem('imei-lens-expected-products', String(expectedProducts)); localStorage.setItem('imei-lens-scan-speed', scanMode); } catch { /* storage full or blocked */ }
@@ -2559,10 +2559,10 @@ export default function App() {
   const [waSend, setWaSend] = useState<{ id: string; name: string; rows: RecordItem[] } | null>(null);
   /** Records already sent to WhatsApp for this person (remembered between visits). */
   const [waSent, setWaSent] = useState<string[]>([]);
-  /** After a send: "Mark them as Sold?" (ids of the phones that went out; done = they were marked, Undo is offered). */
   /** Store only: new scans are kept as "Held": they do not touch the report, targets or Sold until you decide. */
   const [storeOnly, setStoreOnly] = useState(() => localStorage.getItem('imeilens.storeOnly') === 'on');
   const seenIds = useRef<Set<string> | null>(null);
+  /** After a send: "Mark them as Sold?" (ids of the phones that went out; done = they were marked, Undo is offered). */
   const [soldOffer, setSoldOffer] = useState<{ ids: string[]; done: boolean } | null>(null);
   /** A send that was just opened: which pictures it carried, and how many the user says arrived. */
   const [waAttempt, setWaAttempt] = useState<{ ids: string[]; arrived: number; channel: 'whatsapp' | 'bluetooth' } | null>(null);
@@ -2682,15 +2682,17 @@ export default function App() {
   /** After a send: offer to mark the phones that went out as Sold (never automatic: a send can also be a transfer or a check). */
   function offerSold(ids: string[]) {
     if (localStorage.getItem('imeilens.askSoldAfterSend') === 'off') return;
-    const open = ids.filter(id => records.some(row => row.id === id) && !retailRef.current.recordMeta[id]?.status);
+    const exists = new Set(records.map(r => r.id));
+    const open = ids.filter(id => exists.has(id) && !retailRef.current.recordMeta[id]?.status);
     if (open.length) setSoldOffer({ ids: open, done: false });
   }
   function soldOfferGroups(ids: string[]): { groups: SoldGroup[]; noOwner: number } {
     const map = new Map<string, SoldGroup>();
     let noOwner = 0;
+    const byId = new Map(records.map(r => [r.id, r] as const)), people = new Map(personGroups.map(p => [p.id, p] as const));
     for (const id of ids) {
-      const row = records.find(r => r.id === id); if (!row) continue;
-      const v = retailVariantOf(retailRef.current, row), owner = personGroups.find(p => p.id === row.personId);
+      const row = byId.get(id); if (!row) continue;
+      const v = retailVariantOf(retailRef.current, row), owner = people.get(row.personId);
       if (!owner) noOwner++;
       const model = [infoOf(row).name, v.storage].filter(Boolean).join(' '), who = owner ? personName(owner) : 'Unassigned', colour = retailCanonColour(v.color) || 'No colour';
       const key = model + '|' + who + '|' + colour;
@@ -3387,9 +3389,9 @@ export default function App() {
     if (!simpleView) { setMainView('results'); setRecordsTab('people'); }
   }
 
-  /** The phones a bulk action applies to: the ticked ones, or everything shown when none are ticked. */
   /** Phones kept as Held (store only): not in the report, targets or Sold. */
   const heldIds = records.filter(r => retail.recordMeta[r.id]?.status === 'held').map(r => r.id);
+  /** The phones a bulk action applies to: the ticked ones, or everything shown when none are ticked. */
   const bulkTargets = () => (selectedRows.length ? selectedRows : visible);
   const bulkCropRows = () => selectedRows.length ? selectedRows : records.some(needsCropping) ? records.filter(needsCropping) : visible;
   const bulkCropLabel = selectedRows.length ? `${selectedRows.length} ticked` : records.some(needsCropping) ? `${records.filter(needsCropping).length} need cropping` : `all ${visible.length} shown`;
@@ -5316,7 +5318,7 @@ export default function App() {
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
 
-              {heldIds.length > 0 && <div className="held-bar" role="group" aria-label="Held phones"><span><b>{heldIds.length}</b> held phone{heldIds.length === 1 ? '' : 's'} · stored only, not in the report, targets or Sold</span><button type="button" className="subtle-btn" onClick={() => openSharing(heldIds)}>Release (share)</button></div>}
+              {heldIds.length > 0 && <div className="held-bar" role="group" aria-label="Held phones"><span><b>{heldIds.length}</b> held phone{heldIds.length === 1 ? '' : 's'} · stored only, not in the report, targets or Sold</span><button type="button" className="subtle-btn" onClick={() => openSharing(heldIds)}>Release (share)</button><button type="button" className="subtle-btn" onClick={() => { changeRetail(retailSetMeta(retailRef.current, heldIds, { status: '' as never }), 'held back in stock'); setToast(`${heldIds.length} held phone${heldIds.length === 1 ? '' : 's'} are back in stock and count in the report again.`); }}>Put back in stock</button></div>}
               {<div className="select-toggle"><button type="button" className="subtle-btn" aria-pressed={selectMode} onClick={() => { if (selectMode) { setSelectOn(false); setSelectedIds([]); } else setSelectOn(true); }}>{selectMode ? `Done${selectedRows.length ? ` (${selectedRows.length} selected)` : ''}` : 'Select'}</button></div>}
               <div className={`action-bar${selectMode ? ' show' : ''}`} role="group" aria-label="Actions for selected phones">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>

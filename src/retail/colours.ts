@@ -47,17 +47,17 @@ export function modelColourNames(state: Pick<RetailState, 'colours' | 'catalog'>
 
 export type ColourWhy = { name: string; source: 'model' | 'taught' | 'fit' | 'dictionary' };
 /**
- * What a report abbreviation means for this model, and why: (1) what the person taught for this model, (2) what they taught for every model, (3) the best
- * fit among the model's own colours (scanned, catalog), (4) the built-in dictionary of Samsung colours. Null when none says (or two fit equally).
+ * What a report abbreviation means for this model, and why: (1) what the person taught for this model, (2) the best fit among the model's own colours
+ * (scanned, catalog: so one correction for every model cannot break a model whose colours already fit), (3) what they taught for every model, (4) the built-in dictionary of Samsung colours. Null when none says (or two fit equally).
  */
 export function resolveColourWhy(state: Pick<RetailState, 'colours' | 'colourAliases'>, code: string, label: string, names: string[]): ColourWhy | null {
   const key = letters(label);
   const own = entry(state, code).aliases[key];
   if (own) return { name: own, source: 'model' };
-  const taught = state.colourAliases?.[key];
-  if (taught) return { name: taught, source: 'taught' };
   const fit = bestColour(label, names);
   if (fit) return { name: fit, source: 'fit' };
+  const taught = state.colourAliases?.[key];
+  if (taught) return { name: taught, source: 'taught' };
   const dict = dictionaryExact(label);
   return dict ? { name: dict, source: 'dictionary' } : null;
 }

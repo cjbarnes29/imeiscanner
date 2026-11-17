@@ -23,7 +23,7 @@ export function useBackNav(view: string, restore: (view: string) => void) {
     if (history.state === null) history.replaceState({ v: current.current }, '');
     const onPop = (event: PopStateEvent) => {
       const next = event.state?.v;
-      if (typeof next === 'string' && next !== current.current) { skip.current = true; restoreRef.current(next); }
+      if (typeof next === 'string' && next !== current.current) { skip.current = true; restoreRef.current(next); setTimeout(() => { skip.current = false; }, 400); }
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
