@@ -20,6 +20,12 @@ export type RetailCtx = {
   notify: (text: string) => void;
   /** A WhatsApp report shared to the app as text: opens Reports with it filled in. */
   sharedText?: string;
+  /** The screen's Show all toggle (summary is the default). */
+  expanded?: boolean;
+  modelSources?: { code: string; name: string }[];
+  saveModelName?: (code: string, name: string) => boolean;
+  resetModelName?: (code: string) => boolean;
+  openModelSources?: () => void;
   /** Shows these phones in Records (a filter such as `day:2026-11-15`). */
   openRecords: (filter: string) => void;
   download: (blob: Blob, name: string) => void;

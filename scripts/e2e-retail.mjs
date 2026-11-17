@@ -49,14 +49,17 @@ const body=()=>run(`document.body.innerText`);
 const stat=name=>run(`(()=>{const d=[...document.querySelectorAll('.retail-stats > div')].find(x=>x.querySelector('span')?.textContent===${JSON.stringify(name)});return d?d.querySelector('strong').textContent:null;})()`);
 const readDb=key=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const db=o.result;const s=db.transaction('inventory').objectStore('inventory');const q=${key.endsWith(':')?`s.getAll(IDBKeyRange.bound(${JSON.stringify(key)},${JSON.stringify(key)}+'\\uffff'))`:`s.get(${JSON.stringify(key)})`};q.onsuccess=()=>{db.close();res(q.result);};};})`);
 const owners=async()=>Object.fromEntries((await readDb('record:')).map(r=>[r.id,r.personId]));
-const nav=label=>click('.bottom-nav button',label);
-const more=async label=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await waitFor(`!!document.querySelector('.more-list')`,'the More menu');await click('.more-list button',label);};
+const expandScreen=async()=>{await sleep(100);await run(`document.querySelector('button[aria-label="Show all details"]')?.click()`);await sleep(100);};
+const nav=async label=>{await click('.bottom-nav button',label);await expandScreen();};
+const more=async label=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await waitFor(`!!document.querySelector('.more-list')`,'the More menu');if(['Segments','Catalog'].includes(label)){await click('.more-list button','Models & segments');await waitFor(`!!document.querySelector('.model-manager')`,'model manager');await click('.model-manager .give-tabs button',label==='Catalog'?'All models':'By segment');}else if(['Give and share','People'].includes(label)){await click('.more-list button','People & sharing');await waitFor(`!!document.querySelector('.people-sharing-tabs')`,'people and sharing');if(label==='Give and share')await click('.people-sharing-tabs button','Suggested');}else if(label.startsWith('Backup')){await click('.more-list button','Settings & backup');await waitFor(`!!document.querySelector('.settings-modal')`,'settings');await click('.settings-modal button','Backup, restore & history');await waitFor(`!!document.querySelector('.retail-data')`,'backup screen');}else await click('.more-list button',label);await expandScreen();};
 // Home, Report and Targets are on the bottom bar; Gives, Segments, Catalog and Backup are under the ⋯ More menu
 const sub=async label=>{if(label==='Today')return nav('Home');if(label==='Report'||label==='Targets')return nav(label);return more(label==='Data'?'Backup':label);};
 const shot=async name=>{if(!process.env.SHOTS)return;await sleep(400);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});(await import('node:fs')).writeFileSync(join(process.env.SHOTS,name+'.png'),Buffer.from(r.result.data,'base64'));};
+const shotRegion=async(name,expr)=>{if(!process.env.SHOTS)return;await sleep(500);await run(`document.querySelectorAll('.bottom-nav,.toast').forEach(e=>e.style.visibility='hidden')`);try{const clip=await run(`(()=>{const r=(${expr}).getBoundingClientRect();return {x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height,scale:1};})()`);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip});(await import('node:fs')).writeFileSync(join(process.env.SHOTS,name+'.png'),Buffer.from(r.result.data,'base64'));}finally{await run(`document.querySelectorAll('.bottom-nav,.toast').forEach(e=>e.style.removeProperty('visibility'))`);}};
 const results=[];const ok=n=>{results.push(n);console.log('PASS:',n);};
 try{
   await send('Page.enable');
+  await send('Emulation.setDeviceMetricsOverride',{width:411,height:900,deviceScaleFactor:1,mobile:true});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`if(!localStorage.getItem('e2e-seeded')){localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('e2e-seeded','1');}localStorage.setItem('retaillens-theme-v1','${process.env.THEME||'mint'}');`});
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'load');
@@ -67,7 +70,7 @@ try{
   await run(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent));if(b)b.click();return true;})()`);
   // the scanning screen comes first and the brand is RetailLens
   await waitFor(`!!document.querySelector('.bottom-nav')`,'bottom nav');
-  assert.match(await run(`document.querySelector('.brand')?.innerText||''`),/RETAILLENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./);
+  assert.match(await run(`document.querySelector('.brand')?.textContent||''`),/RETAILLENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./i);
   assert.match(await run(`document.title`),/RetailLens/);
   ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
 
@@ -79,8 +82,8 @@ try{
   assert.ok(!/Scanned records/.test(await run(`document.querySelector('.results').innerText`)),'no "Scanned records" header on Home');
   await run(`document.querySelector('button[aria-label="More"]').click()`);
   await waitFor(`!!document.querySelector('.more-list')`,'More menu');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People','Give and share','Segments','Catalog','Backup and data','Settings'],'the More menu');
-  await shot('10-more');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People & sharing','Models & segments','Settings & backup'],'the consolidated More menu');
+  await shotRegion('10-more',`document.querySelector('.more-sheet')`);
   await run(`document.querySelector('.more-sheet [aria-label="Close"]').click()`);
 
   // Home says whose month it is, with a person switcher
@@ -195,6 +198,11 @@ try{
   await click('button','+ New segment');
   await waitFor(`/already a segment with that name/.test(document.body.innerText)`,'duplicate refused');
   ok('a segment is made, models are ticked into it, and a second one with the same name is refused');
+  await click('button[aria-label="Show fewer details"]','Show less');
+  await waitFor(`document.querySelector('.retail-segments > .screen-extra').getBoundingClientRect().height===0`,'segment controls are collapsed');
+  assert.match(await run(`document.querySelector('[aria-label="Models in Fold 1"] .seg-model-summary').innerText`),/Galaxy S26 Ultra/,'the segment lists its assigned models directly');
+  await shotRegion('segments-summary',`document.querySelector('.retail-segments')`);
+  await expandScreen();
 
   // ---------- Targets: level chips and one line per segment ----------
   await sub('Targets');
@@ -256,8 +264,27 @@ try{
   assert.ok(!/The top level here/.test(await run(`document.querySelector('.retail-targets').innerText`)), 'no limit at first');
   await setVal('select[aria-label="Highest level for Carlou Test"]', '100');
   await waitFor(`/The top level here is 100%/.test(document.querySelector('.retail-targets').innerText)`, 'the highest level shows');
+  await click('button', '← All segments');
+  const foldCard = `[...document.querySelectorAll('.tg-seg')].find(b=>b.getAttribute('aria-label')==='Open Fold 1')`;
+  await waitFor(`${foldCard}?.innerText.includes('Caps vary by person')`, 'different caps are visible on the overview');
+  assert.match(await run(`${foldCard}.querySelector('.tg-people').innerText`), /Carlou Test[\s\S]*Cap 100%/);
+  await run(`${foldCard}.click()`); await click('button', 'Edit levels');
   await run(`document.querySelector('button[aria-label="Copy the highest level of Carlou Test to everyone"]').click()`);
   await waitFor(`(document.querySelector('.retail-targets').innerText.match(/The top level here is 100%/g)||[]).length===2`, 'the highest level was copied to Asha');
+  await click('button', '← All segments');
+  await waitFor(`${foldCard}?.querySelector('.tg-cap-badge')?.textContent==='Cap 100%'`, 'the shared cap is on the segment card');
+  assert.match(await run(`${foldCard}.querySelector('.tg-need').innerText`), /for 100%/);
+  assert.doesNotMatch(await run(`${foldCard}.querySelector('.tg-finish').innerText`), /120%/, 'finish dates stop at the cap');
+  await shotRegion('targets-capped-overview',foldCard);
+  await click('button[aria-label="Show fewer details"]','Show less');
+  await waitFor(`${foldCard}?.offsetParent!==null&&!document.querySelector('.retail-targets > .screen-extra').offsetParent`,'segments come first in the compact view');
+  assert.equal(await run(`${foldCard}.querySelector('.tg-people').getBoundingClientRect().height`),0,'per-person details are hidden until Show all');
+  await shotRegion('targets-simple',`document.querySelector('.retail-targets')`);
+  await shot('targets-simple-screen');
+  await expandScreen();
+  await click('button', '70');
+  assert.equal(await run(`${foldCard}.querySelector('.tg-cap-badge').textContent`), 'Cap 100%', 'the cap stays visible below the selected level');
+  await run(`${foldCard}.click()`); await click('button', 'Edit levels');
   await click('button', '70');
   await waitFor(`!/The top level here/.test(document.querySelector('.retail-targets').innerText)`, 'asking for 70 is below the top, so it is a normal line');
   await click('button', '120');
@@ -266,6 +293,7 @@ try{
   await waitFor(`!/The top level here/.test(document.querySelector('.retail-targets').innerText)&&/For 120%/.test(document.querySelector('.retail-targets').innerText)`, 'no limit again');
   await click('button', '90');
   ok('a segment can stop at 100%: 120 then shows "The top level here is 100%", it copies to everyone, and "No limit" puts it back');
+  ok('target overview shows common and per-person caps, uses the effective percentage and stops finish dates at the cap');
   await click('button', '← All segments');
   await waitFor(`!!document.querySelector('.tg-segs')`, 'back to the list');
 
@@ -308,26 +336,29 @@ try{
 
   // Edit all: every person and segment on one screen
   await click('button', 'Edit all targets and sold');
-  await waitFor(`!!document.querySelector('.tg-grid')`, 'the Edit all grid');
-  const head = await run(`[...document.querySelectorAll('.tg-grid thead th')].map(t=>t.childNodes[0].textContent.trim())`);
-  assert.ok(head.includes('Fold 1') && head.includes('Tablet') && head.includes('Total'), 'a column per segment: ' + head.join(','));
-  assert.deepEqual(await run(`[...document.querySelectorAll('.tg-grid tbody th')].map(t=>t.textContent.trim())`), ['Carlou Test', 'Asha Test'], 'a row per person');
+  await waitFor(`!!document.querySelector('.tg-people-grid')`, 'the Edit all screen');
+  const head = await run(`[...document.querySelectorAll('.tg-pcard:first-child .tg-rowname strong')].map(t=>t.textContent.trim())`);
+  assert.ok(head.includes('Fold 1') && head.includes('Tablet'), 'every segment has its name in the person card: ' + head.join(','));
+  assert.deepEqual(await run(`[...document.querySelectorAll('.tg-pcard:not(.tg-allcard) > .tg-top strong')].map(t=>t.textContent.trim())`), ['Carlou Test', 'Asha Test'], 'a card per person');
+  assert.equal(await run(`document.querySelectorAll('.tg-pcard:not(.tg-allcard) .tg-row').length`), head.length * 2, 'every person has a row for every segment');
+  assert.equal(await run(`[...document.querySelectorAll('.tg-row input, .tg-rowname strong')].every(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth;})`), true, 'segment labels and inputs fit the phone viewport');
+  await shotRegion('targets-edit-all',`document.querySelector('.tg-pcard')`);
   await setVal('input[aria-label="Target of Asha Test in Fold 1"]', '6');
-  await waitFor(`document.querySelector('.tg-grid tfoot').textContent.replace(/\\s+/g,'').includes('1/11')`, 'column total follows (1 sold of 5 + 6)');
+  await waitFor(`document.querySelector('[data-total="Fold 1"]').textContent.replace(/\\s+/g,'')==='1/11'`, 'column total follows (1 sold of 5 + 6)');
   await setVal('input[aria-label="Sold of Asha Test in Fold 1"]', '2');
-  await waitFor(`document.querySelector('.tg-grid tfoot').textContent.replace(/\\s+/g,'').includes('3/11')`, 'sold total follows');
+  await waitFor(`document.querySelector('[data-total="Fold 1"]').textContent.replace(/\\s+/g,'')==='3/11'`, 'sold total follows');
   await setVal('input[aria-label="Target of Asha Test in Fold 1"]', '5');
   await setVal('input[aria-label="Sold of Asha Test in Fold 1"]', '0');
-  await waitFor(`document.querySelector('.tg-grid tfoot').textContent.replace(/\\s+/g,'').includes('1/10')`, 'put back');
+  await waitFor(`document.querySelector('[data-total="Fold 1"]').textContent.replace(/\\s+/g,'')==='1/10'`, 'put back');
   await setVal('input[aria-label="Target of Carlou Test in Tablet"]', '0');
   await setVal('input[aria-label="Sold of Carlou Test in Tablet"]', '0');
   await waitFor(`document.querySelector('input[aria-label="Target of Carlou Test in Tablet"]').value==='0'`, 'the test line is cleared again');
   assert.equal(await run(`!!document.querySelector('.tg-cell-fin')`), true, 'a finish line under cells that have a target');
   await run(`document.querySelector('button[aria-label="Levels of Carlou Test in Fold 1"]').click()`);
-  await waitFor(`!!document.querySelector('input[aria-label="Target of Carlou Test"]')&&!document.querySelector('.tg-grid')`, 'Levels opens that segment');
+  await waitFor(`!!document.querySelector('input[aria-label="Target of Carlou Test"]')&&!document.querySelector('.tg-people-grid')`, 'Levels opens that segment');
   await click('button', '← All segments');
   await waitFor(`!!document.querySelector('.tg-segs')`, 'back to the list');
-  ok('Edit all: one row per person and one column per segment; typing target and sold saves at once and the totals follow; Levels opens the segment');
+  ok('Edit all: labeled segment rows fit the phone, targets and sold save at once, totals follow, and Levels opens the segment');
 
   // the Records screen shows the person's own segment name
   await nav('Phones');
@@ -436,6 +467,43 @@ try{
   assert.ok(await run(`document.querySelectorAll('.fc-card .fc-line').length>=1`), 'at least one segment line');
   assert.match(fcText, /Push these|Keep the pace|Hard to reach|Done: stop pushing/, 'the lines are grouped by what to do');
   ok('Home shows a month outlook: where each segment ends at this pace and which ones to push or leave');
+
+  // Backup: restoring says what is wrong with a file, tries an empty read again, and the same file can be chosen twice
+  await more('Backup');
+  await waitFor(`!!document.querySelector('.retail-data input[type=file]')`, 'the backup screen');
+  const fsx = await import('node:fs');
+  const emptyPath = join(tmpdir(), 'e2e-empty-backup.json'), junkPath = join(tmpdir(), 'e2e-junk.json'), goodPath = join(tmpdir(), 'e2e-good-backup.json');
+  fsx.writeFileSync(emptyPath, ''); fsx.writeFileSync(junkPath, '<html>not a backup</html>');
+  fsx.writeFileSync(goodPath, JSON.stringify({ app: 'RetailLens', version: 1, createdAt: '2026-11-17T10:00:00.000Z', state: {}, ledger: [] }));
+  const chooseBackup = async path => { const d = (await send('DOM.getDocument')).result; const n = (await send('DOM.querySelector', { nodeId: d.root.nodeId, selector: '.retail-data input[type=file]' })).result; await send('DOM.setFileInputFiles', { files: [path], nodeId: n.nodeId }); };
+  const alertText = () => run(`(document.querySelector('.retail-data [role=alert]')||{}).innerText||''`);
+  await chooseBackup(emptyPath);
+  await waitFor(`/is empty/.test(document.querySelector('.retail-data').innerText)`, 'an empty file is called empty', 30000);
+  assert.match(await alertText(), /e2e-empty-backup\.json.*wait a little and choose it again/s, 'it names the file and says what to do');
+  await chooseBackup(junkPath);
+  await waitFor(`/is not a RetailLens backup/.test(document.querySelector('.retail-data').innerText)`, 'a file that is not a backup is named');
+  assert.match(await alertText(), /e2e-junk\.json/);
+  await chooseBackup(goodPath);
+  await waitFor(`!!document.querySelector('[aria-label="Restore this backup"]')`, 'a good backup is accepted');
+  assert.equal(await alertText(), '', 'the old message is gone');
+  await click('button', 'Cancel');
+  await chooseBackup(goodPath);
+  await waitFor(`!!document.querySelector('[aria-label="Restore this backup"]')`, 'the same file can be chosen again');
+  await click('button', 'Cancel');
+  await chooseBackup(emptyPath);
+  await waitFor(`/Reading backup/.test(document.querySelector('.retail-data').innerText)`, 'an empty read is pending');
+  await chooseBackup(goodPath);
+  await waitFor(`!!document.querySelector('[aria-label="Restore this backup"]')`, 'a new selection replaces the pending read');
+  await sleep(5200);
+  assert.equal(await alertText(), '', 'the older empty read cannot overwrite the selected backup');
+  assert.equal(await run(`!!document.querySelector('[aria-label="Restore this backup"]')`), true, 'the newer backup stays ready');
+  await click('button', 'Cancel');
+  await run(`window.originalFileText=File.prototype.text;File.prototype.text=function(){return Promise.reject(new Error('unreadable'));}`);
+  await chooseBackup(goodPath);
+  await waitFor(`/could not be opened/.test(document.querySelector('.retail-data').innerText)`, 'a read failure is distinct from an empty file');
+  await run(`File.prototype.text=window.originalFileText;delete window.originalFileText`);
+  ok('restore: an empty file, a file that is not a backup and a good backup each get their own clear message, and the same file can be chosen again');
+  await nav('Home');
   // Assign by model: typed numbers (no plus / minus), paste keeps the digits, and a number can be copied to everyone
   await more('Give and share'); await click('.give-tabs button','By model');
   await waitFor(`!!document.querySelector('.models-list')`,'assign by model');
@@ -453,7 +521,7 @@ try{
   await waitFor(`!!document.querySelector('input[aria-label="Select r1.jpg"]')`,'phone list');
 
   // the colours of a model, typed once in the Catalog
-  await setVal('input[aria-label="Search models"]','a17 5g');
+  await setVal('input[aria-label="Search models and segments"]','a17 5g');
   await waitFor(`[...document.querySelectorAll('.retail-catalog .retail-list li')].some(l=>/A17 5G/.test(l.innerText))`,'A17 in the catalog');
   await run(`(()=>{const li=[...document.querySelectorAll('.retail-catalog .retail-list li')].find(l=>/A17 5G/.test(l.innerText)&&[...l.querySelectorAll('button')].some(x=>x.textContent.trim()==='Edit'));[...li.querySelectorAll('button')].find(x=>x.textContent.trim()==='Edit').click();return true;})()`);
   await waitFor(`!!document.querySelector('textarea[aria-label="Colours of this model"]')`,'the colours box');
@@ -530,6 +598,37 @@ try{
   await nav('Phones');
   await click('.sold-offer button','Undo');
   ok('after sending, the prompt lists what changes; Not now changes nothing; Mark as Sold adds to today in Targets');
+
+  // One model library: shared search, direct model editing, and names used by the scanner too.
+  await sub('Catalog');
+  await click('button','Import and Samsung catalog tools');
+  await waitFor(`document.querySelector('.settings-modal h2')?.textContent==='Model sources'`,'source tools');
+  assert.equal(await run(`[...document.querySelectorAll('.settings-modal button')].some(b=>b.textContent.startsWith('Check catalog'))`),true,'downloaded catalog management is retained');
+  assert.equal(await run(`[...document.querySelectorAll('.settings-modal button')].some(b=>b.textContent==='Import file…')`),true,'model import is retained');
+  await click('.settings-modal .modal-head button','Close');
+  await waitFor(`!document.querySelector('.settings-modal')&&!!document.querySelector('.model-manager')`,'return to the model library');
+  await sleep(300);
+  assert.equal(await run(`document.querySelector('.results .view-head h2').textContent`),'Models & segments','closing source tools keeps the current screen');
+  ok('Samsung catalog maintenance and model import remain available inside the consolidated model library');
+  await setVal('input[aria-label="Search models and segments"]','A176');
+  await waitFor(`document.querySelectorAll('.retail-catalog > section:not([role=dialog]) .retail-list li').length>=1`,'model library result');
+  const openA176 = async()=>{await run(`(()=>{const row=[...document.querySelectorAll('.retail-catalog .retail-list li')].find(li=>li.innerText.includes('A176')&&li.querySelector('button'));row.querySelector('button').click();})()`);await waitFor(`!!document.querySelector('[aria-label="Edit model"]')`,'shared model editor');};
+  await openA176();
+  const oldModelName=await run(`document.querySelector('[aria-label="Edit model"] input:not([disabled])').value`);
+  await setLabelVal('Name','Audit Galaxy A17');await click('[aria-label="Edit model"] button','Save');
+  assert.equal(await run(`JSON.parse(localStorage.getItem('imei-lens-custom-models'))['A176']`),'Audit Galaxy A17','model editor updates scanner model names');
+  await click('button','Import and Samsung catalog tools');
+  await waitFor(`!!document.querySelector('#bulk-models')`,'bulk model import');
+  await setVal('#bulk-models','SM-A176, Audit imported A17');await click('.settings-modal button','Add all');
+  await click('.settings-modal .modal-head button','Close');
+  await waitFor(`!document.querySelector('.settings-modal')&&document.querySelector('.retail-catalog').innerText.includes('Audit imported A17')`,'imported names update the shared editor too');
+  await openA176();await setLabelVal('Name',oldModelName);await click('[aria-label="Edit model"] button','Save');
+  await click('.model-manager .give-tabs button','By segment');
+  assert.match(await run(`document.querySelector('.retail-segments').innerText`),/A176/,'the same search works in the segment view');
+  await setVal('input[aria-label="Search models and segments"]','');
+  await click('button[aria-label="Show fewer details"]','Show less');
+  await shotRegion('models-and-segments',`document.querySelector('.model-manager')`);
+  ok('one model library searches both views, opens one editor and shares saved model names with the scanner');
 
   // ---------- Reload: everything persists, scan records untouched ----------
   await send('Page.navigate',{url:'http://localhost:4196/'});

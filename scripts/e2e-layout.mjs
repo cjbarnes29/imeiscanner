@@ -53,7 +53,7 @@ const stat=name=>run(`(()=>{const d=[...document.querySelectorAll('.retail-stats
 const readDb=key=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const db=o.result;const s=db.transaction('inventory').objectStore('inventory');const q=${key.endsWith(':')?`s.getAll(IDBKeyRange.bound(${JSON.stringify(key)},${JSON.stringify(key)}+'\\uffff'))`:`s.get(${JSON.stringify(key)})`};q.onsuccess=()=>{db.close();res(q.result);};};})`);
 const owners=async()=>Object.fromEntries((await readDb('record:')).map(r=>[r.id,r.personId]));
 const nav=label=>click('.bottom-nav button',label);
-const more=async label=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await waitFor(`!!document.querySelector('.more-list')`,'the More menu');await click('.more-list button',label);};
+const more=async label=>{await click('button[aria-label="More"]','');await waitFor(`!!document.querySelector('.more-list')`,'More menu');if(['Segments','Catalog'].includes(label)){await click('.more-list button','Models & segments');await waitFor(`!!document.querySelector('.model-manager')`,'model manager');await click('.model-manager .give-tabs button',label==='Catalog'?'All models':'By segment');}else if(['Give and share','People'].includes(label)){await click('.more-list button','People & sharing');await waitFor(`!!document.querySelector('.people-sharing-tabs')`,'people and sharing');if(label==='Give and share')await click('.people-sharing-tabs button','Suggested');}else if(label.startsWith('Backup')){await click('.more-list button','Settings & backup');await waitFor(`!!document.querySelector('.settings-modal')`,'settings');await click('.settings-modal button','Backup, restore & history');await waitFor(`!!document.querySelector('.retail-data')`,'backup');}else await click('.more-list button',label);};
 // Home, Report and Targets are on the bottom bar; Gives, Segments, Catalog and Backup are under the ⋯ More menu
 const sub=async label=>{if(label==='Today')return nav('Home');if(label==='Report'||label==='Targets')return nav(label);return more(label==='Data'?'Backup':label);};
 const shot=async name=>{if(!process.env.SHOTS)return;await sleep(400);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});(await import('node:fs')).writeFileSync(join(process.env.SHOTS,name+'.png'),Buffer.from(r.result.data,'base64'));};
@@ -83,12 +83,34 @@ try{
     const small=[...document.querySelectorAll('button,select,input:not([type=checkbox]):not([type=file]):not([hidden]),summary')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.height<36&&e.offsetParent!==null&&!e.closest('.bottom-nav')&&!e.hidden}).slice(0,8).map(e=>(e.getAttribute('aria-label')||e.textContent||e.className).trim().slice(0,28)+' h='+Math.round(e.getBoundingClientRect().height));
     const lastNav=document.querySelector('.bottom-nav button:last-child');const navRight=lastNav?Math.round(lastNav.getBoundingClientRect().right):w;
     return {w,sw:document.documentElement.scrollWidth,bad,small,navRight};})()`;
-  const screens=process.env.SIMPLE?[['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Send',()=>nav('Send')]]:[['Home',()=>nav('Home')],['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Export',()=>nav('Export')],['Targets',()=>nav('Targets')],['Targets segment',async()=>{await nav('Targets');await sleep(500);await run(`(()=>{const b=document.querySelector('.tg-seg');if(b)b.click();return true;})()`);await sleep(400);await run(`(()=>{const b=[...document.querySelectorAll('.link-btn')].find(x=>/Edit levels/.test(x.textContent));if(b)b.click();return true;})()`);}],['Report',()=>nav('Report')],['Assign by model',async()=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await sleep(500);await run(`(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith('Assign by model'));if(b)b.click();return true;})()`);await sleep(500);}]];
+  const screens=process.env.SIMPLE?[['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Send',()=>nav('Send')]]:[
+    ['Home',()=>nav('Home')],['Scan',()=>nav('Scan')],['Phones',()=>nav('Phones')],['Export',()=>nav('Export')],['Targets',()=>nav('Targets')],
+    ['Targets edit all',async()=>{await run(`document.querySelector('button[aria-label="Show all details"]')?.click()`);await click('button','Edit all targets and sold');await waitFor(`!!document.querySelector('.tg-people-grid')`,'Edit all cards');}],
+    ['Targets segment',async()=>{await click('button','← All segments');await click('.tg-seg','');await waitFor(`!!document.querySelector('.tg-person')`,'segment');await click('.link-btn','Edit levels');await waitFor(`!!document.querySelector('.tg-levels')`,'levels');}],
+    ['Report',()=>nav('Report')],['Suggested gives',async()=>{await more('Give and share');await waitFor(`!!document.querySelector('.retail-gives')`,'suggestions');}],
+    ['Assign by model',async()=>{await click('.give-tabs button','By model');await waitFor(`!!document.querySelector('.models-list')`,'model assignment');}],
+    ['Share',()=>click('.give-tabs button','Send')],['People',()=>more('People')],['Segments',()=>more('Segments')],['Catalog',()=>more('Catalog')],['Backup',()=>more('Backup')]
+  ];
   const issues=[];
-  for(const [name,go] of screens){await go();await sleep(700);const r=await run(MEASURE);if(name==='Scan')console.log('Android block drawn:',await run(`/Scan on this phone in the background/.test(document.body.innerText)`));console.log(name,JSON.stringify(r));if(r.sw>r.w+1||r.bad.length)issues.push(name+': runs past the edge '+JSON.stringify(r.bad));if(r.small.length)issues.push(name+': buttons too small to tap (under 30 px): '+r.small.join(' | '));if(r.navRight<r.w-14)issues.push(name+': the bottom bar does not fill the width (last button ends at '+r.navRight+' of '+r.w+')');}
+  const measure=async name=>{const r=await run(MEASURE);console.log(name,JSON.stringify(r));if(r.sw>r.w+1||r.bad.length)issues.push(name+': runs past the edge '+JSON.stringify(r.bad));if(r.small.length)issues.push(name+': controls under 36 px: '+r.small.join(' | '));if(r.navRight<r.w-14)issues.push(name+': bottom bar ends at '+r.navRight+' of '+r.w);};
+  for(const [name,go] of screens){
+    await go();await sleep(500);
+    if(!process.env.SIMPLE&&!['Targets edit all','Targets segment'].includes(name)){
+      await run(`document.querySelector('button[aria-label="Show fewer details"]')?.click()`);await sleep(100);
+      assert.equal(await run(`document.querySelectorAll('main .screen-details-toggle button').length`),1,'one Show all button per screen');
+      await measure(name+' summary');
+      if(name==='Targets')assert.equal(await run(`document.querySelector('.retail-targets > .screen-extra').getBoundingClientRect().height`),0,'Targets opens directly on segments');
+      if(name==='Segments')assert.equal(await run(`!!document.querySelector('.seg-model-summary li')&&document.querySelector('.retail-segments > .screen-extra').getBoundingClientRect().height===0`),true,'segment model summaries are visible before editing controls');
+      await click('button[aria-label="Show all details"]','Show all');await sleep(100);
+    }
+    await measure(name+' all');
+  }
   if(!process.env.SIMPLE){await run(`document.querySelector('button[aria-label="More"]').click()`);await sleep(500);
-  const m=await run(MEASURE);console.log('More',JSON.stringify(m));if(m.sw>m.w+1||m.bad.length)issues.push('More: '+JSON.stringify(m.bad));}
-  assert.deepEqual(issues,[],'screens wider than the phone');
+  const m=await run(MEASURE);console.log('More',JSON.stringify(m));if(m.sw>m.w+1||m.bad.length)issues.push('More: '+JSON.stringify(m.bad));await click('.more-list button','Settings');}
+  else await click('button[aria-label="Settings"]','');
+  await waitFor(`!!document.querySelector('.settings-modal')`,'Settings');
+  const settings=await run(MEASURE);console.log('Settings',JSON.stringify(settings));if(settings.sw>settings.w+1||settings.bad.length)issues.push('Settings: '+JSON.stringify(settings.bad));
+  assert.deepEqual(issues,[],'screens fit the phone and controls are large enough to tap');
   ok('every screen fits the phone width');
 }catch(error){
   console.error('FAIL:',error.message);

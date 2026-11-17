@@ -82,6 +82,20 @@ function cleanTarget(value: unknown, month: Month): PersonTarget | null {
   if (!str(v.personId)) return null;
   return { personId: str(v.personId), month, lines: arr(v.lines).map(cleanLine).filter((l): l is TargetLine => !!l), source: v.source === 'screenshot' ? 'screenshot' : 'manual', importedAt: str(v.importedAt), note: str(v.note) || undefined };
 }
+function cleanTemplate(value: unknown): RetailState['template'] {
+  const v = obj(value);
+  if (!str(v.title) || !Array.isArray(v.sections)) return undefined;
+  const keys = ['sellout', 'stock', 'activations', 'scplus', 'competitor', 'shifts', 'total', 'other'];
+  return {
+    title: str(v.title).slice(0, 400),
+    dateFormat: (['DD/MM/YYYY', 'DD-MM-YYYY', 'D MMM YYYY', 'YYYY-MM-DD'].includes(str(v.dateFormat)) ? v.dateFormat : 'DD/MM/YYYY') as NonNullable<RetailState['template']>['dateFormat'],
+    sections: arr(v.sections).map(obj).filter(s => keys.includes(str(s.key))).slice(0, 100).map(s => ({
+      key: s.key as NonNullable<RetailState['template']>['sections'][number]['key'], heading: str(s.heading).slice(0, 400), bullet: str(s.bullet).slice(0, 20), sep: str(s.sep, ': ').slice(0, 20),
+      useAbbreviation: s.useAbbreviation === true, showColor: s.showColor === true, showStorage: s.showStorage === true, qtyBefore: s.qtyBefore === true,
+      verbatim: arr(s.verbatim).map(x => str(x).slice(0, 400)).slice(0, 100), inline: str(s.inline).slice(0, 400) || undefined
+    })), promoter: str(v.promoter) || undefined
+  };
+}
 function cleanSale(value: unknown): Sale | null {
   const v = obj(value);
   if (!str(v.id) || !isDateKey(v.date) || !/^\d{15}$/.test(str(v.imei))) return null;
@@ -145,8 +159,8 @@ export function cleanState(raw: unknown): RetailState {
     })),
     days,
     stockAdjust: arr(v.stockAdjust).map(obj).filter(a => str(a.id) && isDateKey(a.date)).map(a => ({ id: str(a.id), at: str(a.at), date: a.date as string, code: str(a.code), name: str(a.name), storage: str(a.storage), color: str(a.color), delta: Math.trunc(num(a.delta)), note: str(a.note) })),
-    template: v.template && obj(v.template).title ? obj(v.template) as unknown as RetailState['template'] : undefined,
-    settings: { myPersonId: str(settings.myPersonId), myThreshold: ([70, 100, 120] as const).find(t => t === settings.myThreshold) || 100, lowStock: Math.max(0, count(settings.lowStock) || 2), reportAuthor: str(settings.reportAuthor) },
+    template: cleanTemplate(v.template),
+    settings: { myPersonId: str(settings.myPersonId), myThreshold: ([70, 100, 120] as const).find(t => t === settings.myThreshold) || 100, lowStock: Math.max(0, Math.floor(num(settings.lowStock, 2))), reportAuthor: str(settings.reportAuthor) },
     history: Object.fromEntries(Object.entries(obj(v.history)).filter(([m]) => isMonth(m)).map(([m, h]) => { const o = obj(h); return [m, { closedAt: str(o.closedAt), targets: Object.fromEntries(Object.entries(obj(o.targets)).map(([id, t]) => [id, cleanTarget(t, m)]).filter(([, t]) => t)) as Record<string, PersonTarget>, sales: count(o.sales), byPerson: Object.fromEntries(Object.entries(obj(o.byPerson)).map(([id, n]) => [id, count(n)])) }]; })),
     audit: arr(v.audit).map(obj).filter(a => str(a.what)).slice(-500).map(a => ({ at: str(a.at), what: str(a.what), detail: str(a.detail).slice(0, 300) }))
   };
@@ -191,6 +205,7 @@ export function readBackup(text: string): BackupCheck {
   try { data = JSON.parse(text); } catch { return { ok: false, error: 'This is not a backup file (it could not be read).' }; }
   const v = obj(data);
   if (v.app !== 'RetailLens' || v.version !== 1) return { ok: false, error: 'This file is not a RetailLens backup.' };
+  if (!v.state || typeof v.state !== 'object' || Array.isArray(v.state)) return { ok: false, error: 'This backup is missing its retail data. Choose a complete backup file.' };
   const ledger = arr(v.ledger).map(obj).filter(l => str(l.id)).map(l => ({ id: str(l.id), imei: str(l.imei), imei2: str(l.imei2) || undefined, serial: str(l.serial) || undefined, model: str(l.model), personId: str(l.personId), createdAt: str(l.createdAt) || undefined }));
   return { ok: true, backup: { app: 'RetailLens', version: 1, createdAt: str(v.createdAt), state: cleanState(v.state), ledger } };
 }

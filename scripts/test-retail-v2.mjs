@@ -596,6 +596,9 @@ console.log('retail v2: all checks passed');
   assert.ok(sumText.includes('  Asha Test: 2/5 · needs 3 · 1 every 4 days')); assert.ok(sumText.includes('    100% by 26 Nov')); assert.ok(sumText.includes('Total: 6 more pieces · 1 every 2 days'));
   assert.ok(!/\d\.\d\/day/.test(sumText), 'no decimal pace in the summary');
   console.log('targets 1.39 ok');
+  const cappedSummary = TS2.targetSummary({ month: '2026-11', level: 120, days: 14, rows: [{ ...fin, sold: 10, remaining: 0, capLabel: 'Cap 100%', level: 100, each: [{ ...fin.each[0], cap: 100, level: 100, remaining: 0 }] }] });
+  assert.match(cappedSummary, /Cap 100% · 100% reached/);
+  assert.doesNotMatch(cappedSummary, /120% reached|All segments reached 120%/);
 }
 
 // ---- Home: month outlook (where each segment ends at this pace, what to push and what not) --------------------------------------------------------

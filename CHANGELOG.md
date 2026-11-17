@@ -2,6 +2,21 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — audit fixes and visible target caps
+- Screens open with their main content and one Show all button for secondary controls. Targets prioritises segment progress; segment cards list their models directly.
+- More is consolidated into People & sharing, Models & segments, and Settings & backup. The model library shares one search and editor, includes saved and Samsung names, and saves edited names back to the scanner too. Source import, variants, catalogue maintenance and bulk actions remain available.
+- Fixed a popup-history race when navigating from Settings to Backup. Modern Android Back handling now uses the platform callback while retaining the older Android path.
+- Target overview cards and each person's row show their percentage cap. Remaining pieces and shared summaries name the effective percentage; finish dates stop at a common cap.
+- Retail database failures show a persistent warning and retry button. Failed reads cannot masquerade as empty data; damaged scan data is preserved instead of crashing or being overwritten. Failed transactions roll back partial writes.
+- Fixed concurrent laptop-scanner uploads overwriting the job manifest; invalid JSON now returns a clear client error.
+- Shared report text opens Report on an empty app and replaces the previous shared text when the app is already open.
+- Enlarged small controls in target editing, sharing, giving, person filtering and exports. Android asset copying removes stale web bundles before packaging.
+
+## Unreleased — fixes: Edit all on a phone, restoring a backup
+- **Edit all** is now a card per person with a labeled row per segment (name, Target, Sold, Levels) and an "Everyone together" card. On a phone the wide table lost the segment names.
+- **Restoring a backup** now says which file and what is wrong ("is empty", "is not a RetailLens backup") instead of a vague message. A file saved a moment ago can read as empty at first, so an empty read is tried again a few times. The same file can be chosen again after a failed try.
+- Backup reads show progress and distinguish a file that cannot be opened from an empty file. Choosing another backup cancels the earlier result so it cannot replace the new selection.
+
 ## Unreleased — Home: month outlook
 - **Month outlook** on Home (everyone, or the person chosen): where the month most likely ends if sales keep the pace so far (sold and sold-not-submitted / days gone), and what to do with each segment: **Push these** (the next level is within reach if the pace goes up by at most 2 times), **Keep the pace**, **Hard to reach: focus elsewhere**, **Done: stop pushing** (the top level, or the segment's highest level, is reached). In the first 2 days of the month it only says what each next level needs. It is a guess from the pace so far, not a promise.
 

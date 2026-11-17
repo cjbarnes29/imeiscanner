@@ -354,6 +354,11 @@ assert.equal(clean.catalog.length, 1); assert.equal(C.segmentOf(clean, 'A999', '
 assert.deepEqual(clean.targets['2026-11'].me.lines, [{ segment: 'low', target: 0, achieved: 0 }, { segment: 'bogus', target: 1, achieved: 1 }], 'bad numbers are cleaned; a line for a segment that is not in the list is kept (it just does not show)');
 assert.equal(clean.targets['nope'], undefined); assert.equal(clean.rates.perUnit.low, 0); assert.equal(clean.settings.myThreshold, 100);
 for (const bad of [null, undefined, 5, 'x', [], {}]) assert.equal(D.cleanState(bad).version, 1, 'any junk gives a valid empty state');
+assert.equal(D.cleanState({ settings: { lowStock: 0 } }).settings.lowStock, 0, 'zero low-stock threshold survives loading');
+assert.equal(D.cleanState({ template: { title: 123, sections: [] } }).template, undefined);
+assert.equal(D.cleanState({ template: { title: 'Broken', sections: null } }).template, undefined);
+const cleanedTemplate = D.cleanState({ template: { title: 'Safe {date}', dateFormat: [], sections: [null, { key: 'total', heading: 12 }, { key: 'other', verbatim: [null, 'Note'] }] } });
+assert.doesNotThrow(() => R.buildReport(cleanedTemplate, [], cleanedTemplate.template, { date: '2026-11-17' }), 'damaged template fields cannot crash the report builder');
 // month history: closing a month summarises it and never deletes it
 let hist = D.emptyState();
 hist = S.confirmSale(hist, { id: 'h1', imei: imei(), model: 'SM-A176B', personId: 'me' }, { modelName: 'A17', segment: 'low' }, '2026-10-20', '2026-10-20T10:00:00Z').state;
@@ -368,6 +373,7 @@ assert.equal(backup.ledger.length, 2); assert.ok(!('dataUrl' in backup.ledger[0]
 const text = JSON.stringify(backup);
 const checked = D.readBackup(text); assert.ok(checked.ok); assert.equal(checked.backup.state.sales.length, 1);
 assert.equal(D.readBackup('not json').ok, false); assert.equal(D.readBackup('{"app":"Other","version":1}').ok, false); assert.equal(D.readBackup(JSON.stringify({ ...backup, version: 2 })).ok, false);
+for (const state of [undefined, null, [], 'damaged']) assert.equal(D.readBackup(JSON.stringify({ app: 'RetailLens', version: 1, state })).ok, false, 'missing retail data must not restore an empty state');
 const worse = D.emptyState();
 const restored = D.restoreBackup(worse, checked.backup, NOW);
 assert.equal(restored.state.sales.length, 1); assert.equal(restored.undo, worse, 'the state before the restore is handed back for Undo');

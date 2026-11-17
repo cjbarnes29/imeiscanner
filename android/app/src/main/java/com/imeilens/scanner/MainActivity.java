@@ -79,6 +79,10 @@ public final class MainActivity extends Activity {
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         webView = new WebView(this);
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::navigateBack);
+        }
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.getSettings().setAllowFileAccess(false);
@@ -653,10 +657,19 @@ public final class MainActivity extends Activity {
         });
     }
 
-    @Override public void onBackPressed() {
-        if (webView.canGoBack()) webView.goBack();
+    private void navigateBack() {
+        if (webView == null) { leaveScreen(); return; }
+        // All tabs share one URL. Ask the page's history rather than relying on WebView's URL history list.
+        webView.evaluateJavascript("(function(){if(Number(history.state && history.state.imeiDepth)>0){history.back();return true;}return false;})()",
+            handled -> { if (!"true".equals(handled)) leaveScreen(); });
+    }
+
+    private void leaveScreen() {
+        if (Build.VERSION.SDK_INT >= 31) moveTaskToBack(true);
         else super.onBackPressed();
     }
+
+    @Override public void onBackPressed() { navigateBack(); }
 
     private final class Bridge {
         @JavascriptInterface public void choosePhotos(String personId) {

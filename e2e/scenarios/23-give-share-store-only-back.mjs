@@ -33,17 +33,17 @@ await sleep(800);
 await eval_(`document.querySelector('button[aria-label="More"]').click();true`);
 await waitJs(`!!document.querySelector('.more-list')`, 'the More menu');
 const items = await eval_(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`);
-check(results, 'More has People, Give and share, Segments, Catalog, Backup and data, Settings', JSON.stringify(items) === JSON.stringify(['People', 'Give and share', 'Segments', 'Catalog', 'Backup and data', 'Settings']), JSON.stringify(items));
+check(results, 'More has three groups: People & sharing, Models & segments, Settings & backup', JSON.stringify(items) === JSON.stringify(['People & sharing', 'Models & segments', 'Settings & backup']), JSON.stringify(items));
 shot('more-menu');
-await eval_(`(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith('Give and share'));b.click();return true;})()`);
+await eval_(`(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith('People & sharing'));b.click();return true;})()`);
 await waitJs(`!!document.querySelector('.give-tabs')`, 'the Give and share tabs');
-check(results, 'Give and share has its own title', (await title()) === 'Give and share', await title());
+check(results, 'People & sharing has its own title', (await title()) === 'People & sharing', await title());
 const tabs = await eval_(`[...document.querySelectorAll('.give-tabs button')].map(b=>b.textContent.trim())`);
-check(results, 'the three tabs are Suggested, By model, Send', JSON.stringify(tabs) === JSON.stringify(['Suggested', 'By model', 'Send']), JSON.stringify(tabs));
+check(results, 'people, suggestions, model allocation and sending share one screen', JSON.stringify(tabs) === JSON.stringify(['People', 'Suggested', 'By model', 'Send']), JSON.stringify(tabs));
 for (const t of ['By model', 'Send', 'Suggested']) {
   await eval_(`(()=>{const b=[...document.querySelectorAll('.give-tabs button')].find(x=>x.textContent.trim()===${JSON.stringify(t)});b.click();return true;})()`);
   await sleep(700);
-  check(results, `the ${t} tab opens and stays under the title Give and share`, (await title()) === 'Give and share' && await eval_(`!!document.querySelector('.give-tabs button.on')&&document.querySelector('.give-tabs button.on').textContent.trim()===${JSON.stringify(t)}`));
+  check(results, `the ${t} tab opens under People & sharing`, (await title()) === 'People & sharing' && await eval_(`!!document.querySelector('.give-tabs button.on')&&document.querySelector('.give-tabs button.on').textContent.trim()===${JSON.stringify(t)}`));
 }
 shot('give-and-share');
 
@@ -76,7 +76,7 @@ await eval_(`document.querySelector('button[aria-label="More"]').click();true`);
 await waitJs(`!!document.querySelector('.more-list')`, 'the More menu for the Back test');
 await back();
 check(results, 'Back closes the open More menu first and stays on the same screen', await eval_(`!document.querySelector('.more-list')`) && /^Phones/.test(await title()), await title());
-const logcat = adb(c.device, 'logcat', '-d');
+const logcat = adb(c.device, 'logcat', '-d', '-t', '1500');
 check(results, 'no crash and no "app not responding" of the test app in the log', !/FATAL EXCEPTION[\s\S]{0,200}Process: com\.imeilens\.scanner\.phonetest|ANR in com\.imeilens\.scanner\.phonetest/.test(logcat));
 shot('after-back');
 finish('23-give-share-store-only-back', results);

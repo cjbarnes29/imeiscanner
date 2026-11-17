@@ -28,7 +28,7 @@ const emulatorCache = new Map();
 export function isEmulator(device) {
   if (!emulatorCache.has(device)) {
     let qemu = '';
-    try { qemu = execFileSync(adbPath(), ['-s', device, 'shell', 'getprop', 'ro.kernel.qemu'], { encoding: 'utf8' }).trim(); } catch { /* unknown: treat as a phone */ }
+    try { qemu = execFileSync(adbPath(), ['-s', device, 'shell', 'getprop', 'ro.kernel.qemu'], { encoding: 'utf8', timeout: 15000 }).trim(); } catch { /* unknown: treat as a phone */ }
     emulatorCache.set(device, qemu === '1' || device.startsWith('emulator-'));
   }
   return emulatorCache.get(device) && process.env.E2E_REAL_PHONE !== '1';
@@ -45,11 +45,11 @@ function phoneGuard(device, args) {
 export function adb(device, ...args) {
   if (phoneGuard(device, args) === 'skip') return '';
   for (let attempt = 1; ; attempt++) {
-    try { return execFileSync(adbPath(), ['-s', device, ...args], { encoding: 'utf8', maxBuffer: 1 << 28 }); }
+    try { return execFileSync(adbPath(), ['-s', device, ...args], { encoding: 'utf8', maxBuffer: 1 << 28, timeout: 30000 }); }
     catch (error) {
       const text = String(error.stderr || '') + String(error.message || '');
       if (attempt >= 3 || !/cannot connect to daemon|daemon still not running|daemon not running/i.test(text)) throw error;
-      try { execFileSync(adbPath(), ['start-server'], { encoding: 'utf8' }); } catch { /* retry anyway */ }
+      try { execFileSync(adbPath(), ['start-server'], { encoding: 'utf8', timeout: 15000 }); } catch { /* retry anyway */ }
     }
   }
 }

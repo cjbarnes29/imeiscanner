@@ -1,7 +1,21 @@
 # RetailLens: progress, decisions, how to resume
 
+## GitHub checkpoint — 2026-11-18
+
+The user authorized committing and pushing the completed changes on `ux/photo-editor`, and rebuilding the RetailLens Test APK from the committed source. The audit and earlier local-work notes below describe the pre-publication checkpoint. Generated APKs, screenshots, test reports and agent state remain local and excluded from Git. No merge into main or production release is included in this checkpoint.
+
+## Latest local checkpoint — 2026-11-17
+
+Further work in this checkpoint: summary-first screens with Show all; model lists on segment cards; a single Models & segments library/search/editor with saved and Samsung sources; three More groups (People & sharing, Models & segments, Settings & backup); caps visible in the target overview and shared summaries. Audit fixes cover database read/save failures, transaction rollback, malformed backups/templates, zero low-stock thresholds, simultaneous server uploads, shared report delivery, popup-to-screen history, and modern Android Back handling. Reusable checks: `scripts/e2e-storage.mjs`, `scripts/test-server-api.mjs`, expanded `scripts/e2e-layout.mjs`, `scripts/e2e-retail.mjs`. Final artifacts and detailed results are in ignored `phase2-results/audit-2026-11-17/`; the final audit report there supersedes the older verification paragraph below.
+
+Continued the uncommitted phone target-editor and backup restore changes on `ux/photo-editor` (base commit `10776b3`). Edit all uses a labeled segment row inside each person's card, with live totals and an Everyone together card. Backup selection shows reading progress, retries empty reads, identifies empty/invalid/unreadable files, and allows selecting the same file again. A selection counter prevents an older pending read from replacing a newer backup; leaving the screen invalidates pending reads too.
+
+Verified: `npm test`, `npm run build` (includes TypeScript checking), `npm run check:private`, and `node scripts/e2e-retail.mjs` (48 checks). Browser coverage includes phone-width target labels and inputs, saving and totals, backup errors, repeated selection, and changing files while an empty read is pending. Target editor screenshot inspected: `phase2-results/continue-2026-11-17/targets-edit-all.png` (ignored local output). Build retains the existing large-chunk warning. No Android build or emulator run in this checkpoint; no commit, push or release performed.
+
+The older status and resume notes below describe earlier phases; use `git status` and this checkpoint for the current local work.
+
 Autonomous upgrade of IMEI Lens into **RetailLens** ("Scan. Sell. Track. Achieve."). IMEI Lens stays the scanning engine.
-Branch `ux/photo-editor` (local, **nothing committed, pushed, merged or released**). Checkpoints are zip snapshots in `phase2-results/checkpoints/`.
+Branch `ux/photo-editor`. The phase notes below are historical; see the GitHub checkpoint above for the current publication scope. Checkpoints are zip snapshots in `phase2-results/checkpoints/`.
 
 ## Rules I am working under
 - No commit / merge / push / deploy / release without approval. Real app (`com.imeilens.scanner`) never touched; tests use the isolated test app only.

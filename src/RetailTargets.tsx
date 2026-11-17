@@ -1,13 +1,13 @@
 // RetailLens > Targets and Segments. Targets: pick a level (70 to 120) and every segment line says how many pieces are still needed and per day;
 // tap a segment to see each person (target, own sold count, pieces needed at each level). Segments: the person's own list (Fold 1, Fold 2…) and the
 // models in each. The arithmetic is in src/retail/targets.ts and segments.ts (unit-tested); this file only shows it.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fullCatalog, segmentOf, setModelSegment } from './retail/catalog';
 import { addSegment, assignModels, deleteSegment, moveSegment, renameSegment, segLabel, segmentDefs, segmentIds } from './retail/segments';
-import { emptyTarget, isCapped, lastMonthLine, learnWho, needAt, prevMonth, putTarget, readTargets, setTargetLine, startFromLastMonth, suggestedLevels, type ImportBlock } from './retail/targets';
+import { effectiveLevel, emptyTarget, isCapped, lastMonthLine, learnWho, needAt, prevMonth, putTarget, readTargets, setTargetLine, startFromLastMonth, suggestedLevels, type ImportBlock } from './retail/targets';
 import { finishAt, finishText, perDayText } from './retail/pace';
 import { TargetGrid } from './RetailTargetGrid';
-import { daysLeft, isMonth, LEVELS, monthOf, SEGMENT_LABEL, type Level, type Segment, type TargetLine } from './retail/types';
+import { daysLeft, isMonth, LEVELS, monthOf, SEGMENT_LABEL, type CatalogItem, type Level, type Segment, type TargetLine } from './retail/types';
 import { itemFor } from './retail/catalog';
 import { soldOnDay } from './retail/soldsync';
 import { targetSummary } from './retail/targetsummary';
@@ -33,6 +33,7 @@ export function TargetsTab(ctx: RetailCtx) {
   const [busy, setBusy] = useState(false);
   const [levelsFor, setLevelsFor] = useState('');
   const [showEmpty, setShowEmpty] = useState(false);
+  useEffect(() => { if (ctx.expanded === false) { setEditAll(false); setOpenSeg(''); setLevelsFor(''); } }, [ctx.expanded]);
   const file = useRef<HTMLInputElement>(null);
   const days = daysLeft(month, today);
   const segs = segmentIds(state);
@@ -54,7 +55,8 @@ export function TargetsTab(ctx: RetailCtx) {
     const used = lines.filter(l => l.target > 0);
     if (!used.length) return '';
     const sold = used.reduce((a, l) => a + l.achieved, 0);
-    return ([70, 100, 120] as Level[]).map(lv => used.every(l => isCapped(l, lv)) ? `${lv}%: top is ${Math.min(...used.map(l => l.cap as number))}%` : finishText(lv, finishAt(used.reduce((a, l) => a + needAt(l, lv, days).remaining, 0), sold, month, today))).join(' · ');
+    const levels = [...new Set<Level>([70, 100, 120, ...used.flatMap(l => l.cap ? [l.cap] : [])])].sort((a, b) => a - b).filter(lv => !used.every(l => isCapped(l, lv)));
+    return levels.map(lv => finishText(lv, finishAt(used.reduce((a, l) => a + needAt(l, lv, days).remaining, 0), sold, month, today)) + (used.some(l => isCapped(l, lv)) ? ' (caps applied)' : '')).join(' · ');
   };
   /** One person's target copied to everyone else for this segment. Only the target number: levels and sold stay each person's own. */
   const copyTargetToEveryone = (fromId: string, segment: Segment) => {
@@ -90,17 +92,20 @@ export function TargetsTab(ctx: RetailCtx) {
   const soldToday = useMemo(() => soldOnDay(state, today), [state, today]);
   const rows = useMemo(() => segs.map(segment => {
     let target = 0, sold = 0, remaining = 0;
-    const each: { id: string; name: string; target: number; sold: number; remaining: number; perDay: number; today: number; finish: string }[] = [];
-    let todayAll = 0, cappedBelow = 0;
+    const each: { id: string; name: string; target: number; sold: number; remaining: number; perDay: number; today: number; finish: string; cap?: Level; level: Level }[] = [];
+    let todayAll = 0;
     const lines: TargetLine[] = [];
     for (const p of chosen) {
       const l = lineOf(p.id, segment), rem = needAt(l, level, days).remaining;
       target += l.target; sold += l.achieved; remaining += rem; lines.push(l);
-      if (l.target > 0 && isCapped(l, level)) cappedBelow = Math.min(cappedBelow || 999, l.cap as number);
       const todayN = (soldToday[p.id] || {})[segment] || 0; todayAll += todayN;
-      if (l.target > 0 || l.achieved > 0) each.push({ id: p.id, name: p.name, target: l.target, sold: l.achieved, remaining: rem, perDay: ceilTenth(days <= 0 ? rem : rem / days), today: todayN, finish: finishOf([l]) });
+      if (l.target > 0 || l.achieved > 0) each.push({ id: p.id, name: p.name, target: l.target, sold: l.achieved, remaining: rem, perDay: ceilTenth(days <= 0 ? rem : rem / days), today: todayN, finish: finishOf([l]), cap: l.cap, level: effectiveLevel(l, level) });
     }
-    return { segment, target, sold, remaining, perDay: ceilTenth(days <= 0 ? remaining : remaining / days), each, today: todayAll, finish: finishOf(lines), cappedBelow: cappedBelow === 999 ? 0 : cappedBelow };
+    const usedLines = lines.filter(l => l.target > 0);
+    const caps = usedLines.filter(l => l.cap !== undefined);
+    const capLabel = !caps.length ? '' : caps.length === usedLines.length && caps.every(l => l.cap === caps[0].cap) ? `Cap ${caps[0].cap}%` : 'Caps vary by person';
+    const effective = [...new Set(usedLines.map(l => effectiveLevel(l, level)))];
+    return { segment, target, sold, remaining, perDay: ceilTenth(days <= 0 ? remaining : remaining / days), each, today: todayAll, finish: finishOf(lines), capLabel, level: effective.length === 1 ? effective[0] : undefined };
   }), [state, month, level, personId, people, today, soldToday]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Turns what was read (one block per person) into parts waiting for a check. Nobody is picked unless the text itself said who it is for. */
@@ -150,7 +155,8 @@ export function TargetsTab(ctx: RetailCtx) {
   const visible = showEmpty || !used.length ? rows : used;
   const hidden = rows.length - visible.length;
   return <div className="retail-targets">
-    <section className="retail-card"><h3>Targets</h3>
+    <p className="tg-summary">{new Date(`${month}-01T12:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} · {personId === 'all' ? 'Everyone' : people.find(p => p.id === personId)?.name || 'Person'} · {level}% · {days} days left</p>
+    <section className="retail-card screen-extra"><h3>Targets</h3>
       <div className="retail-inline">
         <label>Month<input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} /></label>
         <label>Person<select value={personId} onChange={e => setPersonId(e.target.value)}><option value="all">Everyone</option>{people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
@@ -185,12 +191,13 @@ export function TargetsTab(ctx: RetailCtx) {
 
     {!seg && !editAll && <ul className="tg-segs">{visible.map(r => <li key={r.segment}><button type="button" className="tg-seg" onClick={() => setOpenSeg(r.segment)} aria-label={`Open ${segLabel(state, r.segment)}`}>
       <span className="tg-top"><strong>{segLabel(state, r.segment)}</strong><small>Sold {r.sold} of {r.target}{r.today > 0 && <> · today {r.today}</>}</small></span>
+      {r.capLabel && <span className="tg-cap-badge">{r.capLabel}</span>}
       <span className="tg-bar"><i style={{ width: `${r.target > 0 ? Math.min(100, Math.round(r.sold / r.target * 100)) : 0}%` }} /></span>
-      <span className="tg-need">{r.target <= 0 ? 'No target set' : r.remaining <= 0 ? `${level}% reached` : <>Needs <b>{r.remaining} more</b> for {level}% · {perDayText(r.remaining, days)}{r.cappedBelow > 0 && <> · some stop at {r.cappedBelow}%</>}</>}</span>
+      <span className="tg-need">{r.target <= 0 ? 'No target set' : r.remaining <= 0 ? r.level === undefined ? 'Selected levels reached (caps applied)' : `${r.level}% reached` : <>Needs <b>{r.remaining} more</b> for {r.level === undefined ? "each person’s level (caps applied)" : `${r.level}%`} · {perDayText(r.remaining, days)}</>}</span>
       {r.finish && <span className="tg-finish">{r.finish}</span>}
-      {personId === 'all' && r.each.length > 0 && <span className="tg-people">{r.each.map(e => <span key={e.id} className="tg-p"><b>{e.name}</b><small>{e.sold}/{e.target}{e.today > 0 && <> · today {e.today}</>}</small><em>{e.target <= 0 ? '' : e.remaining <= 0 ? 'reached' : `needs ${e.remaining} · ${perDayText(e.remaining, days)}`}</em></span>)}</span>}</button></li>)}
+      {personId === 'all' && r.each.length > 0 && <span className="tg-people">{r.each.map(e => <span key={e.id} className="tg-p"><b>{e.name}{e.cap !== undefined && <span className="tg-cap-badge">Cap {e.cap}%</span>}</b><small>{e.sold}/{e.target}{e.today > 0 && <> · today {e.today}</>}</small><em>{e.target <= 0 ? '' : e.remaining <= 0 ? `${e.level}% reached` : `needs ${e.remaining} for ${e.level}% · ${perDayText(e.remaining, days)}`}</em></span>)}</span>}</button></li>)}
       {!rows.length && <li className="settings-help">Add segments first (Retail &gt; Segments).</li>}
-      {hidden > 0 && <li><button type="button" className="subtle-btn" onClick={() => setShowEmpty(true)}>Show {hidden} empty segment{hidden === 1 ? '' : 's'}</button></li>}</ul>}
+      {hidden > 0 && <li className="screen-extra"><button type="button" className="subtle-btn" onClick={() => setShowEmpty(true)}>Show {hidden} empty segment{hidden === 1 ? '' : 's'}</button></li>}</ul>}
 
     {seg && <section className="retail-card"><div className="tg-head"><button type="button" className="subtle-btn" onClick={() => { setOpenSeg(''); setLevelsFor(''); }}>← All segments</button><h3>{segLabel(state, seg)}</h3></div>
       <p className="settings-help">{days} day{days === 1 ? '' : 's'} left · showing {level}%. Type each person’s target and sold count (paste works). Sold is their own count; nothing else changes it.</p>
@@ -218,7 +225,7 @@ export function TargetsTab(ctx: RetailCtx) {
 }
 
 // ---- Segments ------------------------------------------------------------------------------------------------------------------------------
-export function SegmentsTab(ctx: RetailCtx) {
+export function SegmentsTab(ctx: RetailCtx & { query?: string; pickModel?: (code: string) => void }) {
   const { state, records, today } = ctx;
   const month = monthOf(today);
   const defs = segmentDefs(state);
@@ -229,13 +236,16 @@ export function SegmentsTab(ctx: RetailCtx) {
   const [sure, setSure] = useState('');
   const [search, setSearch] = useState('');
   const catalog = useMemo(() => fullCatalog(state), [state]);
-  const counts = useMemo(() => { const c: Record<string, number> = {}; for (const i of catalog) c[i.segment] = (c[i.segment] || 0) + 1; return c; }, [catalog]);
+  const bySegment = useMemo(() => { const out = new Map<string, typeof catalog>(); for (const item of catalog) { const id = segmentOf(state, item.code, month); out.set(id, [...(out.get(id) || []), item]); } return out; }, [catalog, state, month]);
   // models of scanned phones that are in no segment of the person's list
   const unplaced = useMemo(() => {
     const seen = new Map<string, string>();
     for (const r of records) { const item = itemFor(state, r.model); if (item && segmentOf(state, item.code, month, state.recordMeta[r.id]) === 'other' && segmentOf(state, item.code, month) === 'other') seen.set(item.code, item.name); }
     return [...seen.entries()];
   }, [records, state, month]);
+  const query = (ctx.query || '').trim().toLowerCase();
+  const matches = (item: CatalogItem) => !query || `${item.name} ${item.abbreviation} ${item.code}`.toLowerCase().includes(query);
+  const visibleDefs = defs.filter(s => !query || s.name.toLowerCase().includes(query) || (bySegment.get(s.id) || []).some(matches));
   const shown = useMemo(() => { const words = search.toLowerCase().split(/\s+/).filter(Boolean); return catalog.filter(i => !words.length || words.every(w => `${i.name} ${i.abbreviation} ${i.code}`.toLowerCase().includes(w))).slice(0, 40); }, [catalog, search]);
 
   const add = () => { const r = addSegment(state, name); if (r.error) { setError(r.error); return; } setError(''); setName(''); ctx.change(r.state, 'segment'); if (r.id) setEditing(r.id); };
@@ -243,26 +253,30 @@ export function SegmentsTab(ctx: RetailCtx) {
   const toggle = (code: string, id: Segment, has: boolean) => ctx.change(has ? setModelSegment(state, code, 'other') : assignModels(state, id, [code]), '');
 
   return <div className="retail-segments">
-    <section className="retail-card"><h3>Segments</h3>
+    <section className="retail-card screen-extra"><h3>Segments</h3>
       <p className="settings-help">Make your own tabs for Targets (Fold 1, Fold 2…) and tick the models that belong to each.</p>
       <div className="retail-inline"><input aria-label="New segment name" placeholder="New segment, for example Fold 1" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add(); }} /><button type="button" className="primary" onClick={add}>+ New segment</button></div>
       {error && <p className="bad" role="alert">{error}</p>}
     </section>
-    {defs.map((s, k) => <section key={s.id} className={`retail-card${editing === s.id ? ' tg-edit' : ''}`}>
-      <div className="tg-top"><strong>{s.name}</strong><small>{counts[s.id] || 0} model{(counts[s.id] || 0) === 1 ? '' : 's'}</small></div>
-      <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={() => { setEditing(editing === s.id ? '' : s.id); setRename(s.name); setSure(''); setSearch(''); }}>{editing === s.id ? 'Close' : 'Edit'}</button>
-        <button type="button" className="subtle-btn" aria-label={`Move ${s.name} up`} disabled={k === 0} onClick={() => ctx.change(moveSegment(state, s.id, -1), '')}>↑</button>
-        <button type="button" className="subtle-btn" aria-label={`Move ${s.name} down`} disabled={k === defs.length - 1} onClick={() => ctx.change(moveSegment(state, s.id, 1), '')}>↓</button></div>
-      {editing === s.id && <div>
+    {visibleDefs.map(s => <section key={s.id} className={`retail-card seg-overview${editing === s.id ? ' tg-edit' : ''}`} aria-label={`Models in ${s.name}`}>
+      <div className="tg-top"><strong>{s.name}</strong><small>{bySegment.get(s.id)?.length || 0} model{bySegment.get(s.id)?.length === 1 ? '' : 's'}</small></div>
+      <ul className="seg-model-summary">{(bySegment.get(s.id) || []).filter(item => s.name.toLowerCase().includes(query) || matches(item)).map(item => <li key={item.code}>{ctx.pickModel ? <button type="button" className="model-name-link" onClick={() => ctx.pickModel!(item.code)}>{item.name}</button> : <span>{item.name}</span>}<small>{item.code}</small></li>)}</ul>
+      {!bySegment.get(s.id)?.length && <p className="settings-help">No models yet.</p>}
+      {(bySegment.get(s.id)?.length || 0) > 4 && <p className="seg-overflow-hint">+{bySegment.get(s.id)!.length - 4} more models · Show all to see the full list</p>}
+      <div className="share-toolbar screen-extra"><button type="button" className="subtle-btn" onClick={() => { setEditing(editing === s.id ? '' : s.id); setRename(s.name); setSure(''); setSearch(''); }}>{editing === s.id ? 'Close' : 'Edit'}</button>
+        <button type="button" className="subtle-btn" aria-label={`Move ${s.name} up`} disabled={defs[0]?.id === s.id} onClick={() => ctx.change(moveSegment(state, s.id, -1), '')}>↑</button>
+        <button type="button" className="subtle-btn" aria-label={`Move ${s.name} down`} disabled={defs[defs.length - 1]?.id === s.id} onClick={() => ctx.change(moveSegment(state, s.id, 1), '')}>↓</button></div>
+      {editing === s.id && <div className="screen-extra">
         <div className="retail-inline"><label>Name<input value={rename} onChange={e => setRename(e.target.value)} /></label><button type="button" className="subtle-btn" onClick={() => doRename(s.id)}>Rename</button></div>
         <label>Search models<input type="search" value={search} placeholder="Fold, A07, S26…" onChange={e => setSearch(e.target.value)} /></label>
-        <ul className="retail-list tg-models">{shown.map(i => { const has = i.segment === s.id; return <li key={i.code}><label><input type="checkbox" checked={has} onChange={() => toggle(i.code, s.id, has)} aria-label={`${i.name} in ${s.name}`} /> {i.name} <small>{i.code}</small></label>
-          {!has && i.segment !== 'other' && <span className="rep-chip w">in {segLabel(state, i.segment)}</span>}</li>; })}</ul>
+        <ul className="retail-list tg-models">{shown.map(i => { const current = segmentOf(state, i.code, month), has = current === s.id; return <li key={i.code}><label><input type="checkbox" checked={has} onChange={() => toggle(i.code, s.id, has)} aria-label={`${i.name} in ${s.name}`} /> {i.name} <small>{i.code}</small></label>
+          {!has && current !== 'other' && <span className="rep-chip w">in {segLabel(state, current)}</span>}</li>; })}</ul>
         {sure === s.id ? <div className="share-toolbar"><span className="amber">Delete {s.name}? Its models become “No segment”.</span><button type="button" className="subtle-btn danger" onClick={() => { ctx.change(deleteSegment(state, s.id), 'delete segment'); setEditing(''); setSure(''); }}>Yes, delete</button><button type="button" className="subtle-btn" onClick={() => setSure('')}>No</button></div>
           : <button type="button" className="subtle-btn danger" onClick={() => setSure(s.id)}>Delete segment</button>}
       </div>}
     </section>)}
-    <section className="retail-card"><h3>Scanned models with no segment ({unplaced.length})</h3>
+    {!visibleDefs.length && <p className="settings-help">No models or segments match “{ctx.query}”.</p>}
+    <section className="retail-card screen-extra"><h3>Scanned models with no segment ({unplaced.length})</h3>
       <ul className="retail-list">{unplaced.map(([code, modelName]) => <li key={code}><span>{modelName} <small>{code}</small></span>
         <select aria-label={`Segment of ${modelName}`} value="" onChange={e => e.target.value && ctx.change(setModelSegment(state, code, e.target.value), '')}><option value="">Choose…</option>{defs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></li>)}
         {!unplaced.length && <li className="settings-help">Every scanned model is in a segment.</li>}</ul>

@@ -1,7 +1,7 @@
 // RetailLens: the retail side of the app (Today, Report, Targets, Gives, Segments, Catalog, Data). All the rules live in src/retail/*.ts (unit-tested);
 // this file only shows them and passes the person's choices back. Nothing here changes a scan record except the owner of a phone (an approved Give).
-import { useMemo, useState } from 'react';
-import { fullCatalog, itemFor, saveItem, resetItem, segmentOf, setModelSegment, setRecordMeta } from './retail/catalog';
+import { useEffect, useMemo, useState } from 'react';
+import { defaultAbbreviation, fullCatalog, guessSegment, itemFor, saveItem, resetItem, segmentOf, setModelSegment, setRecordMeta } from './retail/catalog';
 import { withAudit } from './retail/data';
 import { variantOf } from './retail/inventory';
 import { reconcile } from './retail/reconcile';
@@ -29,8 +29,7 @@ export function RetailHub(ctx: RetailCtx & { sub?: RetailSub; openSub?: (sub: Re
     {sub === 'report' && <ReportTab {...ctx} />}
     {sub === 'targets' && <TargetsTab {...ctx} />}
     {sub === 'gives' && <GivesTab {...ctx} />}
-    {sub === 'segments' && <SegmentsTab {...ctx} />}
-    {sub === 'catalog' && <CatalogTab {...ctx} />}
+    {(sub === 'segments' || sub === 'catalog') && <ModelManager {...ctx} />}
     {sub === 'data' && <DataTab {...ctx} />}
   </div>;
 }
@@ -85,7 +84,7 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
       {dash.priorities.map(p => <p key={p.segment} className="retail-priority">{p.message}</p>)}
       {dash.summary && !dash.priorities.length && <p className="settings-help">{whoName}’s {state.settings.myThreshold}% target is reached in every segment.</p>}
     </section>}
-    {outlook && <section className="retail-card fc-card" aria-label="Month outlook"><h3>Month outlook: {everyone ? 'everyone' : whoName}</h3>
+    {outlook && <section className="retail-card fc-card screen-extra" aria-label="Month outlook"><h3>Month outlook: {everyone ? 'everyone' : whoName}</h3>
       <p className="settings-help">{outlook.early ? `Too early to project (the first ${MIN_PACE_DAYS - 1} days of the month): each line only says what its next level needs.` : `If sales keep the pace of the month so far, ${everyone ? 'everyone ends' : `${whoName} ends`} at about ${outlook.projectedPct}% (${outlook.projected} of ${outlook.target}). A guess from the pace so far, not a promise.`}</p>
       {(['push', 'keep', 'far', 'stop'] as Advice[]).map(group => { const rows = outlook.lines.filter(l => l.advice === group); return rows.length > 0 && <div key={group} className={`fc-group fc-${group}`}><h4>{FC_TITLE[group]}</h4>
         <ul className="retail-list">{rows.map(l => <li key={l.segment} className="fc-line"><strong>{l.label} <small>{l.sold} of {l.target}</small></strong><small>{l.text}</small></li>)}</ul></div>; })}
@@ -99,12 +98,12 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
     <section className="retail-card"><h3>Low stock ({low.length})</h3>
       <ul className="retail-list">{low.map(i => <li key={i.id}><span className="amber">{i.name}</span> <small>{i.stock} left in the report</small></li>)}{!low.length && <li className="settings-help">{state.report ? 'Nothing is low.' : 'Appears once a report is saved.'}</li>}</ul>
     </section>
-    <section className="retail-card"><h3>Today’s checklist</h3>
+    <section className="retail-card screen-extra"><h3>Today’s checklist</h3>
       <ul className="retail-list">{dash.checklist.map(item => <li key={item.id}><label><input type="checkbox" checked={item.done} disabled={item.auto} onChange={() => tick(item.id, item.done)} /> <span className={item.done ? 'done' : ''}>{item.text}</span></label></li>)}</ul>
       <form className="retail-inline" onSubmit={e => { e.preventDefault(); if (!custom.trim()) return; ctx.change(updateDay(state, today, d => ({ ...d, custom: [...d.custom, { id: `c${Date.now().toString(36)}`, text: custom.trim(), done: false }] })), ''); setCustom(''); }}>
         <input aria-label="Add a checklist item" placeholder="Add your own item" value={custom} onChange={e => setCustom(e.target.value)} /><button type="submit" className="subtle-btn">Add</button></form>
     </section>
-    <section className="retail-card"><h3>Uploads by day</h3>
+    <section className="retail-card screen-extra"><h3>Uploads by day</h3>
       <ul className="retail-list">{byDay.map(([day, rows]) => <li key={day}><button type="button" className="link-btn" aria-label={`Show the phones of ${day}`} onClick={() => ctx.openRecords(`day:${day}`)}>{day}</button><span>{rows.length} phone{rows.length === 1 ? '' : 's'} · {rows.filter(r => /^\d{15}$/.test(r.imei)).length} read{rows.some(r => r.needsReview) ? ` · ${rows.filter(r => r.needsReview).length} to review` : ''}</span></li>)}{!byDay.length && <li className="settings-help">Photos you share from WhatsApp are scanned automatically and listed here by day.</li>}</ul>
     </section>
   </div>;
@@ -114,7 +113,25 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
 function variantsText(item: CatalogItem) { return item.variants.map(v => [v.sku, v.ram, v.storage, v.colors.join(', ')].join(' | ')).join('\n'); }
 function parseVariants(text: string) { return text.split('\n').map(l => l.split('|').map(x => x.trim())).filter(p => p.some(Boolean)).map(p => ({ sku: p[0] || '', ram: p[1] || '', storage: p[2] || '', colors: (p[3] || '').split(',').map(c => c.trim()).filter(Boolean) })); }
 
-function CatalogTab(ctx: RetailCtx) {
+function ModelManager(ctx: RetailCtx) {
+  const [view, setView] = useState<'segments' | 'models'>('segments');
+  const [query, setQuery] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const imported = useMemo<CatalogItem[]>(() => {
+    const sources = new Map((ctx.modelSources || []).filter(m => /^[A-Z0-9]{3,6}$/.test(m.code) && m.name).map(m => [m.code, m]));
+    const explicit = new Set(ctx.state.catalog.map(m => m.code));
+    return [...sources.values()].filter(m => !explicit.has(m.code)).map(m => ({ code: m.code, name: m.name, abbreviation: defaultAbbreviation(m.name), segment: ctx.state.corrections[m.code] || guessSegment(m.name, m.code), monthly: {}, variants: [], custom: false } satisfies CatalogItem));
+  }, [ctx.modelSources, ctx.state.catalog, ctx.state.corrections]);
+  const libraryCtx: RetailCtx = { ...ctx, state: { ...ctx.state, catalog: [...imported, ...ctx.state.catalog] }, change: (next, why) => ctx.change({ ...next, catalog: next.catalog.filter(m => !imported.includes(m)) }, why) };
+  return <div className="model-manager">
+    <input type="search" className="model-library-search" aria-label="Search models and segments" placeholder="Search a model, code or segment" value={query} onChange={e => setQuery(e.target.value)} />
+    <div className="give-tabs two" role="group" aria-label="Model library view"><button type="button" className={view === 'segments' ? 'on' : ''} aria-pressed={view === 'segments'} onClick={() => setView('segments')}>By segment</button><button type="button" className={view === 'models' ? 'on' : ''} aria-pressed={view === 'models'} onClick={() => setView('models')}>All models</button></div>
+    {ctx.openModelSources && <div className="share-toolbar screen-extra"><button type="button" className="subtle-btn" onClick={ctx.openModelSources}>Import and Samsung catalog tools</button></div>}
+    {view === 'segments' ? <SegmentsTab {...libraryCtx} query={query} pickModel={code => { setEditCode(code); setView('models'); }} /> : <CatalogTab {...libraryCtx} query={query} editCode={editCode} />}
+  </div>;
+}
+
+function CatalogTab(ctx: RetailCtx & { query?: string; editCode?: string }) {
   const { state, records, today } = ctx;
   const month = monthOf(today);
   const [search, setSearch] = useState('');
@@ -127,10 +144,12 @@ function CatalogTab(ctx: RetailCtx) {
   const [bulkStatus, setBulkStatus] = useState<'' | 'in' | 'sold' | 'given' | 'held'>('');
   const [bulkStorage, setBulkStorage] = useState('');
   const [bulkColor, setBulkColor] = useState('');
+  useEffect(() => { if (!ctx.editCode) return; const item = itemFor(state, ctx.editCode); if (item) { setEditing(item); setVariants(variantsText(item)); setColourLines(colourBox(state, item.code)); } }, [ctx.editCode]);
   const segOf = (r: RetailRecord) => segmentOf(state, r.model, month, state.recordMeta[r.id]);
   const counts = useMemo(() => { const c: Record<string, number> = {}; for (const r of records) c[segOf(r)] = (c[segOf(r)] || 0) + 1; return c; }, [records, state]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = records.filter(r => seg === 'all' || segOf(r) === seg).slice(0, 60);
-  const models = fullCatalog(state).filter(i => !search || `${i.name} ${i.abbreviation} ${i.code}`.toLowerCase().includes(search.toLowerCase())).slice(0, 40);
+  const searchText = ctx.query ?? search;
+  const models = fullCatalog(state).filter(i => !searchText || `${i.name} ${i.abbreviation} ${i.code} ${segLabel(state, segmentOf(state, i.code, month))}`.toLowerCase().includes(searchText.toLowerCase())).slice(0, 60);
   const toggle = (id: string) => setIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]);
   const applyBulk = (rememberModel: boolean) => {
     let next = setRecordMeta(state, ids, { ...(bulkSeg ? { segment: bulkSeg } : {}), ...(bulkStorage ? { storage: bulkStorage } : {}), ...(bulkColor ? { color: canonColour(bulkColor) } : {}), ...(bulkStatus ? { status: (bulkStatus === 'in' ? '' : bulkStatus) as never } : {}) });
@@ -139,7 +158,7 @@ function CatalogTab(ctx: RetailCtx) {
     ctx.notify(`${ids.length} phone${ids.length === 1 ? '' : 's'} updated${rememberModel ? '; the segment is remembered for those models' : ''}.`);
   };
   return <div className="retail-catalog">
-    <section className="retail-card"><h3>Phones by segment</h3>
+    <section className="retail-card screen-extra"><h3>Phones by segment</h3>
       <div className="filter-chips" role="group" aria-label="Segment filter">
         <button type="button" className={seg === 'all' ? 'active' : ''} onClick={() => setSeg('all')}>All <b>{records.length}</b></button>
         {[...segmentIds(state), 'other'].map(s => (counts[s] || seg === s) ? <button key={s} type="button" className={seg === s ? 'active' : ''} onClick={() => setSeg(s)}>{segLabel(state, s)} <b>{counts[s] || 0}</b></button> : null)}
@@ -156,7 +175,7 @@ function CatalogTab(ctx: RetailCtx) {
       </div>}
     </section>
     <section className="retail-card"><h3>Models</h3>
-      <div className="retail-inline"><input type="search" aria-label="Search models" placeholder="Search models" value={search} onChange={e => setSearch(e.target.value)} /><button type="button" className="subtle-btn" onClick={() => { setEditing({ code: '', name: '', abbreviation: '', segment: 'mid', monthly: {}, variants: [], custom: true }); setVariants(''); setColourLines(''); }}>+ Add model</button></div>
+      <div className="retail-inline">{ctx.query === undefined && <input type="search" aria-label="Search models" placeholder="Search models" value={search} onChange={e => setSearch(e.target.value)} />}<button type="button" className="subtle-btn" onClick={() => { setEditing({ code: '', name: '', abbreviation: '', segment: 'mid', monthly: {}, variants: [], custom: true }); setVariants(''); setColourLines(''); }}>+ Add model</button></div>
       <ul className="retail-list">{models.map(i => <li key={i.code}><span><strong>{i.abbreviation}</strong> <small>{i.name} · {i.code}{i.custom ? ' · edited' : ''}</small></span>
         <span className="retail-inline"><select aria-label={`Segment of ${i.name}`} value={segmentOf(state, i.code, month)} onChange={e => ctx.change(setModelSegment(state, i.code, e.target.value as Segment), 'segment')}>{[...segmentIds(state), 'other'].map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select>
           <button type="button" className="subtle-btn" onClick={() => { setEditing(i); setVariants(variantsText(i)); setColourLines(colourBox(state, i.code)); }}>Edit</button></span></li>)}</ul>
@@ -169,8 +188,8 @@ function CatalogTab(ctx: RetailCtx) {
       <label>Segment for {month} only<select value={editing.monthly[month] || ''} onChange={e => { const monthly = { ...editing.monthly }; if (e.target.value) monthly[month] = e.target.value as Segment; else delete monthly[month]; setEditing({ ...editing, monthly }); }}><option value="">Same as above</option>{segmentIds(state).map(s => <option key={s} value={s}>{segLabel(state, s)}</option>)}</select></label>
       <label>Colours, one per line: Name = abbreviations used in your report<textarea rows={4} aria-label="Colours of this model" value={colourLines} onChange={e => setColourLines(e.target.value)} placeholder={'Cream = CRM\nPink = PINK\nGraphite = GRPH'} /></label>
       <label>Variants, one per line: SKU | RAM | storage | colours<textarea rows={4} value={variants} onChange={e => setVariants(e.target.value)} placeholder="SM-A176BZKGINU | 6GB | 128GB | Black, Blue" /></label>
-      <div className="share-toolbar"><button type="button" className="primary" disabled={!/^[A-Z0-9]{3,6}$/.test(editing.code)} onClick={() => { ctx.change(setModelColours(saveItem(state, { ...editing, variants: parseVariants(variants) }), editing.code.trim().toUpperCase(), parseColoursText(colourLines)), 'catalog edit'); setEditing(null); }}>Save</button>
-        {itemFor(state, editing.code) && state.catalog.some(c => c.code === editing.code) && <button type="button" className="subtle-btn danger" onClick={() => { ctx.change(resetItem(state, editing.code), 'catalog reset'); setEditing(null); }}>Reset to built-in</button>}
+      <div className="share-toolbar"><button type="button" className="primary" disabled={!/^[A-Z0-9]{3,6}$/.test(editing.code)} onClick={() => { if (ctx.saveModelName && !ctx.saveModelName(editing.code, editing.name)) return; ctx.change(setModelColours(saveItem(state, { ...editing, variants: parseVariants(variants) }), editing.code.trim().toUpperCase(), parseColoursText(colourLines)), 'catalog edit'); setEditing(null); }}>Save</button>
+        {itemFor(state, editing.code) && state.catalog.some(c => c.code === editing.code) && <button type="button" className="subtle-btn danger" onClick={() => { if (ctx.resetModelName && !ctx.resetModelName(editing.code)) return; ctx.change(resetItem(state, editing.code), 'catalog reset'); setEditing(null); }}>Reset to built-in</button>}
         <button type="button" className="subtle-btn" onClick={() => setEditing(null)}>Cancel</button></div></section>}
   </div>;
 }

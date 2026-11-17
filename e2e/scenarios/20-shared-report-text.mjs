@@ -6,7 +6,7 @@ import { requireShareAllowed } from '../scripts/lib.mjs';
 const c = ctx(), results = [];
 requireShareAllowed(c.device);
 const share = text => adb(c.device, 'shell', `am start -a android.intent.action.SEND -t text/plain -p ${c.app} --es android.intent.extra.TEXT '${text}'`);
-const reportsFilled = marker => js(c, `(()=>{const tab=[...document.querySelectorAll('.retail-tabs button')].find(b=>b.getAttribute('aria-selected')==='true');return !!tab&&tab.textContent.trim().startsWith('Reports')&&[...document.querySelectorAll('textarea')].some(t=>t.value.includes(${JSON.stringify(marker)}));})()`);
+const reportsFilled = marker => js(c, `(()=>{const title=document.querySelector('.results .view-head h2');return title?.textContent.trim()==='Report'&&[...document.querySelectorAll('textarea')].some(t=>t.value.includes(${JSON.stringify(marker)}));})()`);
 const waitFilled = async marker => { for (let i = 0; i < 40; i++) { try { if (await reportsFilled(marker)) return true; } catch { /* the page is still starting */ } await sleep(1500); } return false; };
 
 // 1. cold start: the app is not running when the text arrives

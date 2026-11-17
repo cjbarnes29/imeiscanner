@@ -15,6 +15,15 @@ const allowedOrigins = new Set(['https://cjbarnes29.github.io', 'http://localhos
 let accessKey = '';
 let processing = false;
 const stoppedJobs = new Set();
+const jobLocks = new Map();
+
+// Each job's manifest is a read/modify/write operation. Serialize requests for that job so parallel uploads cannot overwrite each other.
+async function withJobLock(id, action) {
+  const pending = (jobLocks.get(id) || Promise.resolve()).catch(() => {}).then(action);
+  jobLocks.set(id, pending);
+  try { return await pending; }
+  finally { if (jobLocks.get(id) === pending) jobLocks.delete(id); }
+}
 
 const jobPath = id => join(jobsRoot, id);
 const manifestPath = id => join(jobPath(id), 'manifest.json');
@@ -205,7 +214,10 @@ async function handle(request, response) {
     return json(response, 200, { jobs });
   }
   if (pathname === '/api/jobs' && request.method === 'POST') {
-    const input = JSON.parse((await bodyBuffer(request, 4096)).toString());
+    let input;
+    try { input = JSON.parse((await bodyBuffer(request, 4096)).toString()); }
+    catch (error) { if (error.status) throw error; return json(response, 400, { error: 'Send a valid JSON object with a photo count.' }); }
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return json(response, 400, { error: 'Send a JSON object with a photo count.' });
     const count = Number(input.count);
     if (!Number.isInteger(count) || count < 1 || count > 500) return json(response, 400, { error: 'Choose between 1 and 500 photos.' });
     const id = randomUUID();
@@ -222,6 +234,7 @@ async function handle(request, response) {
   const match = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})(?:\/(photos|start|stop|records|images)(?:\/([^/]+))?)?$/);
   if (!match) return json(response, 404, { error: 'Not found' });
   const [, id, action, item] = match;
+  return withJobLock(id, async () => {
   const job = await loadJob(id);
   if (!job) return json(response, 404, { error: 'Scan job not found.' });
   if (!action && request.method === 'GET') return json(response, 200, { job: publicJob(job) });
@@ -262,6 +275,7 @@ async function handle(request, response) {
     return;
   }
   json(response, 404, { error: 'Not found' });
+  });
 }
 
 await mkdir(jobsRoot, { recursive: true });

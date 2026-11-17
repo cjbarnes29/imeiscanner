@@ -6,6 +6,7 @@ Standalone Node (`.mjs`) and PowerShell helpers for the IMEI Lens project: build
 ## Interface
 Build and release helpers (wired as npm lifecycle hooks):
 - `write-version.mjs` - writes `src/version.ts` (`APP_VERSION`, `APP_COMMIT`); runs in `predev`, `prebuild`, `pretypecheck`.
+- `copy-android-assets.mjs` (`npm run android:assets`) replaces the generated Android assets with exactly the current `dist/`. Run after the web build and before Gradle; this removes old hashed bundles.
 - `copy-ocr-assets.mjs` - copies the Tesseract worker, core and language data into `public/ocr`, and also copies `brands/profiles/*.json` into `public/brands/` (git-ignored) so the brand profiles reach `dist/`; `OCR_MODEL` env selects the model (default `4.0.0_best_int`).
 - `update-catalog.mjs` - crawls Samsung sitemaps/product pages and updates `public/samsung-catalog.json`; `CATALOG_PAGE_LIMIT` (default 80). Needs network.
 - `check-private-data.mjs` - privacy guard against real IMEIs in Git (`npm run check:private`; `--ci` for `npm run check:private:ci`). Allowed synthetic numbers are listed in `synthetic-imeis.allow`.
@@ -14,6 +15,8 @@ Unit-style tests (all in `npm test`): `test-records`, `test-device-splitting`, `
 
 Browser end-to-end checks (headless Edge/Chrome, not in `npm test`; run `npm run build` first, `scripts/e2e-*.mjs`). Extra needs per script:
 - Fully synthetic, nothing else needed: `e2e-layout`, `e2e-retail`, `e2e-simple`.
+- `node scripts/e2e-storage.mjs`: actual IndexedDB transactions in an isolated browser; snapshot retention, rollback, record/photo isolation, read/save failures with retry, and damaged-record protection. Build first; optional `SHOTS` saves warning screenshots.
+- `node scripts/test-server-api.mjs`: temporary scanner data directory; authorization, CORS, invalid requests, parallel uploads, stop state and image/path boundaries. Does not start OCR.
 - Need the private `test-photos/multi-02.jpg`: `e2e-bulk`, `e2e-camera`, `e2e-review`, `e2e-studio`.
 - `e2e-scan` needs `test-photos/multi-NN.jpg` (photo numbers as arguments, default `02 04 09`).
 - `e2e-queue` needs `node scripts/make-composites.mjs` first (reads `test-photos/composite/`).

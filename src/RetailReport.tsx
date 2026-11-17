@@ -162,13 +162,13 @@ export function ReportTab(ctx: RetailCtx) {
         <p className="settings-help">Scanned in the app (in stock): {sum.scannedPhones} · report stock: {sum.reportStock}</p>
         <p className="rep-chips"><span className="rep-chip ok">{sum.agree} agree</span><span className="rep-chip w">{sum.differ} differ</span><span className="rep-chip q">{sum.unknown} unknown</span>{sum.checked > 0 && <span className="rep-chip ok">{sum.checked} checked by you</span>}{sum.empty > 0 && <span className="rep-chip">{sum.empty} no stock</span>}{sum.notScanned > 0 && <span className="rep-chip">{sum.notScanned} not scanned yet</span>}</p>
         <div className="share-toolbar"><button type="button" className="primary" onClick={copy}>Copy report</button><button type="button" className="subtle-btn" onClick={send}>Send</button>
-          <button type="button" className="subtle-btn" onClick={() => setPasting(true)}>Paste new</button><button type="button" className="subtle-btn" onClick={newDay}>New day</button></div>
+          <button type="button" className="subtle-btn screen-extra" onClick={() => setPasting(true)}>Paste new</button><button type="button" className="subtle-btn screen-extra" onClick={newDay}>New day</button></div>
         {report.totalSellout && <p className="settings-help">Sellout in the list: {listedSold(report)} · the report says {report.totalSellout.typed}
           {report.totalSellout.acknowledged ? <> · includes {report.totalSellout.extra} phone{report.totalSellout.extra === 1 ? '' : 's'} not in the list</> : sum.totalDiff !== 0 && <> <span className="rep-chip w">{sum.totalDiff! > 0 ? `${sum.totalDiff} more than the list` : `${-sum.totalDiff!} fewer than the list`}</span> <button type="button" className="subtle-btn" onClick={() => ctx.change({ ...state, report: acknowledgeTotal(report) }, '')}>Includes phones not listed</button></>}</p>}
         <div className="filter-chips" role="group" aria-label="Show"><button type="button" className={only === 'all' ? 'active' : ''} onClick={() => setOnly('all')}>All lines <b>{items.length}</b></button><button type="button" className={only === 'problems' ? 'active' : ''} onClick={() => setOnly('problems')}>Only problems <b>{sum.differ + sum.unknown}</b></button></div>
       </section>
 
-      {labels.length > 0 && <details className="retail-card rep-colours-card" open={labels.some(l => !l.resolved)}>
+      {labels.length > 0 && <details className="retail-card rep-colours-card screen-extra" open={labels.some(l => !l.resolved)}>
         <summary><strong>Colour names</strong> {labels.some(l => !l.resolved) ? <span className="rep-chip w">{labels.filter(l => !l.resolved).length} to name</span> : <span className="rep-chip ok">all named</span>}</summary>
         <p className="settings-help">One row for each short form in the report (CRM, GRPH…). Name it once and every line that uses it is filled in, for every model. Tap a name or type one.</p>
         <datalist id="rep-all-colours">{COLOUR_DICTIONARY.map(c => <option key={c.name} value={c.name} />)}</datalist>

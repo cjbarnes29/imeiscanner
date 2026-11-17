@@ -26,7 +26,7 @@ macOS or Linux (bash):
 
 ```bash
 npm run build
-mkdir -p android/app/src/main/assets && cp -R dist/. android/app/src/main/assets/
+npm run android:assets
 gradle --project-dir android :app:assembleDebug
 ```
 
@@ -34,8 +34,7 @@ Windows (PowerShell):
 
 ```powershell
 npm run build
-New-Item -ItemType Directory -Force android/app/src/main/assets | Out-Null
-Copy-Item -Recurse -Force dist/* android/app/src/main/assets/
+npm run android:assets
 gradle --project-dir android :app:assembleDebug
 ```
 

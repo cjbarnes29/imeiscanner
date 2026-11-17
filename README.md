@@ -1,5 +1,9 @@
 # RetailLens — Scan. Sell. Track. Achieve.
 
+RetailLens opens each screen with its main content. **Show all** reveals the extra controls; **Show less** returns to the summary. Targets show segment progress and percentage caps first. Models & segments shows the models inside each segment, with one search and a shared model editor.
+
+The main tabs are **Home, Scan, Phones, Report, Targets, Export**. **More** has three groups: **People & sharing** (people, suggestions, allocation by model and sending), **Models & segments** (names, segments, colours and Samsung source tools), and **Settings & backup** (preferences, backup, restore and history). Existing tools are kept inside these groups.
+
 **RetailLens** is an offline retail app for phone sellers: it scans label photos (IMEI Lens is the scanning engine), sorts phones into segments, tracks targets and stock, recommends who should get which phones, and writes your WhatsApp report. See [docs/RETAILLENS-PROGRESS.md](docs/RETAILLENS-PROGRESS.md) for what RetailLens does and how far it has got. RetailLens appears in Detailed mode only, and it is not in the tab table below. Everything below describes the scanning engine, which works as before.
 
 # IMEI Lens — Photo Scanner (the scanning engine)

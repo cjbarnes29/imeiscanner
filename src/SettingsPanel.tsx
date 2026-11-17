@@ -19,6 +19,9 @@ type Props = {
   onChangeCode: (from: string, to: string) => number;
   onDownload: (blob: Blob, filename: string) => void;
   onClose: () => void;
+  modelsOnly?: boolean;
+  onOpenModelManager?: () => void;
+  onOpenBackup?: () => void;
 };
 
 type SpeedBridge = { speedInfo?: () => string; setSpeedMode?: (mode: string) => boolean };
@@ -73,7 +76,7 @@ function readSaveInfo(): SaveInfo | null {
 }
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose }: Props) {
+export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose, modelsOnly = false, onOpenModelManager, onOpenBackup }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
@@ -213,10 +216,12 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   const [textSize, setTextSize] = useState<TextSizeId>(readTextSize);
   const [theme, setTheme] = useState<ThemeId>(readTheme);
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
-    <div className="modal-head"><h2>Settings</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
+    <div className="modal-head"><h2>{modelsOnly ? 'Model sources' : 'Settings & backup'}</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
     <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
 
+    <div hidden={modelsOnly}>
+    <div className="settings-actions">{onOpenModelManager && <button type="button" className="primary" onClick={onOpenModelManager}>Models & segments</button>}{onOpenBackup && <button type="button" className="subtle-btn" onClick={onOpenBackup}>Backup, restore & history</button>}</div>
     <h3>Help</h3>
     <div className="settings-learn"><button type="button" className="primary" onClick={() => setGuide('tutorials')}>Tutorials: how to do everything</button><button type="button" className="subtle-btn" onClick={() => setGuide('new')}>What’s new</button></div>
     <h3>Colour</h3>
@@ -259,6 +264,8 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
       </li>)}
     </ul>
 
+    </div>
+    <div hidden={!modelsOnly && !!onOpenModelManager}>
     <h3>Devices in my scans</h3>
     <p className="settings-help">{devices.rows.length ? (missingCount ? <><b>{missingCount}</b> scanned model{missingCount === 1 ? ' is' : 's are'} not in any catalog. Add a name so {missingCount === 1 ? 'it shows' : 'they show'} instead of the code.</> : 'Every scanned model is in a catalog or has your name.') : 'No scanned models yet. Scan some phones and they appear here.'}{devices.noCode > 0 && ` ${devices.noCode} phone${devices.noCode === 1 ? ' has' : 's have'} no model code.`}</p>
     {devices.rows.length > 0 && <div className="settings-tabs" role="group" aria-label="Show devices">
@@ -343,6 +350,7 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     <SamsungCatalog onUpdated={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />
     <small className="settings-help">Deleting the catalog does not touch your models, your scanned phones or the built-in list.</small>
     {catalogOpen && <CatalogDialog onClose={() => setCatalogOpen(false)} onChanged={() => { setCatalogTick(value => value + 1); onCatalogChange(); }} />}
+    </div>
     {guide === 'new' && <WhatsNewDialog onClose={() => setGuide('')} onTutorials={() => setGuide('tutorials')} />}
     {guide === 'tutorials' && <TutorialsDialog onClose={() => setGuide('')} />}
     <AuthorCredit />

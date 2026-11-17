@@ -550,9 +550,17 @@ function looksMostlyWhite(canvas: HTMLCanvasElement) {
   return samples > 0 && bright / samples >= 0.62;
 }
 
+/** Validate the fields used by the screens before rendering saved data. Failed reads must never trigger an empty save over the originals. */
+function readableRecords(value: unknown): value is RecordItem[] {
+  if (!Array.isArray(value)) return false;
+  const required = ['id', 'name', 'dataUrl', 'model', 'imei', 'raw'];
+  const optional = ['imei2', 'serial', 'originalDataUrl', 'cropDataUrl', 'personId', 'pictureId', 'sourcePictureId', 'createdAt'];
+  return value.every(row => row && typeof row === 'object' && required.every(key => typeof row[key] === 'string') && optional.every(key => row[key] === undefined || typeof row[key] === 'string') && row.id);
+}
 function readRecords(): RecordItem[] {
   try {
     const stored = JSON.parse(localStorage.getItem(STORE) || '[]') as Partial<RecordItem>[];
+    if (!readableRecords(stored)) return [];
     return stored.map((row, index) => ({
       ...row,
       number: Number.isInteger(row.number) && row.number! >= 3 ? row.number! : index + 3,
@@ -1906,6 +1914,7 @@ export default function App() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [splitUndo, setSplitUndo] = useState<{ ids: string[]; text: string } | null>(null);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
+  const inventoryWritable = useRef(true);
   // Excel "Download picture" links open the app at #picture=<id>.
   const readLinkedPicture = () => new URLSearchParams(location.hash.slice(1)).get('picture');
   const [linkedPictureId, setLinkedPictureId] = useState<string | null>(readLinkedPicture);
@@ -2016,22 +2025,39 @@ export default function App() {
   const [retail, setRetail] = useState<RetailState>(emptyState);
   const retailRef = useRef(retail);
   const [retailLoaded, setRetailLoaded] = useState(false);
+  const [retailError, setRetailError] = useState('');
+  const [retailLoadAttempt, setRetailLoadAttempt] = useState(0);
+  const retailSaveChain = useRef<Promise<void>>(Promise.resolve());
   const [sharedText, setSharedText] = useState('');
+  const [reportShareId, setReportShareId] = useState(0);
   useEffect(() => {
     let alive = true;
     void loadRetail().then(saved => {
       if (!alive) return;
       const next = rollover(saved, retailMonth(dateKey())); // a new month closes the old one into history (nothing is deleted)
       retailRef.current = next; setRetail(next); setRetailLoaded(true);
-      if (next !== saved) void saveRetail(next);
+      setRetailError('');
+      if (next !== saved) persistRetail(next);
+    }).catch(error => {
+      console.error('Could not load the RetailLens data', error);
+      if (alive) setRetailError('Retail data could not be opened. Try again before editing targets, stock or reports.');
     });
     return () => { alive = false; };
-  }, []);
+  }, [retailLoadAttempt]);
+  function persistRetail(next: RetailState, before?: RetailState, why = 'change') {
+    retailSaveChain.current = retailSaveChain.current.catch(() => {}).then(() => saveRetail(next, before, why)).then(() => {
+      setRetailError('');
+    }).catch(error => {
+      console.error('Could not save the RetailLens data', error);
+      setRetailError('Retail changes could not be saved on this device. Try again or download a backup in More > Backup and data before refreshing.');
+    });
+  }
   /** Saves RetailLens data. `why` keeps the state before the change as an Undo point; '' = a trivial change (no snapshot). */
   function changeRetail(next: RetailState, why: string) {
+    if (!retailLoaded) return;
     const before = retailRef.current;
     retailRef.current = next; setRetail(next);
-    void saveRetail(next, why ? before : undefined, why).catch(error => console.error('Could not save the RetailLens data', error));
+    persistRetail(next, why ? before : undefined, why);
   }
   /** The tab under Scanned records (Detailed mode): the list, giving models out, or sharing. */
   const [recordsTab, setRecordsTab] = useState<'records' | 'models' | 'share' | 'people' | 'retail'>('records');
@@ -2040,8 +2066,12 @@ export default function App() {
   /** Which RetailLens section is open (Home = today). Home, Report and Targets are on the bottom bar; the rest are under the ⋯ More menu. */
   const [retailSub, setRetailSub] = useState<RetailSub>('today');
   const [moreOpen, setMoreOpen] = useState(false);
+  useBackLayer(moreOpen, () => setMoreOpen(false), 'more');
   type View = 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export' | 'home' | 'report' | 'targets';
   const activeView: View = mainView !== 'results' ? mainView : recordsTab === 'retail' ? (retailSub === 'today' ? 'home' : retailSub === 'report' ? 'report' : retailSub === 'targets' ? 'targets' : 'retail') : recordsTab;
+  const detailViewKey = activeView === 'retail' ? retailSub : activeView;
+  const [expandedViews, setExpandedViews] = useState<Record<string, boolean>>({});
+  const showAllDetails = !!expandedViews[detailViewKey];
   // The phone's Back button goes to the screen before, and closes a popup first (see backnav.ts).
   useBackNav(`${mainView}|${recordsTab}|${retailSub}`, key => { const [m, r, sub] = key.split('|'); setMainView(m as typeof mainView); setRecordsTab(r as typeof recordsTab); setRetailSub(sub as RetailSub); window.scrollTo({ top: 0 }); });
   function openView(view: View) {
@@ -2053,8 +2083,8 @@ export default function App() {
   /** The title of the screen that is open, and a short status line under it. */
   const viewInfo = (() => {
     const back = recordsTab !== 'records' && !(recordsTab === 'retail' && ['today', 'report', 'targets'].includes(retailSub));
-    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'Give and share', segments: 'Segments', catalog: 'Catalog', data: 'Backup and data' };
-    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' ? 'People' : recordsTab === 'models' || recordsTab === 'share' ? 'Give and share' : retailTitles[retailSub];
+    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'People & sharing', segments: 'Models & segments', catalog: 'Models & segments', data: 'Backup and data' };
+    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' ? 'People & sharing' : retailTitles[retailSub];
     const unassigned = records.filter(r => r.personId === UNASSIGNED).length;
     const sub = recordsTab === 'records' ? (records.length ? `${records.length} scanned${unassigned ? ` · ${unassigned} unassigned` : ''}` : 'Nothing scanned yet')
       : recordsTab === 'retail' && retailSub === 'today' ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : '';
@@ -2072,7 +2102,7 @@ export default function App() {
     const take = () => {
       const text = androidBridge?.takeSharedText?.() || '';
       if (!text) return;
-      setSharedText(text); setSimpleView(false); setMainView('results'); setRecordsTab('retail'); setRetailSub('report');
+      setSharedText(text); setReportShareId(id => id + 1); setSimpleView(false); setMainView('results'); setRecordsTab('retail'); setRetailSub('report');
     };
     take();
     window.addEventListener('android-shared-text', take);
@@ -2081,7 +2111,7 @@ export default function App() {
   const wasBusy = useRef(false);
   const startCount = useRef(0);
   // First open with nothing saved starts on Scan; a finished scan that added phones shows them.
-  useEffect(() => { if (inventoryLoaded && !records.length) setMainView('scan'); }, [inventoryLoaded]);
+  useEffect(() => { if (inventoryLoaded && !records.length && !sharedText) setMainView('scan'); }, [inventoryLoaded, sharedText]);
   useEffect(() => {
     if (busy && !wasBusy.current) startCount.current = records.length;
     if (!busy && wasBusy.current && records.length > startCount.current) { setMainView('results'); setRecordsTab('records'); window.scrollTo({ top: 0 }); }
@@ -2104,7 +2134,16 @@ export default function App() {
   // Samsung catalog (bundled, refreshed in the background): turns model codes into phone names.
   const [catalogEntries, setCatalogEntries] = useState<CatalogEntry[]>(() => readCatalogEntries());
   const [customModels, setCustomModels] = useState<CustomModels>(readCustomModels);
+  function applyCustomModelNames(next: CustomModels) {
+    const changed = new Set([...Object.keys(customModels), ...Object.keys(next)].filter(code => customModels[code] !== next[code]));
+    setCustomModels(next);
+    if (!retailLoaded || !changed.size) return;
+    const before = retailRef.current;
+    const catalog = before.catalog.map(item => changed.has(item.code) ? { ...item, name: next[item.code] || phoneInfo(`SM-${item.code}`, catalogEntries, {}).name } : item);
+    if (catalog.some((item, i) => item !== before.catalog[i])) changeRetail({ ...before, catalog }, 'model names');
+  }
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelSourcesOpen, setModelSourcesOpen] = useState(false);
   useBackLayer(settingsOpen, () => setSettingsOpen(false), 'settings');
   useEffect(() => { void loadSamsungCatalog().then(() => setCatalogEntries(readCatalogEntries())).catch(() => {}); }, []);
   // A phone whose model code was not readable borrows the name of another scanned phone with the
@@ -2206,6 +2245,7 @@ export default function App() {
     loadInventory<RecordItem>()
       .then(saved => {
         if (mounted) {
+          if (saved !== undefined && !readableRecords(saved)) throw new Error('Saved scan records have missing or invalid fields.');
           setRecords(markDuplicateRecords(saved === undefined ? readRecords() : saved));
           setInventoryLoaded(true);
         }
@@ -2213,9 +2253,10 @@ export default function App() {
       .catch(error => {
         console.error('Unable to open device storage', error);
         if (mounted) {
+          inventoryWritable.current = false;
           setRecords(markDuplicateRecords(readRecords()));
           setInventoryLoaded(true);
-          setStorageWarning('Large batch storage is unavailable in this browser. Export your records before closing this page.');
+          setStorageWarning('Saved scan records could not be read. Existing records and photos will not be overwritten. Refresh to try again; export any new scans before closing this page.');
         }
       });
     return () => { mounted = false; };
@@ -2402,7 +2443,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('imei-lens-simple-view', String(simpleView)); }, [simpleView]);
 
   useEffect(() => {
-    if (!inventoryLoaded) return;
+    if (!inventoryLoaded || !inventoryWritable.current) return;
     const timer = window.setTimeout(() => {
       saveChain.current = saveChain.current.catch(() => {}).then(async () => {
         try {
@@ -3085,7 +3126,7 @@ export default function App() {
   // phones leaving the stock change the report's colour counts and stock. Taking a sale back undoes it. See retail/soldsync.ts and retail/reportsync.ts.
   const autoGiveSeen = useRef('');
   useEffect(() => {
-    if (!retailLoaded || !inventoryLoaded) return;
+    if (!retailLoaded || !inventoryLoaded || !inventoryWritable.current) return;
     // phones that appear while Store only is on are kept as Held
     if (!seenIds.current) seenIds.current = new Set(retailRecords.map(r => r.id));
     else {
@@ -3187,7 +3228,7 @@ export default function App() {
       </ul>
       <div className="unknown-more">
         <strong>More you can do</strong>
-        <button type="button" className="subtle-btn" onClick={() => setSettingsOpen(true)}>Add many names at once (Settings)</button>
+        <button type="button" className="subtle-btn" onClick={() => { setModelSourcesOpen(true); setSettingsOpen(true); }}>Add many model names</button>
         <button type="button" className="subtle-btn" onClick={() => jumpTo('records', 'Review')}>Show phones that need review</button>
       </div>
     </div>
@@ -4848,14 +4889,14 @@ export default function App() {
           </div>
           <button type="button" className="settings-btn reset-all-btn" aria-label="Reset: delete all scanned IMEIs" title="Reset: delete all scanned IMEIs" onClick={() => setResetOpen(true)}><Trash2 size={18} /></button>
           {!simpleView && <button type="button" className="settings-btn" aria-label="More" title="More" onClick={() => setMoreOpen(true)}><Ellipsis size={18} /></button>}
-          <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
+          <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => { setModelSourcesOpen(false); setSettingsOpen(true); }}><Settings size={18} /></button>
           <span className="local-pill">
             <span /> {storageWarning ? 'Some records not saved' : 'Stored on this device'}
           </span>
         </div>
       </header>
 
-      {settingsOpen && <SettingsPanel onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={setCustomModels} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel modelsOnly={modelSourcesOpen} onOpenModelManager={() => { setSettingsOpen(false); openMore('segments'); }} onOpenBackup={() => { setSettingsOpen(false); openMore('data'); }} onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={applyCustomModelNames} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
         <h2>Check this</h2>
         <p>{warning}</p>
@@ -4873,13 +4914,14 @@ export default function App() {
         <SheetHandle onClose={() => setMoreOpen(false)} />
         <div className="modal-head"><h2>More</h2><button className="iconbtn" aria-label="Close" onClick={() => setMoreOpen(false)}><X size={17} /></button></div>
         <ul className="more-list">
-          {([['people', 'People', `${personGroups.length} people · devices and targets`], ['gives', 'Give and share', 'Suggest, give out by model, then send'], ['segments', 'Segments', 'Fold 1, Fold 2 and your own'], ['catalog', 'Catalog', 'Models, abbreviations, colours'], ['data', 'Backup and data', 'Backup, restore, undo, history']] as const).map(([key, label, hint]) =>
+          {([['people', 'People & sharing', `${personGroups.length} people · give phones and send`], ['segments', 'Models & segments', 'Models, segments, colours and Samsung catalog']] as const).map(([key, label, hint]) =>
             <li key={key}><button type="button" onClick={() => openMore(key)}><strong>{label}</strong><small>{hint}</small></button></li>)}
-          <li><button type="button" onClick={() => { setMoreOpen(false); setSettingsOpen(true); }}><strong>Settings</strong><small>Simple or Detailed mode, speed, language</small></button></li>
+          <li><button type="button" onClick={() => { setMoreOpen(false); setModelSourcesOpen(false); setSettingsOpen(true); }}><strong>Settings & backup</strong><small>Preferences, backup, restore and history</small></button></li>
         </ul>
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
-      <main className={`${collapsedPanels.length ? 'compact-page' : ''}${' nav-mode'}${mainView === 'scan' ? ' scan-first' : ''}${simpleView ? ' simple-mode' : ''}`}>
+      <main data-detail-mode={showAllDetails ? 'all' : 'summary'} className={`${collapsedPanels.length ? 'compact-page' : ''}${' nav-mode'}${mainView === 'scan' ? ' scan-first' : ''}${simpleView ? ' simple-mode' : ''}`}>
+        {!simpleView && <div className="screen-details-toggle"><button type="button" className="subtle-btn" aria-label={showAllDetails ? 'Show fewer details' : 'Show all details'} aria-expanded={showAllDetails} onClick={() => setExpandedViews(old => ({ ...old, [detailViewKey]: !showAllDetails }))}>{showAllDetails ? 'Show less' : 'Show all'}</button></div>}
         {!bulkOpen && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button> <button type="button" className="subtle-btn" onClick={openPhotoEdit}>Bulk edit photos</button></div>}
         {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
@@ -4901,6 +4943,7 @@ export default function App() {
           <div><button className="primary" onClick={() => setBulkDraft(pendingDraft)}>Resume</button><button className="subtle-btn" onClick={() => { clearDraft(localStorage); setPendingDraft(null); setToast('Saved crop boxes discarded.'); }}>Discard</button></div>
         </div>; })()}
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
+        {retailError && <div className="storage-warning" role="alert">{retailError} <button type="button" className="subtle-btn" onClick={() => { if (retailLoaded) persistRetail(retailRef.current); else setRetailLoadAttempt(n => n + 1); }}>Try retail storage again</button></div>}
         {splitSuggestions.some(id => records.some(r => r.id === id)) && <div className="archive-banner" role="status"><span>{splitSuggestions.filter(id => records.some(r => r.id === id)).length} photo(s) may hold several products. Nothing was changed automatically.</span> <button type="button" className="subtle-btn" onClick={() => { setSelectedIds(splitSuggestions.filter(id => records.some(r => r.id === id))); setBulkCropOpen(true); }}>Review and split</button></div>}
         {archive.some(item => !item.restoredAt) && <div className="archive-banner" role="status"><span>{archive.filter(item => !item.restoredAt).length} record{archive.filter(item => !item.restoredAt).length === 1 ? ' is' : 's are'} archived (split originals and duplicates; nothing deleted).</span> <button type="button" className="subtle-btn" onClick={() => setArchiveOpen(true)}>View / restore</button></div>}
 
@@ -5125,7 +5168,7 @@ export default function App() {
               </span>
             </label>
 
-            <label className="export-format-picker">
+            <label className="export-format-picker screen-extra">
               <span>Information to include</span>
               <select value={reportLayout} onChange={e => { setReportLayout(e.target.value as typeof reportLayout); setDownloadStatus(''); }}>
                 <option value="imei_photo">IMEI + picture with download button (Excel)</option>
@@ -5155,7 +5198,7 @@ export default function App() {
               </>
             )}
 
-            <label className="export-format-picker">
+            <label className="export-format-picker screen-extra">
               <span>Records to export</span>
               <select value={imeiFilter} onChange={e => { setImeiFilter(e.target.value as typeof imeiFilter); setDownloadStatus(''); }}>
                 <option value="all">All records ({selectedOnly ? selectedRows.length : records.length})</option>
@@ -5316,16 +5359,16 @@ export default function App() {
             </div>
           </div>}
 
-          {!simpleView && (recordsTab === 'models' || recordsTab === 'share' || (recordsTab === 'retail' && retailSub === 'gives')) && <div className="give-tabs" role="tablist" aria-label="Give and share">
-            {([['gives', 'Suggested', recordsTab === 'retail'], ['models', 'By model', recordsTab === 'models'], ['share', 'Send', recordsTab === 'share']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={on ? 'on' : ''} onClick={() => openMore(key)}>{label}</button>)}
+          {!simpleView && (recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' || (recordsTab === 'retail' && retailSub === 'gives')) && <div className="give-tabs people-sharing-tabs" role="tablist" aria-label="People and sharing">
+            {([['people', 'People', recordsTab === 'people'], ['gives', 'Suggested', recordsTab === 'retail'], ['models', 'By model', recordsTab === 'models'], ['share', 'Send', recordsTab === 'share']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={on ? 'on' : ''} onClick={() => openMore(key)}>{label}</button>)}
           </div>}
           {!simpleView && recordsTab === 'models' && modelsTab}
           {!simpleView && recordsTab === 'records' && filter === 'Unknown' && unknownTab}
           {!simpleView && recordsTab === 'people' && peopleTab}
-          {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
+          {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub key={reportShareId} state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
             assign={assignOwners} readImage={readScreenshotText} notify={setToast} download={saveDirectFile} share={text => { void shareOrCopyText(text, 'The report'); }}
             counts={{ scanning: androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing') ? Math.max(0, androidJob.count - androidJob.completed) : 0, needsReview: needLookCount }}
-            sharedText={sharedText} openRecords={filter => jumpTo('records', filter)} sub={retailSub} openSub={setRetailSub} />}
+            sharedText={sharedText} expanded={showAllDetails} modelSources={[...knownModels].map(([code, name]) => ({ code, name: customModels[code] || SAMSUNG_MODELS[code] || name }))} saveModelName={(code, name) => { const next = { ...customModels, [code]: cleanName(name) }; if (!writeCustomModels(next)) { setToast('Could not save the model name. Device storage is full.'); return false; } setCustomModels(next); return true; }} resetModelName={code => { const next = { ...customModels }; delete next[code]; if (!writeCustomModels(next)) { setToast('Could not reset the model name.'); return false; } setCustomModels(next); return true; }} openModelSources={() => { setModelSourcesOpen(true); setSettingsOpen(true); }} openRecords={filter => jumpTo('records', filter)} sub={retailSub} openSub={setRetailSub} />}
           {!simpleView && recordsTab === 'share' && shareTab}
 
           <div className="records-tab-body" hidden={!simpleView && recordsTab !== 'records'}>
