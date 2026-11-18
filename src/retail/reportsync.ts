@@ -6,7 +6,7 @@
  */
 import { itemFor } from './catalog';
 import { canonColour, resolveColour } from './colours';
-import { inStock, variantOf, type StockSource } from './inventory';
+import { realStock, variantOf, type StockSource } from './inventory';
 import { catalogIndex, matchModel, splitName } from './reconcile';
 import type { ReportItem, ReportPart, RetailState, StockReport } from './types';
 
@@ -18,7 +18,7 @@ const widthOf = (raw: string) => Math.min(4, Math.max(2, (raw.replace(/\D/g, '')
 /** model | storage | colour -> how many scanned phones are in stock. */
 export function scanCounts(state: RetailState, records: StockSource[]): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const source of inStock(state, records)) {
+  for (const source of realStock(state, records)) {
     const item = itemFor(state, source.model);
     if (!item) continue;
     const v = variantOf(state, source);
@@ -42,7 +42,7 @@ function existCounts(state: RetailState, records: StockSource[]): Record<string,
 }
 
 /** The report with the phones scanned so far taken as already in it (used right after pasting). */
-export const withBaseline = (state: RetailState, report: StockReport, records: StockSource[]): StockReport => ({ ...report, scanBase: scanCounts(state, records) });
+export const withBaseline = (state: RetailState, report: StockReport, records: StockSource[]): StockReport => ({ ...report, releaseRevision: crypto.randomUUID(), scanBase: scanCounts(state, records) });
 
 const sameCounts = (a: Record<string, number>, b: Record<string, number>) => { const ka = Object.keys(a), kb = Object.keys(b); return ka.length === kb.length && ka.every(k => a[k] === b[k]); };
 

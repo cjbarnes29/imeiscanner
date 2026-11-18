@@ -13,13 +13,17 @@ import { perDayText, MIN_PACE_DAYS } from './retail/pace';
 import { outlookFor, type Advice } from './retail/forecast';
 import { daysInMonth, localDay, monthOf, type CatalogItem, type Segment } from './retail/types';
 import { GivesTab, DataTab } from './RetailHub2';
+import { PlanSummary, PlanTab } from './RetailPlan';
+import { HelpButton } from './Guide';
+import { DeliveryPackets } from './RetailDelivery';
+import { QuickUploadCheck, ScheduleReminder } from './RetailCalendarActivity';
 import { ReportTab } from './RetailReport';
 import { TargetsTab, SegmentsTab } from './RetailTargets';
-import { last4, updateDay, type RetailCtx, type RetailRecord } from './retail/ui-helpers';
+import { last4, timeOf, updateDay, type RetailCtx, type RetailRecord } from './retail/ui-helpers';
 export type { RetailCtx, RetailRecord };
 
 /** The RetailLens sections. Home (today), Report and Targets are on the bottom bar; Gives, Segments, Catalog and Data are under the ⋯ More menu. */
-export type RetailSub = 'today' | 'report' | 'targets' | 'gives' | 'segments' | 'catalog' | 'data';
+export type RetailSub = 'today' | 'report' | 'targets' | 'gives' | 'plan' | 'segments' | 'catalog' | 'data';
 /** Which section is open is decided by the app (bottom bar / More menu); this shows it. */
 export function RetailHub(ctx: RetailCtx & { sub?: RetailSub; openSub?: (sub: RetailSub) => void }) {
   const sub: RetailSub = ctx.sub || (ctx.sharedText ? 'report' : 'today');
@@ -29,6 +33,7 @@ export function RetailHub(ctx: RetailCtx & { sub?: RetailSub; openSub?: (sub: Re
     {sub === 'report' && <ReportTab {...ctx} />}
     {sub === 'targets' && <TargetsTab {...ctx} />}
     {sub === 'gives' && <GivesTab {...ctx} />}
+    {sub === 'plan' && <PlanTab {...ctx} />}
     {(sub === 'segments' || sub === 'catalog') && <ModelManager {...ctx} />}
     {sub === 'data' && <DataTab {...ctx} />}
   </div>;
@@ -61,6 +66,12 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
   }, [records]);
   const unassigned = records.filter(r => !r.personId).length;
   return <div className="retail-today">
+    {!records.length && !Object.keys(state.targets[monthOf(today)] || {}).length && <section className="retail-card first-use-checklist"><div className="plan-top"><h3>Start here</h3><HelpButton topic="Uploading and adding phones" /></div><p className="settings-help">Set up your team, then scan. You can edit these choices later.</p><ol><li><button className="plan-link" onClick={ctx.openPeople}>Add or name your people →</button></li><li><button className="plan-link" onClick={ctx.openModels}>Check models and segments →</button></li><li><button className="plan-link" onClick={ctx.openTargets}>Set monthly targets and caps →</button></li><li><button className="plan-link" onClick={ctx.openScan}>Upload or scan labels →</button></li><li><button className="plan-link" onClick={ctx.openPlan}>Choose Store or calculate a release plan →</button></li></ol><p className="settings-help">Tap ? Help on any screen for an interactive demo. Practice uses sample data and never changes your records.</p></section>}
+    <ScheduleReminder {...ctx} />
+    <PlanSummary {...ctx} />
+    {(state.deliveryPackets?.length || 0) > 0 && <DeliveryPackets {...ctx}/>}
+    <QuickUploadCheck {...ctx} />
+    <section className="retail-card accessory-home-summary"><div className="plan-top"><h3>Tablets & accessories</h3><strong>{Object.values(state.accessoryStock||{}).reduce((n,r)=>n+r.quantity,0)} stock</strong></div><p className="settings-help">{state.accessoryReport?`${reportItems(state.accessoryReport).reduce((n,r)=>n+r.sold,0)} sales listed · Report date ${state.accessoryReport.dateText||'not set'}`:'Import Daily OSR to add stock, then review the final report.'}</p><button className="subtle-btn" onClick={ctx.openAccessoryReport}>Open tablets & accessories →</button></section>
     {people.length > 0 && <div className="who-chips" role="group" aria-label="Whose month"><button type="button" aria-pressed={everyone} className={everyone ? 'on' : ''} onClick={() => setPick('all')}><i className="who-av c4">★</i>Everyone</button>{people.map((p, k) => <button key={p.id} type="button" aria-pressed={!everyone && who === p.id} className={!everyone && who === p.id ? 'on' : ''} onClick={() => setPick(p.id)}><i className={`who-av c${k % 4}`}>{p.name.slice(0, 1).toUpperCase()}</i>{p.name}</button>)}</div>}
     <div className="retail-stats">
       <div><span>Report lines to check</span><strong className={check && check.differ + check.unknown ? 'amber' : ''}>{check ? check.differ + check.unknown : '—'}</strong></div>
@@ -91,7 +102,7 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
     </section>}
     <section className="retail-card"><h3>Report</h3>
       {!state.report && <p className="settings-help">No report yet. Paste your WhatsApp report in Report: it is checked against the phones you scanned.</p>}
-      {state.report && check && <p className="settings-help">Last saved {state.report.savedAt.slice(0, 16).replace('T', ' ')} · {check.agree} agree · {check.differ} differ · {check.unknown} unknown.</p>}
+      {state.report && check && <p className="settings-help">Last saved {timeOf(state.report.savedAt)} · {check.agree} agree · {check.differ} differ · {check.unknown} unknown.</p>}
       <div className="share-toolbar"><button type="button" className="subtle-btn" onClick={ctx.openReport}>{state.report ? 'Open the report' : 'Paste a report'}</button></div>
     </section>
     {unassigned > 0 && <section className="retail-card"><h3>Unassigned phones</h3><p className="settings-help">{unassigned} phone{unassigned === 1 ? ' has' : 's have'} no person yet.</p><div className="share-toolbar"><button type="button" className="subtle-btn" onClick={() => ctx.openRecords('All')}>Open Phones</button></div></section>}

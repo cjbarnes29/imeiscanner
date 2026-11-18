@@ -7,7 +7,7 @@
  */
 import { fullCatalog, itemFor } from './catalog';
 import { canonColour, modelColourNames, resolveColour } from './colours';
-import { inStock, variantOf, type StockSource } from './inventory';
+import { realStock, variantOf, type StockSource } from './inventory';
 import { listedSold, partsSum, hasUnreadable, reportItems } from './stockreport';
 import type { CatalogItem, ReportItem, RetailState, StockReport } from './types';
 
@@ -86,7 +86,7 @@ type Scan = { source: StockSource; code: string; storage: string; ram: string; c
 function scannedIndex(state: RetailState, records: StockSource[]): { byCode: Map<string, Scan[]>; total: number } {
   const byCode = new Map<string, Scan[]>();
   let total = 0;
-  for (const source of inStock(state, records)) {
+  for (const source of realStock(state, records)) {
     const item = itemFor(state, source.model);
     if (!item) continue;
     const v = variantOf(state, source);

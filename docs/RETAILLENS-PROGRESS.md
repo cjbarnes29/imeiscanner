@@ -1,5 +1,9 @@
 # RetailLens: progress, decisions, how to resume
 
+## In progress — Store and daily plans, 2026-11-18
+
+The current uncommitted feature work is documented in [HANDOFF-RELEASE-PLANNING.md](HANDOFF-RELEASE-PLANNING.md). This supersedes older Store-only semantics: stored unsold phones count in real stock, confirmed releases count as sales, and report inclusion is tracked separately. The user clarified that Auto refreshes daily proposals, never confirms releases; Home should prominently show Release today / Not today and upcoming editable days. Dated report drafts and final verification are still in progress at this checkpoint.
+
 ## GitHub checkpoint — 2026-11-18
 
 The user authorized committing and pushing the completed changes on `ux/photo-editor`, and rebuilding the RetailLens Test APK from the committed source. The audit and earlier local-work notes below describe the pre-publication checkpoint. Generated APKs, screenshots, test reports and agent state remain local and excluded from Git. No merge into main or production release is included in this checkpoint.

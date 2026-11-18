@@ -74,6 +74,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        RecoveryDiagnostics.install(this);
         cleanStaleCache();
         if (state == null) handleShare(getIntent());
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
@@ -897,6 +898,47 @@ public final class MainActivity extends Activity {
         }
 
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }
+
+        /** Read-only startup health check. No record fields, paths or contact data are returned. */
+        @JavascriptInterface public String recoveryInfo() {
+            JSONObject out = new JSONObject();
+            try {
+                JSONObject job = ScanStore.read(MainActivity.this);
+                boolean active = false;
+                for (androidx.work.WorkInfo work : WorkManager.getInstance(MainActivity.this).getWorkInfosForUniqueWork(WORK_NAME).get(2, java.util.concurrent.TimeUnit.SECONDS))
+                    if (!work.getState().isFinished()) active = true;
+                int count = job.optInt("count"), done = job.optInt("completed");
+                out.put("status", job.optString("status")); out.put("count", count); out.put("completed", done);
+                out.put("remaining", ScanRecovery.remaining(count, done)); out.put("active", active);
+                out.put("canResume", ScanRecovery.canResume(job.optString("id"),job.optString("status"),count,done,active));
+                out.put("notifications", androidx.core.app.NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled());
+                android.os.PowerManager power = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                out.put("batterySaver", power != null && power.isPowerSaveMode());
+                out.put("batteryUnrestricted", power != null && power.isIgnoringBatteryOptimizations(getPackageName()));
+                out.put("freeBytes", getFilesDir().getUsableSpace());
+                String crash = getSharedPreferences("recovery-diagnostics", MODE_PRIVATE).getString("last-crash", "");
+                if (!crash.isEmpty()) out.put("lastCrash", new JSONObject(crash));
+            } catch (Exception error) { try { out.put("checkError", error.getClass().getSimpleName()); } catch (Exception ignored) {} }
+            return out.toString();
+        }
+
+        @JavascriptInterface public boolean resumeInterruptedScan() {
+            try {
+                // KEEP is a second guard against replacing a worker which starts during this check.
+                for (androidx.work.WorkInfo work : WorkManager.getInstance(MainActivity.this).getWorkInfosForUniqueWork(WORK_NAME).get(2, java.util.concurrent.TimeUnit.SECONDS))
+                    if (!work.getState().isFinished()) return true;
+                if (!ScanStore.resume(MainActivity.this)) return false;
+                WorkManager.getInstance(MainActivity.this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP,new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+                notifyWeb(); return true;
+            } catch (Exception error) { return false; }
+        }
+
+        @JavascriptInterface public void openPerformanceSettings() {
+            runOnUiThread(() -> {
+                try { startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:"+getPackageName()))); }
+                catch (Exception ignored) { }
+            });
+        }
 
         @JavascriptInterface public boolean setSpeedMode(String mode) { return DeviceProfile.setMode(MainActivity.this, mode); }
 

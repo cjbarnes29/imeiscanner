@@ -1,3 +1,4 @@
+import { RecoveryPanel } from './RecoveryPanel';
 import { useEffect, useRef, useState } from 'react';
 import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
 import { SAMSUNG_MODELS } from './samsung-models';
@@ -8,6 +9,7 @@ import { readTextSize, saveTextSize, TEXT_SIZES, type TextSizeId } from './text-
 import { readTheme, saveTheme, THEMES, type ThemeId } from './theme';
 import { AuthorCredit, TutorialsDialog, WhatsNewDialog } from './Guide';
 import { APP_COMMIT, APP_VERSION } from './version';
+import { LocalAISettings } from './RetailPlanAI';
 
 type Props = {
   scannedModels: string[];
@@ -22,6 +24,7 @@ type Props = {
   modelsOnly?: boolean;
   onOpenModelManager?: () => void;
   onOpenBackup?: () => void;
+  onOpenLocalAI?: () => void;
 };
 
 type SpeedBridge = { speedInfo?: () => string; setSpeedMode?: (mode: string) => boolean };
@@ -62,7 +65,7 @@ function capacityRows(speed: SpeedInfo | null): { level: Level; title: string; d
     { level: minutes ? 'ok' : 'warn', title: 'Time for 1000 photos', detail: minutes ? `About ${minutes} minute${minutes === 1 ? '' : 's'} at your last speed (${speed!.lastRate} photos per minute). Your phone may be warmer and slower on long runs.` : 'Scan a batch once and this line shows how long 1000 photos take on this phone.' },
     { level: 'no', title: 'Send to WhatsApp without tapping', detail: 'WhatsApp always asks you to choose the chat, so each send needs a tap.' },
     { level: 'no', title: 'Read blurry, glare or cut-off labels', detail: 'These go to Needs review. Fix them by hand, or retake the photo flat and sharp, with the whole label in view.' },
-    { level: 'no', title: 'Keep scanning after a force stop', detail: 'If Android force-stops the app, or battery saver is strict, scanning stops. Open the app, tap Stop scan, then choose the remaining photos.' },
+    { level: 'no', title: 'Keep scanning after a force stop', detail: 'If Android force-stops the app, or battery saver is strict, scanning stops. Open the app and use Startup recovery check → Resume remaining photos. Only photos after the last saved checkpoint are read again; missing file access may require selecting them again.' },
   ];
 }
 
@@ -76,7 +79,7 @@ function readSaveInfo(): SaveInfo | null {
 }
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose, modelsOnly = false, onOpenModelManager, onOpenBackup }: Props) {
+export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose, modelsOnly = false, onOpenModelManager, onOpenBackup, onOpenLocalAI }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
@@ -221,6 +224,8 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
 
     <div hidden={modelsOnly}>
+    <RecoveryPanel always download={onDownload}/>
+    {onOpenLocalAI && <LocalAISettings open={onOpenLocalAI} />}
     <div className="settings-actions">{onOpenModelManager && <button type="button" className="primary" onClick={onOpenModelManager}>Models & segments</button>}{onOpenBackup && <button type="button" className="subtle-btn" onClick={onOpenBackup}>Backup, restore & history</button>}</div>
     <h3>Help</h3>
     <div className="settings-learn"><button type="button" className="primary" onClick={() => setGuide('tutorials')}>Tutorials: how to do everything</button><button type="button" className="subtle-btn" onClick={() => setGuide('new')}>What’s new</button></div>

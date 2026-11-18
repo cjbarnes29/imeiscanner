@@ -17,6 +17,16 @@ export const validImei = (value: string) => /^\d{15}$/.test(value);
 /** Records that count as stock: scanned, valid, not duplicate, not sold, and not marked sold / given by the person. */
 export const inStock = (state: RetailState, records: StockSource[]) => records.filter(r => validImei(r.imei) && !r.duplicate && !state.recordMeta[r.id]?.status && !isSold(state, r.id, r.imei));
 
+/** Physical unsold stock includes stored phones; allocation still uses available stock. */
+export const realStock = (state: RetailState, records: StockSource[]) => {
+  const seen = new Set<string>();
+  return records.filter(r => {
+    const status = state.recordMeta[r.id]?.status;
+    if (!validImei(r.imei) || r.duplicate || (status && status !== 'held') || isSold(state, r.id, r.imei) || seen.has(r.imei)) return false;
+    seen.add(r.imei); return true;
+  });
+};
+
 export function variantOf(state: Pick<RetailState, 'recordMeta'>, record: Pick<StockSource, 'id' | 'raw'>): { storage: string; color: string; ram: string } {
   const meta = state.recordMeta[record.id] || {};
   const read = inferVariant(record.raw || '');

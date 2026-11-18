@@ -9,7 +9,7 @@ import type { ReportItem, ReportPart, ReportText, StockReport } from './types';
 
 const ITEM_LINE = /^\s*([^:\n]*?\S)\s*:\s*(\d{1,3})\s*\/\s*(\d{1,4})\s*$/;
 const BRACKET_LINE = /^\s*\(([^)]*)\)(\s*)(.*)$/;
-const TOTAL_LINE = /^(\s*total\s*sell\s*out\s*:?\s*)(\d+)(.*)$/i;
+const TOTAL_LINE = /^(\s*(?:total\s*sell\s*out|samsung\s+sold)\s*:?\s*)(\d+)(.*)$/i;
 const DATE_LINE = /^(\s*date\s*:\s*)(.+?)\s*$/i;
 const STORAGE_LABEL = /^\d{1,4}\s*(gb|tb)$/i;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -133,6 +133,7 @@ export function updateItem(report: StockReport, id: string, patch: { name?: stri
 export function startNewDay(report: StockReport): StockReport {
   return {
     ...report,
+    releaseRevision: crypto.randomUUID(),
     entries: report.entries.map(e => (e.t === 'item' ? { ...e, sold: 0 } : e)),
     totalSellout: report.totalSellout ? { typed: 0, acknowledged: false, extra: 0 } : undefined
   };

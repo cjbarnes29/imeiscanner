@@ -1,6 +1,7 @@
 // RetailLens > Targets and Segments. Targets: pick a level (70 to 120) and every segment line says how many pieces are still needed and per day;
 // tap a segment to see each person (target, own sold count, pieces needed at each level). Segments: the person's own list (Fold 1, Fold 2…) and the
 // models in each. The arithmetic is in src/retail/targets.ts and segments.ts (unit-tested); this file only shows it.
+import { StoreTargetsPanel } from './RetailStoreTargets';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fullCatalog, segmentOf, setModelSegment } from './retail/catalog';
 import { addSegment, assignModels, deleteSegment, moveSegment, renameSegment, segLabel, segmentDefs, segmentIds } from './retail/segments';
@@ -155,6 +156,7 @@ export function TargetsTab(ctx: RetailCtx) {
   const visible = showEmpty || !used.length ? rows : used;
   const hidden = rows.length - visible.length;
   return <div className="retail-targets">
+    <StoreTargetsPanel ctx={ctx} month={month} />
     <p className="tg-summary">{new Date(`${month}-01T12:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} · {personId === 'all' ? 'Everyone' : people.find(p => p.id === personId)?.name || 'Person'} · {level}% · {days} days left</p>
     <section className="retail-card screen-extra"><h3>Targets</h3>
       <div className="retail-inline">

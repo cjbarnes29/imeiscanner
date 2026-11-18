@@ -2,6 +2,21 @@
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
 
+## Unreleased — 1.27.0 daily plans, Stored, calendars and target splitting
+- Give & share has Give / Plan / Share. Home shows today's release decision, pending reports, true stock and editable upcoming days. Auto refreshes calculations; every release requires confirmation or a recorded off-day override.
+- Scans stay safely pending until Use now / Store for now / Plan release is chosen. Optional live scan previews estimate release/store quantities without recording sales. Stored phones count in real unsold stock.
+- Plans support percentages, percentage points, deadlines, milestones, stored percentages, fixed units, manual daily quantities, reserves, limits, days or month-end duration, and Not today recalculation.
+- Saved Available / Not available calendars skip unavailable people automatically. Editable month and unavailability divisors feed calculations; manual transfer/release overrides warn and appear in History.
+- Store targets auto-divide into editable promoter targets. AL uses target/(month days-AL days)*AL days with editable totals/shares:40/(30-5)*5=8 gives32/44/44 while keeping store120. Editing/cancelling reverses the previous adjustment; achieved sales and stock never change from target edits.
+- Release confirmations count IMEIs once as sold; report inclusion can select all or quantities by segment. Unreported released IMEIs remain pending. Dated Auto/Manual drafts show match/mismatch and explicit future projections; report edits do not change real stock.
+- Export includes stock statuses, plans, pending IMEIs, report comparisons, calendars/divisors, leave shares, history and retail backups. Pictures remain a separate export.
+- Global ? Help opens interactive demo tutorials; first-time Home shows a setup checklist. Optional on-device AI runs a separately downloaded model, validates proposals and cannot execute sales. Physical-phone performance is not yet verified.
+- Shift files interpret into editable calendar proposals; saved codes/times, overnight shifts, original-file viewing, day/week/month sharing and Home review reminders stay separate from the IMEI release calendar and daily upload counts.
+- Final phone reports can be viewed and edited in the app. Per-person approval defaults prepare report/IMEI messages; ordinary WhatsApp requires a final Send tap, and opened is never treated as delivered.
+- Tablets & accessories have an independent Daily OSR, editable final message and approved stock register connected to Home, Export, Backup and History. Report balances replace quantities without duplicate-import inflation; declared totals and stock differences are checked.
+- Startup recovery resumes remaining saved native scan photos without replacing an active worker. Automatic local diagnostics, an exportable privacy-filtered error file, render recovery screen and performance guidance were added. Updates preserve package/signing and increase versionCode42→43.
+- Upload-choice dialogs wait while photo/review/queue editors are open. Export now includes12 planning/report/stock/schedule/sharing categories; roster originals and photos are saved separately from the retail backup.
+
 ## Unreleased — audit fixes and visible target caps
 - Screens open with their main content and one Show all button for secondary controls. Targets prioritises segment progress; segment cards list their models directly.
 - More is consolidated into People & sharing, Models & segments, and Settings & backup. The model library shares one search and editor, includes saved and Samsung names, and saves edited names back to the scanner too. Source import, variants, catalogue maintenance and bulk actions remain available.

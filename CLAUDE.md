@@ -1,5 +1,11 @@
 # RetailLens: how to work in this project
 
+## Current continuation checkpoint
+
+For the in-progress Store / Give & Share / daily planning changes, read [docs/HANDOFF-RELEASE-PLANNING.md](docs/HANDOFF-RELEASE-PLANNING.md) first. It records the latest user decisions, verified work, pending checks, and artifact locations. Auto calculates proposals; **releases always require the user's confirmation**.
+
+The checkpoint also covers separate shift/IMEI calendars, tablet/accessory report stock, final report editing, approval-based WhatsApp preparation, recovery/diagnostics and APK upgrade verification. Do not combine accessory balances with phone IMEI stock, treat a roster as phone uploads, or mark an opened WhatsApp message delivered. Preserve installed package/signing and data; use isolated emulator test builds only.
+
 Offline retail app (React + TypeScript + Vite in an Android WebView, with a native Android scanner). Package id `com.imeilens.scanner` must never change. Signing config stays untouched.
 
 ## Every time code is written

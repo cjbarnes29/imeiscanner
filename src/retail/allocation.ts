@@ -24,7 +24,9 @@ const eligible = (state: RetailState, r: AllocRecord) => /^\d{15}$/.test(r.imei)
 export function gap(target: PersonTarget | undefined, segment: Segment, threshold: number, holding: number, pending: number): number {
   const line = target?.lines.find(l => l.segment === segment);
   if (!line || line.target <= 0) return 0;
-  return Math.max(0, Math.ceil(line.target * threshold / 100) - line.achieved - pending - holding);
+  const level = Math.min(threshold, line.cap ?? threshold);
+  const typed = line.levels?.[level as keyof NonNullable<typeof line.levels>];
+  return Math.max(0, (typed ?? Math.ceil(line.target * level / 100)) - line.achieved - pending - holding);
 }
 
 /** Phones given to each person today (applied gives, by you, suggested or automatic): they count toward that person's daily maximum. */

@@ -1,14 +1,22 @@
+import { RecoveryPanel } from './RecoveryPanel';
+import { recordDiagnostic } from './diagnostics';
 import { activeIssue, issueTextFor } from './label-issue';
+import { LiveScanPlan } from './RetailScanPlan';
+import { RetailExports } from './RetailExports';
+import { UploadDisposition } from './RetailUpload';
 import { RetailHub, type RetailRecord, type RetailSub } from './RetailHub';
 import { SheetHandle } from './SheetHandle';
 import { QuickPerson } from './QuickPerson';
 import { syncScans } from './retail/reportsync';
 import { syncSold } from './retail/soldsync';
+import { deliveryFingerprint } from './retail/delivery';
+import { refreshCalculatedPlans } from './retail/planning';
+import { availabilityAt as personAvailability, localTime } from './retail/availability';
 import { autoGiveSignature, runAutoGive } from './retail/autogive';
 import { SoldOffer, type SoldGroup } from './SoldOffer';
 import { useBackNav } from './backnav';
 import { reconcile as reconcileReport } from './retail/reconcile';
-import { emptyState, rollover } from './retail/data';
+import { emptyState, rollover, withAudit } from './retail/data';
 import { loadRetail, saveRetail } from './retail/retail-store';
 import { segmentOf as retailSegmentOf, setRecordMeta as retailSetMeta, setModelSegment as retailSetModelSegment } from './retail/catalog';
 import { variantOf as retailVariantOf } from './retail/inventory';
@@ -67,7 +75,7 @@ import { ModelPicker } from './ModelPicker';
 import { SettingsPanel } from './SettingsPanel';
 import { embedPhotoLimit } from './capacity';
 import './text-size';
-import { hasSeenWhatsNew, markWhatsNewSeen, TutorialsDialog, WhatsNewDialog } from './Guide';
+import { hasSeenWhatsNew, markWhatsNewSeen, TutorialsDialog, WhatsNewDialog, HelpButton } from './Guide';
 import { cleanName, normalizeCode, readCustomModels, writeCustomModels, type CustomModels } from './custom-models';
 
 setSourceGuard(isProtectedSource);
@@ -1937,6 +1945,9 @@ export default function App() {
   const [queueDisplayCount, setQueueDisplayCount] = useState(30);
   const [photoDisplayCount, setPhotoDisplayCount] = useState(40);
   const [busy, setBusy] = useState(false);
+  const [calendarDay, setCalendarDay] = useState(dateKey);
+  const [availabilityTime, setAvailabilityTime] = useState(localTime);
+  useEffect(() => { const tick = () => { setCalendarDay(dateKey()); setAvailabilityTime(localTime()); }; const timer = window.setInterval(tick, 60000); window.addEventListener('focus', tick); document.addEventListener('visibilitychange', tick); return () => { clearInterval(timer); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick); }; }, []);
   const [stoppingScan, setStoppingScan] = useState(false);
   const [progress, setProgress] = useState('');
   const [completedFiles, setCompletedFiles] = useState(0);
@@ -2039,7 +2050,7 @@ export default function App() {
       setRetailError('');
       if (next !== saved) persistRetail(next);
     }).catch(error => {
-      console.error('Could not load the RetailLens data', error);
+      recordDiagnostic('retail-load-failed',error); console.error('Could not load the RetailLens data', error);
       if (alive) setRetailError('Retail data could not be opened. Try again before editing targets, stock or reports.');
     });
     return () => { alive = false; };
@@ -2048,7 +2059,7 @@ export default function App() {
     retailSaveChain.current = retailSaveChain.current.catch(() => {}).then(() => saveRetail(next, before, why)).then(() => {
       setRetailError('');
     }).catch(error => {
-      console.error('Could not save the RetailLens data', error);
+      recordDiagnostic('retail-save-failed',error); console.error('Could not save the RetailLens data', error);
       setRetailError('Retail changes could not be saved on this device. Try again or download a backup in More > Backup and data before refreshing.');
     });
   }
@@ -2056,6 +2067,8 @@ export default function App() {
   function changeRetail(next: RetailState, why: string) {
     if (!retailLoaded) return;
     const before = retailRef.current;
+    const overrides = before.audit.filter(a => a.what === 'off-day override' && !next.audit.some(b => b.at === a.at && b.detail === a.detail));
+    if (overrides.length) next = { ...next, audit: [...next.audit, ...overrides].slice(-500) };
     retailRef.current = next; setRetail(next);
     persistRetail(next, why ? before : undefined, why);
   }
@@ -2065,6 +2078,9 @@ export default function App() {
   const [mainView, setMainView] = useState<'scan' | 'results' | 'export'>('results');
   /** Which RetailLens section is open (Home = today). Home, Report and Targets are on the bottom bar; the rest are under the ⋯ More menu. */
   const [retailSub, setRetailSub] = useState<RetailSub>('today');
+  const [draftReportDate, setDraftReportDate] = useState<string | undefined>();
+  const [reportCategory,setReportCategory]=useState<'phones'|'accessories'>('phones');
+  const [reportAvailability, setReportAvailability] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   useBackLayer(moreOpen, () => setMoreOpen(false), 'more');
   type View = 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export' | 'home' | 'report' | 'targets';
@@ -2083,8 +2099,8 @@ export default function App() {
   /** The title of the screen that is open, and a short status line under it. */
   const viewInfo = (() => {
     const back = recordsTab !== 'records' && !(recordsTab === 'retail' && ['today', 'report', 'targets'].includes(retailSub));
-    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'People & sharing', segments: 'Models & segments', catalog: 'Models & segments', data: 'Backup and data' };
-    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' ? 'People & sharing' : retailTitles[retailSub];
+    const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'Give & share', plan: 'Give & share', segments: 'Models & segments', catalog: 'Models & segments', data: 'Backup and data' };
+    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' ? 'Give & share' : retailTitles[retailSub];
     const unassigned = records.filter(r => r.personId === UNASSIGNED).length;
     const sub = recordsTab === 'records' ? (records.length ? `${records.length} scanned${unassigned ? ` · ${unassigned} unassigned` : ''}` : 'Nothing scanned yet')
       : recordsTab === 'retail' && retailSub === 'today' ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : '';
@@ -2102,7 +2118,7 @@ export default function App() {
     const take = () => {
       const text = androidBridge?.takeSharedText?.() || '';
       if (!text) return;
-      setSharedText(text); setReportShareId(id => id + 1); setSimpleView(false); setMainView('results'); setRecordsTab('retail'); setRetailSub('report');
+      setReportAvailability(false); setDraftReportDate(undefined); setSharedText(text); setReportShareId(id => id + 1); setSimpleView(false); setMainView('results'); setRecordsTab('retail'); setRetailSub('report');
     };
     take();
     window.addEventListener('android-shared-text', take);
@@ -2357,7 +2373,7 @@ export default function App() {
           const kept = old.filter(row => !replacedOld.has(row.id)).map(row => flagged.has(row.id) ? { ...row, checked: false, imeiNeedsReview: true, imeiNote: flagged.get(row.id) } : row);
           return markDuplicateRecords([...kept, ...unique]);
         });
-      } catch (error) { console.error('Unable to read Android scan', error); }
+      } catch (error) { recordDiagnostic('native-scan-read-failed',error); console.error('Unable to read Android scan', error); }
       finally {
         importingAndroid.current = false;
         if (more && !cancelled) window.setTimeout(() => void refreshAndroid(), 60);
@@ -2581,6 +2597,7 @@ export default function App() {
     if (!giveChanged.length) return;
     let next = records;
     for (const group of giveChanged) next = planAllocation(next, group.ids, personGroups.map(person => ({ personId: person.id, count: giveValue(group, person.id) }))).records;
+    if (!authorizeTransfers(next.filter(r => records.find(old => old.id === r.id)?.personId !== r.personId).map(r => ({ id: r.id, personId: r.personId })))) return;
     setRecords(next);
     setSelectedIds([]);
     setEmptiedPeople(old => old.filter(id => next.some(row => row.personId === id)));
@@ -2602,7 +2619,7 @@ export default function App() {
   /** Records already sent to WhatsApp for this person (remembered between visits). */
   const [waSent, setWaSent] = useState<string[]>([]);
   /** Store only: new scans are kept as "Held": they do not touch the report, targets or Sold until you decide. */
-  const [storeOnly, setStoreOnly] = useState(() => localStorage.getItem('imeilens.storeOnly') === 'on');
+  // Each completed upload now gets an explicit disposition; pending phones are held safely.
   const seenIds = useRef<Set<string> | null>(null);
   /** After a send: "Mark them as Sold?" (ids of the phones that went out; done = they were marked, Undo is offered). */
   const [soldOffer, setSoldOffer] = useState<{ ids: string[]; done: boolean } | null>(null);
@@ -3132,11 +3149,11 @@ export default function App() {
     else {
       const fresh = retailRecords.filter(r => !seenIds.current!.has(r.id));
       for (const r of fresh) seenIds.current.add(r.id);
-      const hold = storeOnly ? fresh.filter(r => !retail.recordMeta[r.id]?.status).map(r => r.id) : [];
-      if (hold.length) { changeRetail(retailSetMeta(retail, hold, { status: 'held' as never }), ''); return; }
+      const hold = fresh.filter(r => !retail.recordMeta[r.id]?.status).map(r => r.id);
+      if (hold.length) { changeRetail({ ...retailSetMeta(retail, hold, { status: 'held' }), pendingUploadIds: [...new Set([...(retail.pendingUploadIds || []), ...hold])] }, 'await upload decision'); return; }
     }
     const sold = syncSold(retail, retailRecords, todayKey);
-    let next = sold.state;
+    let next = refreshCalculatedPlans(sold.state, retailRecords, calendarDay);
     let scan = { added: 0, removed: 0, created: 0 };
     if (next.report) { const r = syncScans(next, next.report, retailRecords); if (r.report !== next.report) next = { ...next, report: r.report }; scan = r; }
     // Give and share in Automatic mode: phones without an owner are given by themselves (never while a scan is still running, and never a phone that
@@ -3149,12 +3166,13 @@ export default function App() {
       if (autoGiveSeen.current !== sig) {
         autoGiveSeen.current = sig;
         const auto = runAutoGive(next, retailMonth(day), day, retailPeople, retailRecords);
-        if (auto) { next = auto.state; given = auto.changes.length; assignOwners(auto.changes); }
+        if (auto && assignOwners(auto.changes, true)) { next = auto.state; given = auto.changes.length; }
       }
     }
     if (next === retail) return;
     changeRetail(next, '');
     const bits: string[] = [];
+    if (next.audit.slice(-1)[0]?.what === 'daily plan recalculated') bits.push('daily plan updated from real stock; no phones released');
     if (sold.added) bits.push(`${sold.added} sale${sold.added === 1 ? '' : 's'} added to the targets and the report`);
     if (sold.undone) bits.push(`${sold.undone} sale${sold.undone === 1 ? '' : 's'} taken back`);
     if (scan.added && !sold.added) bits.push(`${scan.added} scanned phone${scan.added === 1 ? '' : 's'} added to the report`);
@@ -3162,12 +3180,23 @@ export default function App() {
     if (scan.created) bits.push(`${scan.created} new report line${scan.created === 1 ? '' : 's'}`);
     if (given) bits.push(`${given} phone${given === 1 ? '' : 's'} given automatically (Give and share > History to undo)`);
     if (bits.length) setToast(bits.join(', ') + '.');
-  }, [retail, retailRecords, retailLoaded, inventoryLoaded, storeOnly, androidJob]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [retail, retailRecords, retailLoaded, inventoryLoaded, androidJob, calendarDay, availabilityTime]); // eslint-disable-line react-hooks/exhaustive-deps
   const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
   const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;
-  function assignOwners(changes: { id: string; personId: string }[]) {
+  function authorizeTransfers(changes: { id: string; personId: string }[], automatic = false) {
+    const affected = changes.filter(c => c.personId && records.find(r => r.id === c.id)?.personId !== c.personId && personAvailability(retailRef.current, c.personId, dateKey()) !== 'working');
+    if (!affected.length) return true;
+    if (automatic) return false;
+    const groups = [...new Set(affected.map(c => c.personId))].map(id => `${personNameOf(id)} is Not available (${affected.filter(c => c.personId === id).length} IMEIs)`);
+    if (!window.confirm(`${groups.join('\n')} today.\nAutomatic transfers skip these people. Transfer anyway? This override will appear in History.`)) return false;
+    changeRetail(withAudit(retailRef.current, 'off-day override', `${dateKey()}: ${groups.join('; ')}. Manual transfer explicitly confirmed despite Not available status.`), 'manual off-day transfer');
+    return true;
+  }
+  function assignOwners(changes: { id: string; personId: string }[], automatic = false) {
+    if (!authorizeTransfers(changes, automatic)) return false;
     const owner = new Map(changes.map(change => [change.id, change.personId]));
     setRecords(old => markDuplicateRecords(old.map(r => owner.has(r.id) ? { ...r, personId: owner.get(r.id)! } : r)));
+    return true;
   }
   /** The text of a screenshot, read on this phone (no internet): used to import the Promoter targets. */
   async function readScreenshotText(file: File): Promise<string> {
@@ -3272,13 +3301,15 @@ export default function App() {
     return copied;
   }
 
-  const todayKey = dateKey();
+  const todayKey = calendarDay;
   const segOfRecord = (r: RecordItem): RetailSegment => retailSegmentOf(retail, r.model, retailMonth(todayKey), retail.recordMeta[r.id]);
   const visible = records.filter(r =>
     (filter === 'All' ||
       (filter === 'Duplicates' ? r.duplicate :
         filter === 'Review' ? reviewStatus(r).includes('Needs review') :
         filter === 'Unknown' ? isUnknownModel(r) :
+        filter === 'Stored' ? retail.recordMeta[r.id]?.status === 'held' :
+        filter === 'Available' ? !retail.recordMeta[r.id]?.status :
         filter.startsWith('seg:') ? segOfRecord(r) === filter.slice(4) :
         filter.startsWith('day:') ? localDay(r.createdAt) === filter.slice(4) :
           filter === 'Valid' ? r.status === 'Valid' :
@@ -3532,6 +3563,7 @@ export default function App() {
    */
   function moveRecords(ids: string[], destination: string, base: RecordItem[] = records) {
     const plan = planMove(base, ids, destination);
+    if (!authorizeTransfers(plan.moved.map(id => ({ id, personId: destination })))) return { ...plan, records: base, moved: [] };
     setRecords(plan.records);
     setSelectedIds(old => old.filter(id => !plan.moved.includes(id)));
     setEmptiedPeople(old => [...old.filter(id => id !== destination), ...plan.emptiedSources.filter(id => !old.includes(id))]);
@@ -4896,7 +4928,7 @@ export default function App() {
         </div>
       </header>
 
-      {settingsOpen && <SettingsPanel modelsOnly={modelSourcesOpen} onOpenModelManager={() => { setSettingsOpen(false); openMore('segments'); }} onOpenBackup={() => { setSettingsOpen(false); openMore('data'); }} onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={applyCustomModelNames} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel onOpenLocalAI={() => { setSettingsOpen(false); setSimpleView(false); openMore('plan'); setTimeout(() => window.dispatchEvent(new Event('retaillens-local-ai')), 100); }} modelsOnly={modelSourcesOpen} onOpenModelManager={() => { setSettingsOpen(false); openMore('segments'); }} onOpenBackup={() => { setSettingsOpen(false); openMore('data'); }} onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={applyCustomModelNames} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
         <h2>Check this</h2>
         <p>{warning}</p>
@@ -4914,14 +4946,15 @@ export default function App() {
         <SheetHandle onClose={() => setMoreOpen(false)} />
         <div className="modal-head"><h2>More</h2><button className="iconbtn" aria-label="Close" onClick={() => setMoreOpen(false)}><X size={17} /></button></div>
         <ul className="more-list">
-          {([['people', 'People & sharing', `${personGroups.length} people · give phones and send`], ['segments', 'Models & segments', 'Models, segments, colours and Samsung catalog']] as const).map(([key, label, hint]) =>
+          {([['gives', 'Give & share', `${personGroups.length} people · give phones and send`], ['segments', 'Models & segments', 'Models, segments, colours and Samsung catalog']] as const).map(([key, label, hint]) =>
             <li key={key}><button type="button" onClick={() => openMore(key)}><strong>{label}</strong><small>{hint}</small></button></li>)}
           <li><button type="button" onClick={() => { setMoreOpen(false); setModelSourcesOpen(false); setSettingsOpen(true); }}><strong>Settings & backup</strong><small>Preferences, backup, restore and history</small></button></li>
         </ul>
       </section></div>}
       {cameraOpen && <CameraCapture expectedProducts={expectedProducts} onClose={() => setCameraOpen(false)} onCapture={batch => void scan(batch)} />}
       <main data-detail-mode={showAllDetails ? 'all' : 'summary'} className={`${collapsedPanels.length ? 'compact-page' : ''}${' nav-mode'}${mainView === 'scan' ? ' scan-first' : ''}${simpleView ? ' simple-mode' : ''}`}>
-        {!simpleView && <div className="screen-details-toggle"><button type="button" className="subtle-btn" aria-label={showAllDetails ? 'Show fewer details' : 'Show all details'} aria-expanded={showAllDetails} onClick={() => setExpandedViews(old => ({ ...old, [detailViewKey]: !showAllDetails }))}>{showAllDetails ? 'Show less' : 'Show all'}</button></div>}
+        <RecoveryPanel download={saveDirectFile} counts={{records:records.length,pendingUploads:retail.pendingUploadIds?.length||0,plans:retail.releasePlans?.length||0}} />
+        <div className="screen-control-row">{!simpleView && <div className="screen-details-toggle"><button type="button" className="subtle-btn" aria-label={showAllDetails ? 'Show fewer details' : 'Show all details'} aria-expanded={showAllDetails} onClick={() => setExpandedViews(old => ({ ...old, [detailViewKey]: !showAllDetails }))}>{showAllDetails ? 'Show less' : 'Show all'}</button></div>}<HelpButton topic={activeView === 'scan' ? 'Uploading and adding phones' : activeView === 'home' ? 'Home: today and upcoming days' : activeView === 'report' ? 'Reports: quantities, stock and dated drafts' : activeView === 'records' ? 'Bulk actions and storing phones' : activeView === 'export' || recordsTab === 'share' ? 'Sharing and exporting' : retailSub === 'plan' || retailSub === 'gives' ? 'Daily plans: Auto and Manual' : 'Adding people, models and segments'} /></div>
         {!bulkOpen && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button> <button type="button" className="subtle-btn" onClick={openPhotoEdit}>Bulk edit photos</button></div>}
         {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
@@ -4985,7 +5018,7 @@ export default function App() {
               </select>
             </label>}
             <QuickPerson onAdd={addPersonNamed} label="+ New person" />
-            <label className="settings-check store-only"><input type="checkbox" checked={storeOnly} onChange={e => { setStoreOnly(e.target.checked); localStorage.setItem('imeilens.storeOnly', e.target.checked ? 'on' : 'off'); setToast(e.target.checked ? 'Store only is on: new phones are kept as Held and do not touch the report or targets.' : 'Store only is off: new phones count in the report again.'); }} /> Store only: keep new scans as Held (report and targets are not changed){heldIds.length > 0 && <small> · {heldIds.length} held</small>}</label>
+            <p className="settings-help">After scanning, choose Use now, Store for now, or Plan release. Nothing is recorded as sold without confirmation.</p>
 
 {!simpleView && (<>
             {androidBridge && <div className="android-scan">
@@ -5110,6 +5143,7 @@ export default function App() {
               {androidBridge && androidJob && <ScanReport bridge={androidBridge} summary={androidJob.report} status={androidJob.status} personId={activePersonId} onMessage={setToast} />}
               <input ref={simpleChooseRef} type="file" accept="image/*" multiple hidden onChange={event => { const chosen = Array.from(event.target.files || []), picked = chosen.filter(isImageFile); event.target.value = ''; if (chosen.length && picked.length < chosen.length) setToast(picked.length ? `${chosen.length - picked.length} file(s) were not photos and were skipped.` : 'Those files are not photos. Choose JPG, PNG, WEBP or HEIC pictures.'); if (picked.length) void scan(picked); }} />
             </div>}
+            <LiveScanPlan state={retail} records={retailRecords} people={retailPeople} today={todayKey} scanning={busy || !!(androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing'))} completed={androidJob?.completed} expected={androidJob?.count} openPlan={() => { setSimpleView(false); openMore('plan'); }} />
             <button type="button" className="subtle-btn reset-entries" disabled={busy || laptopUploading} onClick={resetForNewEntries} title="Clears the upload queue, search, filters and selection so you can start new entries. Saved records are not deleted.">↺ Reset for new entries</button>
             {(busy || laptopUploading) && <button type="button" className="subtle-btn stop-upload-button" disabled={stoppingScan} onClick={stopCurrentUpload}>
               <X size={16} /> {laptopUploading ? 'Stop uploading' : stoppingScan ? 'Stopping after this photo…' : 'Stop scanning'}
@@ -5155,6 +5189,7 @@ export default function App() {
           <div id="export" hidden={!simpleView && mainView !== 'export'} className={`panel export-panel ${collapsedPanels.includes('export') ? 'is-collapsed' : ''}`}><button className="panel-toggle" aria-expanded={!collapsedPanels.includes('export')} onClick={() => togglePanel('export')}>{collapsedPanels.includes('export') ? '▸' : '▾'} Export inventory {collapsedPanels.includes('export') ? '— expand' : '— minimize'}</button>
             <div className="view-head"><h2>Export</h2><p className="view-sub">Pick what to include, then download. The Excel file opens in Google Sheets too.</p></div>
 
+            <RetailExports state={retail} records={retailRecords} people={retailPeople} today={todayKey} download={saveDirectFile} notify={setToast} openPlan={() => openMore('plan')} openReport={() => { setReportCategory('phones'); setReportAvailability(false); setDraftReportDate(undefined); openView('report'); }} />
             <label className="auto-download-toggle">
               <input
                 type="checkbox"
@@ -5340,6 +5375,7 @@ export default function App() {
             </div>
           </div>
 
+          {!simpleView && recordsTab === 'records' && <div className="give-tabs" aria-label="Phone storage"><button className={filter !== 'Stored' && filter !== 'Available' ? 'on' : ''} onClick={() => setFilter('All')}>All</button><button className={filter === 'Available' ? 'on' : ''} onClick={() => setFilter('Available')}>Available</button><button className={filter === 'Stored' ? 'on' : ''} onClick={() => setFilter('Stored')}>Stored ({heldIds.length})</button></div>}
           {!simpleView && recordsTab === 'records' && <div className="filters filters-compact">
             <label className="filter-select">Model
               <select aria-label="Filter by model" value={filter === 'All' || modelGroups.some(group => group.key === filter) ? filter : 'All'} onChange={event => setFilter(event.target.value)}>
@@ -5359,14 +5395,14 @@ export default function App() {
             </div>
           </div>}
 
-          {!simpleView && (recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' || (recordsTab === 'retail' && retailSub === 'gives')) && <div className="give-tabs people-sharing-tabs" role="tablist" aria-label="People and sharing">
-            {([['people', 'People', recordsTab === 'people'], ['gives', 'Suggested', recordsTab === 'retail'], ['models', 'By model', recordsTab === 'models'], ['share', 'Send', recordsTab === 'share']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={on ? 'on' : ''} onClick={() => openMore(key)}>{label}</button>)}
+          {!simpleView && (recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' || (recordsTab === 'retail' && (retailSub === 'gives' || retailSub === 'plan'))) && <div className="give-tabs people-sharing-tabs" role="tablist" aria-label="People and sharing">
+            {([['gives', 'Give', recordsTab === 'retail' && retailSub === 'gives'], ['plan', 'Plan', recordsTab === 'retail' && retailSub === 'plan'], ['share', 'Share', recordsTab === 'share'], ['people', 'People', recordsTab === 'people'], ['models', 'By model', recordsTab === 'models']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={`${on ? 'on' : ''} ${key === 'people' || key === 'models' ? 'screen-extra' : ''}`} onClick={() => openMore(key)}>{label}</button>)}
           </div>}
           {!simpleView && recordsTab === 'models' && modelsTab}
           {!simpleView && recordsTab === 'records' && filter === 'Unknown' && unknownTab}
           {!simpleView && recordsTab === 'people' && peopleTab}
-          {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub key={reportShareId} state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
-            assign={assignOwners} readImage={readScreenshotText} notify={setToast} download={saveDirectFile} share={text => { void shareOrCopyText(text, 'The report'); }}
+          {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub key={reportShareId} latest={() => retailRef.current} openDelivery={packet => { const state=retailRef.current; if(packet.fingerprint && packet.fingerprint!==deliveryFingerprint(state,retailRecords) && !window.confirm('Stock or report data changed after this message was prepared. Review the packet. Open its saved snapshot anyway?'))return; if(packet.destination==='mobile'){const link=`https://wa.me/${packet.phone}?text=${encodeURIComponent(packet.text)}`;if(link.length>8000){void copyText(packet.text);window.open(`https://wa.me/${packet.phone}`,'_blank','noopener');setToast('Message copied; chat opened. Paste and tap Send.');}else{window.open(link,'_blank','noopener');setToast('WhatsApp opened with the prepared message. Tap Send there.');}}else{void shareOrCopyText(packet.text,'Prepared report and IMEIs');}changeRetail(withAudit({...state,deliveryPackets:state.deliveryPackets?.map(p=>p.id===packet.id?{...p,status:'opened'}:p)},'WhatsApp/share opened',`${packet.recordIds.length} IMEIs prepared; external sending is not verified.`),'delivery opened'); }} state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
+            reportCategory={reportCategory} openAccessoryReport={() => { setReportCategory('accessories'); setReportAvailability(false); setDraftReportDate(undefined); setReportShareId(id=>id+1); openView('report'); }} reportAvailability={reportAvailability} openAvailability={() => { setReportCategory('phones'); setDraftReportDate(undefined); setReportAvailability(true); setReportShareId(id => id + 1); openView('report'); }} openUploads={(date, personId) => jumpTo('records', `day:${date}`, personId || UNASSIGNED_FILTER)} shareFile={async (blob, name, title, text = '') => { const file = new File([blob], name, { type: blob.type }); try { if (await androidShareFiles([file], title, text)) return true; if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title, text }); return true; } saveDirectFile(blob, name); setToast('Schedule file downloaded. Share the saved file from your phone.'); return false; } catch (error) { if ((error as DOMException)?.name !== 'AbortError') setToast('Could not open sharing. Export the file and share it from your phone.'); return false; } }} openPeople={() => openMore('people')} openModels={() => openMore('segments')} openTargets={() => openView('targets')} openScan={() => openView('scan')} reportDate={draftReportDate} openDatedReport={date => { setReportAvailability(false); setDraftReportDate(date); openView('report'); }} openReport={() => { setReportCategory('phones'); setReportAvailability(false); setDraftReportDate(undefined); openView('report'); }} openPlan={() => openMore('plan')} sharePhones={openSharing} assign={assignOwners} readImage={readScreenshotText} notify={setToast} download={saveDirectFile} share={text => { void shareOrCopyText(text, 'The report'); }}
             counts={{ scanning: androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing') ? Math.max(0, androidJob.count - androidJob.completed) : 0, needsReview: needLookCount }}
             sharedText={sharedText} expanded={showAllDetails} modelSources={[...knownModels].map(([code, name]) => ({ code, name: customModels[code] || SAMSUNG_MODELS[code] || name }))} saveModelName={(code, name) => { const next = { ...customModels, [code]: cleanName(name) }; if (!writeCustomModels(next)) { setToast('Could not save the model name. Device storage is full.'); return false; } setCustomModels(next); return true; }} resetModelName={code => { const next = { ...customModels }; delete next[code]; if (!writeCustomModels(next)) { setToast('Could not reset the model name.'); return false; } setCustomModels(next); return true; }} openModelSources={() => { setModelSourcesOpen(true); setSettingsOpen(true); }} openRecords={filter => jumpTo('records', filter)} sub={retailSub} openSub={setRetailSub} />}
           {!simpleView && recordsTab === 'share' && shareTab}
@@ -5377,7 +5413,7 @@ export default function App() {
             <div className="people-setup">
               <strong>Group IMEIs by person</strong>
 
-              {heldIds.length > 0 && <div className="held-bar" role="group" aria-label="Held phones"><span><b>{heldIds.length}</b> held phone{heldIds.length === 1 ? '' : 's'} · stored only, not in the report, targets or Sold</span><button type="button" className="subtle-btn" onClick={() => openSharing(heldIds)}>Release (share)</button><button type="button" className="subtle-btn" onClick={() => { changeRetail(retailSetMeta(retailRef.current, heldIds, { status: '' as never }), 'held back in stock'); setToast(`${heldIds.length} held phone${heldIds.length === 1 ? '' : 's'} are back in stock and count in the report again.`); }}>Put back in stock</button></div>}
+              {heldIds.length > 0 && <div className="held-bar" role="group" aria-label="Stored phones"><span><b>{heldIds.length}</b> stored · included in real stock, not sold</span><button type="button" className="subtle-btn" onClick={() => openMore('plan')}>Plan a release</button><button type="button" className="subtle-btn" onClick={() => { const ids = selectedRows.filter(r => retail.recordMeta[r.id]?.status === 'held').map(r => r.id); if (!ids.length) { setToast('Select stored phones to make available. This does not record sales.'); return; } changeRetail(retailSetMeta(retailRef.current, ids, { status: '' as never }), 'stored made available'); setToast(`${ids.length} phones made available. Real stock is unchanged.`); }}>Make selected available</button></div>}
               {<div className="select-toggle"><button type="button" className="subtle-btn" aria-pressed={selectMode} onClick={() => { if (selectMode) { setSelectOn(false); setSelectedIds([]); } else setSelectOn(true); }}>{selectMode ? `Done${selectedRows.length ? ` (${selectedRows.length} selected)` : ''}` : 'Select'}</button></div>}
               <div className={`action-bar${selectMode ? ' show' : ''}`} role="group" aria-label="Actions for selected phones">
               <button className="subtle-btn" disabled={!visible.length} onClick={toggleVisibleSelection}>
@@ -5481,8 +5517,8 @@ export default function App() {
                       <option value="">Not set</option>{[...new Set([...retailModelColours(retail, modelCode4(r.model), colourSeen[modelCode4(r.model)] || []), retailCanonColour(v.color)].filter(Boolean))].sort().map(n => <option key={n} value={n}>{n}</option>)}</select></label>
                     <label>Segment of this model<select aria-label={'Segment of ' + title} value={segOfRecord(r)} onChange={e => changeRetail(retailSetModelSegment(retail, r.model, e.target.value), 'segment')}>
                       {[...retailSegmentIds(retail), 'other' as RetailSegment].map(sg => <option key={sg} value={sg}>{retailSegLabel(retail, sg)}</option>)}</select></label>
-                    <label>Stock<select aria-label={'Stock status of ' + title} value={retail.recordMeta[r.id]?.status || ''} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { status: e.target.value as never }), '')}>
-                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option><option value="held">Held (store only)</option></select></label></>}
+                    <label>Stock<select disabled={retail.releases?.some(e => e.status === 'released' && e.recordIds.includes(r.id))} title={retail.releases?.some(e => e.status === 'released' && e.recordIds.includes(r.id)) ? 'Use Undo release in Give & share → Plan to reverse this sale and its report links.' : undefined} aria-label={'Stock status of ' + title} value={retail.recordMeta[r.id]?.status || ''} onChange={e => changeRetail(retailSetMeta(retail, [r.id], { status: e.target.value as never }), '')}>
+                      <option value="">In stock</option><option value="sold">Sold</option><option value="given">Given</option><option value="held">Stored (unsold)</option></select></label></>}
                     <label>Model<input className="inline-edit model-edit" aria-label={'Model for record ' + r.number} value={r.model}
                       onFocus={e => { e.currentTarget.dataset.before = r.model; }}
                       onChange={e => { const model = e.target.value, ok = typedModelOk(r, model.trim()); updateRow(r.id, { model, modelNeedsReview: !ok, modelNote: typedModelNote(r, model.trim()) }); }}
@@ -5882,6 +5918,7 @@ export default function App() {
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}
       </nav>}
+      {retailLoaded && !!retail.pendingUploadIds?.length && !selected && !cropEditorOpen && !bulkCropOpen && !bulkEditOpen && !queuePanelOpen && !overviewOpen && !cameraOpen && !settingsOpen && !busy && !(androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing')) && <UploadDisposition state={retail} records={retailRecords} today={todayKey} change={changeRetail} notify={setToast} openExport={() => { setSimpleView(false); openView('export'); }} openPlan={() => { setSimpleView(false); openMore('plan'); }} />}
       {soldOffer && (() => { const g = soldOfferGroups(soldOffer.ids); return <SoldOffer count={soldOffer.ids.length} groups={g.groups} noOwner={g.noOwner} done={soldOffer.done} onMark={markOfferSold} onColour={setOfferColour} onUndo={undoOfferSold} onClose={() => setSoldOffer(null)} onNever={() => { localStorage.setItem('imeilens.askSoldAfterSend', 'off'); setSoldOffer(null); setToast('Will not ask again. Mark phones as Sold in Phones whenever you want.'); }} />; })()}
       {toast && (
         <div className="toast">

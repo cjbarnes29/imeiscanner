@@ -4,6 +4,8 @@
  */
 import { isDateKey, isMonth, isSegment, LEVELS, SEGMENTS, type DayLog, type IncentiveRates, type Level, type Month, type PersonTarget, type ReportItem, type ReportText, type RetailState, type Sale, type SegmentDef, type StockReport, type TargetLine } from './types';
 
+import { cleanPlanning } from './planning-data';
+
 /** EXAMPLE incentive scheme (edit it in Targets > Incentives): the real scheme is the person's own, the app only multiplies. */
 export const DEFAULT_RATES: IncentiveRates = {
   perUnit: { flagship1: 500, flagship2: 400, flagship3: 300, mid: 150, low: 75, tablet: 200, wearable: 100, other: 0 },
@@ -14,7 +16,7 @@ export const emptyDay = (): DayLog => ({ activations: 0, scPlus: 0, competitor: 
 
 export function emptyState(): RetailState {
   return {
-    version: 1, catalog: [], aliases: {}, corrections: {}, recordMeta: {}, sales: [], targets: {}, rates: DEFAULT_RATES, allocations: [], days: {}, stockAdjust: [],
+    version: 1, planningVersion: 1, releasePlans: [], releases: [], pendingUploadIds: [], storeTargets: {}, workSchedules: {}, leaveTransfers: [], reportDrafts: {}, localAI: { enabled: false }, catalog: [], aliases: {}, corrections: {}, recordMeta: {}, sales: [], targets: {}, rates: DEFAULT_RATES, allocations: [], days: {}, stockAdjust: [],
     settings: { myPersonId: '', myThreshold: 100, lowStock: 2, reportAuthor: '' }, history: {}, audit: []
   };
 }
@@ -46,7 +48,7 @@ function cleanReport(value: unknown): StockReport | undefined {
   if (!entries.length) return undefined;
   const t = obj(v.totalSellout);
   const scanBase = Object.fromEntries(Object.entries(obj(v.scanBase)).filter(([k, c]) => k.length <= 80 && typeof c === 'number' && c > 0 && c < 1e6).slice(0, 3000).map(([k, c]) => [k, Math.floor(c as number)]));
-  return { entries, savedAt: str(v.savedAt), dateText: str(v.dateText) || undefined, scanBase: v.scanBase ? scanBase : undefined, totalSellout: typeof t.typed === 'number' ? { typed: count(t.typed), acknowledged: t.acknowledged === true, extra: count(t.extra) } : undefined };
+  return { entries, releaseRevision: str(v.releaseRevision) || undefined, savedAt: str(v.savedAt), dateText: str(v.dateText) || undefined, scanBase: v.scanBase ? scanBase : undefined, totalSellout: typeof t.typed === 'number' ? { typed: count(t.typed), acknowledged: t.acknowledged === true, extra: count(t.extra) } : undefined };
 }
 function cleanColourAliases(value: unknown): RetailState['colourAliases'] {
   const out = Object.fromEntries(Object.entries(obj(value)).filter(([k, n]) => /^[a-z]{1,20}$/.test(k) && str(n).trim()).slice(0, 500).map(([k, n]) => [k, str(n).trim().slice(0, 30)]));
@@ -159,6 +161,17 @@ export function cleanState(raw: unknown): RetailState {
     })),
     days,
     stockAdjust: arr(v.stockAdjust).map(obj).filter(a => str(a.id) && isDateKey(a.date)).map(a => ({ id: str(a.id), at: str(a.at), date: a.date as string, code: str(a.code), name: str(a.name), storage: str(a.storage), color: str(a.color), delta: Math.trunc(num(a.delta)), note: str(a.note) })),
+    ...cleanPlanning(v),
+    deliverySettings: Object.fromEntries(Object.entries(obj(v.deliverySettings)).map(([id, raw]) => { const s=obj(raw),phone=str(s.phone).slice(0,30);return [id,{enabled:s.enabled===true&&(s.destination==='group'||/^[1-9]\d{7,14}$/.test(phone.replace(/[+()\s-]/g,''))),destination:s.destination==='group'?'group' as const:'mobile' as const,phone,includeReport:s.includeReport!==false,includeImeis:s.includeImeis!==false,reportMode:s.reportMode==='quantity'?'quantity' as const:'all' as const,quantities:Object.fromEntries(Object.entries(obj(s.quantities)).filter(([segment])=>isSegment(segment)).map(([segment,n])=>[segment,count(n)]))}];})),
+    deliveryPackets: arr(v.deliveryPackets).map(obj).filter(p=>str(p.id)&&str(p.personId)).slice(-2000).map(p=>({id:str(p.id),at:str(p.at),personId:str(p.personId),phone:str(p.phone).slice(0,30),destination:p.destination==='group'?'group' as const:'mobile' as const,releaseIds:arr(p.releaseIds).map(x=>str(x)).filter(Boolean),recordIds:arr(p.recordIds).map(x=>str(x)).filter(Boolean),reportIds:arr(p.reportIds).map(x=>str(x)).filter(Boolean),text:str(p.text).slice(0,100000),fingerprint:typeof p.fingerprint==='string'?p.fingerprint:undefined,status:p.status==='opened'?'opened' as const:p.status==='sent-by-user'?'sent-by-user' as const:p.status==='not-sent'?'not-sent' as const:'prepared' as const})),
+    finalReportDraft: str(obj(v.finalReportDraft).text) ? { text: str(obj(v.finalReportDraft).text).slice(0,100000), baseText: str(obj(v.finalReportDraft).baseText).slice(0,100000), at: str(obj(v.finalReportDraft).at) } : undefined,
+    accessoryReport: cleanReport(v.accessoryReport),
+    accessoryStock: Object.fromEntries(Object.entries(obj(v.accessoryStock)).map(([key,value])=>{const s=obj(value);return [key,{name:str(s.name,key),quantity:count(s.quantity),updatedAt:str(s.updatedAt),reportDate:typeof s.reportDate==='string'?s.reportDate:undefined}];})),
+    accessoryFinalDraft: str(obj(v.accessoryFinalDraft).text) ? { text: str(obj(v.accessoryFinalDraft).text).slice(0,100000), baseText: str(obj(v.accessoryFinalDraft).baseText).slice(0,100000), at: str(obj(v.accessoryFinalDraft).at) } : undefined,
+    rosterDrafts: arr(v.rosterDrafts).map(obj).filter(d => str(d.id)).slice(-100).map(d => ({ id: str(d.id), sourceId: str(d.sourceId) || undefined, sourceName: str(d.sourceName).slice(0,200), month: isMonth(d.month) ? d.month : '', order: d.order === 'MDY' ? 'MDY' as const : 'DMY' as const, at: str(d.at), status: d.status === 'applied' ? 'applied' as const : d.status === 'rejected' ? 'rejected' as const : 'pending' as const, targetMode: d.targetMode === 'linked' ? 'linked' as const : 'manual' as const, requireSchedule: d.requireSchedule === true, warnings: arr(d.warnings).map(w => str(w).slice(0,200)), codes: cleanPlanning({shiftCodes:d.codes}).shiftCodes || [], entries: arr(d.entries).map(obj).slice(0,10000).map(e => ({ id: str(e.id) || crypto.randomUUID(), personId: str(e.personId), personText: str(e.personText), start: str(e.start), end: str(e.end), available: typeof e.available === 'boolean' ? e.available : null, startTime: str(e.startTime).slice(0,20), endTime: str(e.endTime).slice(0,20), code: str(e.code).slice(0,24), source: str(e.source).slice(0,200) })) })),
+    rosterSources: arr(v.rosterSources).map(obj).filter(s => /^[a-zA-Z0-9-]{1,80}$/.test(str(s.id))).map(s => ({ id: str(s.id), name: str(s.name).slice(0,200), type: str(s.type).slice(0,80), bytes: count(s.bytes), at: str(s.at) })),
+    storeTargets: Object.fromEntries(Object.entries(obj(v.storeTargets)).filter(([month]) => isMonth(month)).map(([month, segments]) => [month, Object.fromEntries(Object.entries(obj(segments)).filter(([segment]) => isSegment(segment)).map(([segment, n]) => [segment, count(n)]))])),
+    reportDrafts: Object.fromEntries(Object.entries(obj(v.reportDrafts)).filter(([date]) => isDateKey(date)).slice(-366).flatMap(([date, raw]) => { const d = obj(raw), report = cleanReport(d.report); return report ? [[date, { report, updatedAt: str(d.updatedAt), mode: d.mode === 'manual' ? 'manual' as const : 'auto' as const }]] : []; })),
     template: cleanTemplate(v.template),
     settings: { myPersonId: str(settings.myPersonId), myThreshold: ([70, 100, 120] as const).find(t => t === settings.myThreshold) || 100, lowStock: Math.max(0, Math.floor(num(settings.lowStock, 2))), reportAuthor: str(settings.reportAuthor) },
     history: Object.fromEntries(Object.entries(obj(v.history)).filter(([m]) => isMonth(m)).map(([m, h]) => { const o = obj(h); return [m, { closedAt: str(o.closedAt), targets: Object.fromEntries(Object.entries(obj(o.targets)).map(([id, t]) => [id, cleanTarget(t, m)]).filter(([, t]) => t)) as Record<string, PersonTarget>, sales: count(o.sales), byPerson: Object.fromEntries(Object.entries(obj(o.byPerson)).map(([id, n]) => [id, count(n)])) }]; })),

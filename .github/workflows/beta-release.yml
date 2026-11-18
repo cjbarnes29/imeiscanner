@@ -30,7 +30,7 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: npm ci && npm run build
-      - run: mkdir -p android/app/src/main/assets && cp -R dist/. android/app/src/main/assets/
+      - run: node scripts/copy-android-assets.mjs
       - name: Build the isolated-id APK (own app id, minified code, debug-signed)
         run: |
           gradle --project-dir android :app:assembleDebug -PphoneTest -PminifyDebug --stacktrace
@@ -50,6 +50,12 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **Daily plans and Stored:** Home shows Release today / Not today, true stock and upcoming editable quantities. Auto recalculates proposals; it never confirms sales automatically.
+          - **Saved work calendars and AL targets:** Off/annual leave skips automatic transfers; manual overrides warn and are recorded. Divisors and shares are editable. Store120 splits40 each; AL40/(30-5)*5=8 adjusts to32/44/44 while retaining store120.
+          - **Reports, exports and help:** Partial release reporting, dated drafts with mismatch warnings, extended planning exports, and interactive safe demo tutorials from ? Help. Optional on-device AI is experimental and cannot approve releases.
+          - **Shift schedules:** Reviewed file imports, editable codes/times, original-file viewing, day/week/month sharing and Home reminders; separate from planned IMEI releases.
+          - **Tablets & accessories:** Separate Daily OSR, stock snapshot approval without double import, final report editing and WhatsApp chooser; connected to Home, Export, Backup and History.
+          - **Recovery:** Resume remaining saved native scan work, automatic local diagnostics export and performance guidance. Package/signing are preserved for in-place updates; no uninstall is required for matching installed builds.
           - **Home:** a **Month outlook** (where the month ends at this pace, what to push and what to leave: a guess, not a promise).
           - **Give and share:** a **Suggest only / Auto give** switch (Auto gives waiting phones by itself, with History and Undo), and **Limits per person**: minimum and maximum phones a day, or leave a person out.
           - **Targets:** pace in whole numbers ("2 a day", "1 every 3 days") with the day 70%, 100% and 120% are reached at this month's pace; a **Highest level** per segment for segments that stop at 100%; **Edit all** (every person and segment on one screen); screenshots and pasted text find the person from the name or ID and never guess.
@@ -57,7 +63,7 @@ jobs:
           - **Give and share** is one section with three tabs.
           - **Unknown models** can be deleted; the Catalog segment menu works again.
           - **Scan settings simplified:** one speed (Standard); products per photo Auto or 1 to 6.
-          - **Store only:** keep new scans as Held (not in the report or targets) and release them to share later.
+          - **Store for now:** new scans wait for a saved Use now / Store / Plan choice; Stored counts in real stock and is unsold until confirmed release.
           - **Colour check before Sold:** pick the colour in the prompt so the exact colour comes off the report.
           - **After sending:** "Mark them as Sold?" with what will change, and Undo.
           - **Targets:** sold today per person, and a copyable "pieces per day" summary.

@@ -7,6 +7,7 @@
  * is given on the next run (a late upload, or tomorrow). Every automatic give is one entry in the history and can be undone.
  * Phones that still need review, are held (Store only), have a bad or repeated number, or whose give was undone are never given automatically.
  */
+import { availability, availabilityLabel, isWorking, isAvailableAt, localTime, allocationPlanningState } from './availability';
 import { UNASSIGNED } from '../people';
 import { applyAllocation, givenToday, recommend, type AllocRecord, type Recommendation } from './allocation';
 import { segmentOf } from './catalog';
@@ -27,16 +28,22 @@ export function allocView(state: RetailState, month: Month, records: GiveRecord[
   // a phone whose give was undone is never given again by itself (it can still be suggested, and given by hand)
   const undone = forAuto ? new Set(state.allocations.filter(e => e.status === 'undone').flatMap(e => e.items.map(i => i.recordId))) : new Set<string>();
   return records
+    .filter(r => !state.recordMeta[r.id]?.status && !r.needsReview && !state.sales.some(s => !s.voided && (s.recordId === r.id || s.imei === r.imei)))
     .filter(r => !forAuto || r.personId !== UNASSIGNED || (!r.needsReview && state.recordMeta[r.id]?.status !== 'held' && !undone.has(r.id)))
     .map(r => ({ id: r.id, imei: r.imei, personId: r.personId, segment: segmentOf(state, r.model, month, state.recordMeta[r.id]), duplicate: r.duplicate }));
 }
 
 /** What would be given now, with the person's limits and what was already given today. */
 export function recommendFor(state: RetailState, month: Month, today: DateKey, people: { id: string; name: string }[], records: GiveRecord[], forAuto = false): Recommendation {
-  return recommend({
-    state, month, people, records: allocView(state, month, records, forAuto), pending: Object.fromEntries(people.map(p => [p.id, creditOf(state, month, p.id)])),
-    limits: state.giveLimits, givenToday: givenToday(state, today)
+  const planning = allocationPlanningState(state, month);
+  const working = people.filter(p => isAvailableAt(state, p.id, today));
+  const adjusted = isAvailableAt(state, state.settings.myPersonId, today) ? planning : { ...planning, settings: { ...planning.settings, myPersonId: '' } };
+  const result = recommend({
+    state: adjusted, month, people: working, records: allocView(state, month, records, forAuto), pending: Object.fromEntries(people.map(p => [p.id, creditOf(state, month, p.id)])),
+    limits: Object.fromEntries(people.map(p => [p.id, { ...state.giveLimits?.[p.id], ...(!isAvailableAt(state, p.id, today) ? { off: true } : {}) }])), givenToday: givenToday(state, today)
   });
+  for (const person of people.filter(p => !isAvailableAt(state, p.id, today))) result.notes.push(`${person.name} is ${availabilityLabel(state, person.id, today)} today; automatic transfers are skipped. Manual transfers require a warning and are recorded in History.`);
+  return result;
 }
 
 export type AutoGiveResult = { state: RetailState; changes: { id: string; personId: string }[]; blocked: number };
@@ -54,5 +61,5 @@ export function runAutoGive(state: RetailState, month: Month, today: DateKey, pe
 /** A short fingerprint of what automatic mode looks at: the same fingerprint means the same answer, so it is not run twice. */
 export function autoGiveSignature(state: RetailState, month: Month, today: DateKey, records: GiveRecord[]): string {
   const waiting = records.filter(r => r.personId === UNASSIGNED).map(r => r.id).sort();
-  return [state.giveMode || 'suggest', today, JSON.stringify(state.giveLimits || {}), JSON.stringify(state.targets[month] || {}), state.settings.myPersonId, state.settings.myThreshold, waiting.length, waiting[0] || '', waiting[waiting.length - 1] || ''].join('|');
+  return [state.giveMode || 'suggest', today, localTime(), JSON.stringify(state.workSchedules || {}), JSON.stringify(state.shiftCodes || []), JSON.stringify(state.leaveTransfers || []), JSON.stringify(state.giveLimits || {}), JSON.stringify(state.targets[month] || {}), state.settings.myPersonId, state.settings.myThreshold, waiting.length, waiting[0] || '', waiting[waiting.length - 1] || ''].join('|');
 }

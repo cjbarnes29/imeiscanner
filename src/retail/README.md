@@ -4,6 +4,10 @@ Pure-logic modules for the RetailLens side of the app: stock, sales, targets, se
 
 ## Interface
 
+Current planning/calendar/report architecture and verified continuation status: [handoff](../../docs/HANDOFF-RELEASE-PLANNING.md).
+
+`planning.ts` owns reservations and approved sale releases; `availability.ts` and `store-targets.ts` own editable calendars and balanced target adjustments; `availability-import.ts` / `shift-codes.ts` interpret reviewed shift proposals; `daily-uploads.ts` keeps upload counts separate from releases. `dated-reports.ts` handles projected report drafts. `delivery.ts` prepares messages only after sale approval and never claims external delivery. `accessory-report.ts` owns a separate tablet/accessory quantity register updated only by approved absolute report snapshots. All new fields are additive and cleaned on backup restore. Roster originals live under `retail:roster-file:`, never scanner record keys.
+
 Most functions take a `RetailState` and return a new one. They do not mutate their input.
 
 | File | Public symbols |

@@ -6,7 +6,9 @@ import { makeBackup, readBackup, restoreBackup, withAudit } from './retail/data'
 import { listSnapshots, type Snapshot } from './retail/retail-store';
 import { segLabel } from './retail/segments';
 import { monthOf, type GiveLimit } from './retail/types';
-import { last4, who, type RetailCtx } from './retail/ui-helpers';
+import { last4, who, timeOf, type RetailCtx } from './retail/ui-helpers';
+import { PlanSummary } from './RetailPlan';
+import { WorkforcePanel } from './RetailWorkforce';
 
 // ---- Gives -------------------------------------------------------------------------------------------------------------------------------
 // Suggestions only: one list, one reason each. Nothing is assigned until the person approves it (and it can be undone).
@@ -20,7 +22,7 @@ export function GivesTab(ctx: RetailCtx) {
   const approve = (list: Proposal[]) => {
     const result = applyAllocation(view(), rec.proposals, new Set(list.map(p => p.id)), 'recommended', month);
     if (!result.event) { ctx.notify(result.blocked.length ? 'Nothing moved: those phones are already with that person.' : 'Nothing was approved.'); return; }
-    ctx.assign(result.event.items.map(i => ({ id: i.recordId, personId: i.to })));
+    if (ctx.assign(result.event.items.map(i => ({ id: i.recordId, personId: i.to }))) === false) return;
     ctx.change({ ...state, allocations: [...state.allocations, result.event] }, 'allocation');
     ctx.notify(`${result.moved.length} phone${result.moved.length === 1 ? '' : 's'} given${result.blocked.length ? `, ${result.blocked.length} skipped (already held)` : ''}. It is in the history and can be undone.`);
   };
@@ -28,7 +30,7 @@ export function GivesTab(ctx: RetailCtx) {
     const event = state.allocations.find(a => a.id === id);
     if (!event) return;
     const result = undoAllocation(view().map(r => ({ id: r.id, personId: r.personId })), event);
-    ctx.assign(result.restored.map(rid => ({ id: rid, personId: event.items.find(i => i.recordId === rid)!.from })));
+    if (ctx.assign(result.restored.map(rid => ({ id: rid, personId: event.items.find(i => i.recordId === rid)!.from }))) === false) return;
     ctx.change({ ...state, allocations: state.allocations.map(a => a.id === id ? result.event : a) }, 'undo allocation');
     ctx.notify(`${result.restored.length} phone${result.restored.length === 1 ? '' : 's'} returned${result.kept.length ? `; ${result.kept.length} stay where they are now` : ''}.`);
   };
@@ -50,6 +52,8 @@ export function GivesTab(ctx: RetailCtx) {
   const digits = (value: string): number | undefined => { const d = value.replace(/[^\d]/g, ''); return d === '' ? undefined : Math.min(999, Number(d)); };
   const byId = new Map(records.map(r => [r.id, r]));
   return <div className="retail-gives">
+    <PlanSummary {...ctx} />
+    <WorkforcePanel {...ctx} />
     <section className="retail-card screen-extra"><h3>How phones are given</h3>
       <div className="give-tabs two" role="group" aria-label="How phones are given">
         <button type="button" className={mode === 'suggest' ? 'on' : ''} aria-pressed={mode === 'suggest'} onClick={() => setMode('suggest')}>Suggest only</button>
@@ -58,6 +62,7 @@ export function GivesTab(ctx: RetailCtx) {
       <p className="settings-help">{mode === 'auto' ? 'New phones are given by themselves when a scan finishes, with the same rules as the suggestions and each person’s limits below. Phones that still need review, are held or are repeated wait. Every give is in History and can be undone.' : 'Phones are only suggested. Nothing moves until you approve it.'}</p>
     </section>
     <section className="retail-card"><h3>Suggested ({open.length})</h3>
+      <p className="settings-help">Giving assigns phones; it does not record sales. Use Plan for confirmed stored releases and upcoming days.</p><button type="button" className="subtle-btn" onClick={ctx.openPlan}>View today & upcoming plan →</button>
       {rec.notes.map((n, i) => <p key={i} className="amber">{n}</p>)}
       <ul className="retail-list gv-list">{open.map(p => <li key={p.id} className="gv-item"><span className="gv-main"><strong>{p.recordIds.length} × {segLabel(state, p.segment)} → {who(ctx, p.personId)}</strong><small>{p.reason}</small><small>{p.recordIds.map(id => last4(byId.get(id)?.imei || '')).join(' ')}</small></span>
         <span className="gv-act"><button type="button" className="subtle-btn" onClick={() => setSkipped(old => [...old, p.id])}>Skip</button><button type="button" className="primary" onClick={() => approve([p])}>Approve</button></span></li>)}
@@ -80,13 +85,13 @@ export function GivesTab(ctx: RetailCtx) {
     </details>
     <details className="retail-card screen-extra" open={!state.settings.myPersonId}><summary><strong>My target</strong></summary>
       <div className="retail-inline">
-        <label>I am<select value={state.settings.myPersonId} onChange={e => ctx.change({ ...state, settings: { ...state.settings, myPersonId: e.target.value } }, '')}><option value="">Choose…</option>{people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <label>I am<select aria-label="My target person" value={state.settings.myPersonId} onChange={e => ctx.change({ ...state, settings: { ...state.settings, myPersonId: e.target.value } }, '')}><option value="">Choose…</option>{people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Protect my<select value={state.settings.myThreshold} onChange={e => ctx.change({ ...state, settings: { ...state.settings, myThreshold: Number(e.target.value) as 70 | 100 | 120 } }, '')}>{[70, 100, 120].map(t => <option key={t} value={t}>{t}% target</option>)}</select></label>
       </div>
       <p className="settings-help">Suggestions reserve the units I need for this target first, then help everyone below 70%.</p>
     </details>
     <details className="retail-card screen-extra"><summary><strong>History ({state.allocations.length})</strong></summary>
-      <ul className="retail-list">{[...state.allocations].reverse().slice(0, 15).map(a => <li key={a.id}><span>{a.at.slice(0, 16).replace('T', ' ')} · {a.items.length} phone{a.items.length === 1 ? '' : 's'} · {a.source === 'manual' ? 'by you' : a.source === 'auto' ? 'automatic' : 'suggested'} · {[...new Set(a.items.map(i => who(ctx, i.to)))].join(', ')}{a.status === 'undone' ? ' · undone' : ''}</span>
+      <ul className="retail-list">{[...state.allocations].reverse().slice(0, 15).map(a => <li key={a.id}><span>{timeOf(a.at)} · {a.items.length} phone{a.items.length === 1 ? '' : 's'} · {a.source === 'manual' ? 'by you' : a.source === 'auto' ? 'automatic' : 'suggested'} · {[...new Set(a.items.map(i => who(ctx, i.to)))].join(', ')}{a.status === 'undone' ? ' · undone' : ''}</span>
         {a.status === 'applied' && <button type="button" className="subtle-btn" onClick={() => undo(a.id)}>Undo</button>}</li>)}{!state.allocations.length && <li className="settings-help">Approved suggestions and automatic gives appear here.</li>}</ul>
     </details>
   </div>;
@@ -152,7 +157,7 @@ export function DataTab(ctx: RetailCtx) {
       <ul className="retail-list">{months.map(([m, h]) => <li key={m}><span><strong>{m}</strong> · {h.sales} sale{h.sales === 1 ? '' : 's'} · {Object.entries(h.byPerson).map(([id, n]) => `${who(ctx, id)} ${n}`).join(', ') || 'no sales'}</span></li>)}{!months.length && <li className="settings-help">Closed months appear here. Nothing is deleted when a month ends.</li>}</ul>
     </section>
     <section className="retail-card screen-extra"><h3>Audit trail</h3>
-      <ul className="retail-list">{[...state.audit].reverse().slice(0, 25).map((a, i) => <li key={i}><small>{a.at.slice(0, 16).replace('T', ' ')}</small> <strong>{a.what}</strong> {a.detail}</li>)}{!state.audit.length && <li className="settings-help">Sales, approvals and restores are listed here.</li>}</ul>
+      <ul className="retail-list">{[...state.audit].reverse().slice(0, 25).map((a, i) => <li key={i}><small>{timeOf(a.at)}</small> <strong>{a.what}</strong> {a.detail}</li>)}{!state.audit.length && <li className="settings-help">Sales, approvals and restores are listed here.</li>}</ul>
     </section>
   </div>;
 }

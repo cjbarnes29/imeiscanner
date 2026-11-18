@@ -51,7 +51,7 @@ const readDb=key=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1
 const owners=async()=>Object.fromEntries((await readDb('record:')).map(r=>[r.id,r.personId]));
 const expandScreen=async()=>{await sleep(100);await run(`document.querySelector('button[aria-label="Show all details"]')?.click()`);await sleep(100);};
 const nav=async label=>{await click('.bottom-nav button',label);await expandScreen();};
-const more=async label=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await waitFor(`!!document.querySelector('.more-list')`,'the More menu');if(['Segments','Catalog'].includes(label)){await click('.more-list button','Models & segments');await waitFor(`!!document.querySelector('.model-manager')`,'model manager');await click('.model-manager .give-tabs button',label==='Catalog'?'All models':'By segment');}else if(['Give and share','People'].includes(label)){await click('.more-list button','People & sharing');await waitFor(`!!document.querySelector('.people-sharing-tabs')`,'people and sharing');if(label==='Give and share')await click('.people-sharing-tabs button','Suggested');}else if(label.startsWith('Backup')){await click('.more-list button','Settings & backup');await waitFor(`!!document.querySelector('.settings-modal')`,'settings');await click('.settings-modal button','Backup, restore & history');await waitFor(`!!document.querySelector('.retail-data')`,'backup screen');}else await click('.more-list button',label);await expandScreen();};
+const more=async label=>{await run(`document.querySelector('button[aria-label="More"]').click()`);await waitFor(`!!document.querySelector('.more-list')`,'the More menu');if(['Segments','Catalog'].includes(label)){await click('.more-list button','Models & segments');await waitFor(`!!document.querySelector('.model-manager')`,'model manager');await click('.model-manager .give-tabs button',label==='Catalog'?'All models':'By segment');}else if(['Give and share','People'].includes(label)){await click('.more-list button','Give & share');await waitFor(`!!document.querySelector('.people-sharing-tabs')`,'people and sharing');if(label==='Give and share')await click('.people-sharing-tabs button','Give');else{await expandScreen();await click('.people-sharing-tabs button','People');}}else if(label.startsWith('Backup')){await click('.more-list button','Settings & backup');await waitFor(`!!document.querySelector('.settings-modal')`,'settings');await click('.settings-modal button','Backup, restore & history');await waitFor(`!!document.querySelector('.retail-data')`,'backup screen');}else await click('.more-list button',label);await expandScreen();};
 // Home, Report and Targets are on the bottom bar; Gives, Segments, Catalog and Backup are under the ⋯ More menu
 const sub=async label=>{if(label==='Today')return nav('Home');if(label==='Report'||label==='Targets')return nav(label);return more(label==='Data'?'Backup':label);};
 const shot=async name=>{if(!process.env.SHOTS)return;await sleep(400);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});(await import('node:fs')).writeFileSync(join(process.env.SHOTS,name+'.png'),Buffer.from(r.result.data,'base64'));};
@@ -63,6 +63,8 @@ try{
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`if(!localStorage.getItem('e2e-seeded')){localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('e2e-seeded','1');}localStorage.setItem('retaillens-theme-v1','${process.env.THEME||'mint'}');`});
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'load');
+  await waitFor(`!!document.querySelector('.bottom-nav')`,'initial app ready');
+  await sleep(400);
   await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');for(const r of ${JSON.stringify(seed)})tx.objectStore('inventory').put(r,'record:'+r.id);tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
   await send('Page.navigate',{url:'http://localhost:4196/'});
   await waitFor(`document.readyState==='complete'`,'reload');
@@ -82,7 +84,7 @@ try{
   assert.ok(!/Scanned records/.test(await run(`document.querySelector('.results').innerText`)),'no "Scanned records" header on Home');
   await run(`document.querySelector('button[aria-label="More"]').click()`);
   await waitFor(`!!document.querySelector('.more-list')`,'More menu');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People & sharing','Models & segments','Settings & backup'],'the consolidated More menu');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['Give & share','Models & segments','Settings & backup'],'the consolidated More menu');
   await shotRegion('10-more',`document.querySelector('.more-sheet')`);
   await run(`document.querySelector('.more-sheet [aria-label="Close"]').click()`);
 
@@ -408,8 +410,8 @@ try{
   // ---------- Gives: suggestions only ----------
   await nav('Home'); await sub('Give and share');
   await waitFor(`!!document.querySelector('.retail-gives')`,'gives');
-  await run(`(()=>{const d=document.querySelector('.retail-gives details');d.open=true;return true;})()`);
-  await setVal('.retail-gives details select',  'me');
+  await run(`(()=>{const d=[...document.querySelectorAll('.retail-gives details')].find(d=>d.querySelector('summary')?.textContent==='My target');d.open=true;return true;})()`);
+  await setVal('select[aria-label="My target person"]', 'me');
   await waitFor(`/Suggested \\(1\\)/.test(document.querySelector('.retail-gives').innerText)`,'one suggestion');
   assert.match(await run(`document.querySelector('.gv-item').innerText`),/1 × Fold 1 → Carlou Test/);
   assert.equal((await owners()).r8,'','nothing is given until approved');
@@ -576,14 +578,10 @@ try{
   await run(`history.back();true`);
   await waitFor(`document.querySelectorAll('.tg-seg').length>0`,'Back went to Targets, the screen before Phones');
   ok('Back closes a popup first, then goes to the screen before (it does not leave the app)');
-  // Store only: the switch is on the Scan screen and is remembered
+  // Every new upload gets an explicit disposition instead of a sticky Store-only switch.
   await nav('Scan');
-  await waitFor(`!!document.querySelector('.store-only input')`,'Store only switch');
-  await run(`document.querySelector('.store-only input').click()`);
-  await waitFor(`localStorage.getItem('imeilens.storeOnly')==='on'`,'Store only on');
-  await run(`document.querySelector('.store-only input').click()`);
-  await waitFor(`localStorage.getItem('imeilens.storeOnly')==='off'`,'Store only off');
-  ok('Store only has a switch on the Scan screen (new scans are kept as Held; held phones are in no report number)');
+  assert.match(await body(), /After scanning, choose Use now, Store for now, or Plan release/);
+  ok('Scan explains the explicit per-upload storage choice');
   await nav('Phones');
   await waitFor(`!!document.querySelector('.select-toggle')`,'Phones once more');
   await nav('Phones');
@@ -644,7 +642,7 @@ try{
   assert.equal(final.length,9);
   ok('the scan records (numbers, models, pictures) were never changed; only owners can change, and they were put back');
 }catch(error){
-  console.error('FAIL:',error.message);
+  console.error('FAIL:',error.message);console.error('DB:',(await readDb('record:'))?.length,JSON.stringify((await readDb('retail:state'))?.recordMeta));
   try{console.error('PAGE:',String(await run('document.body.innerText.slice(0,700)')).split(String.fromCharCode(10)).join(' | '));}catch{}
   process.exitCode=1;
 }finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}

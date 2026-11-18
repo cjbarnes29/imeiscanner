@@ -4,6 +4,8 @@ Front-end source for the IMEI scanner / RetailLens web app (React + TypeScript, 
 
 Entry point: `main.tsx` mounts `App.tsx` (`export default App`). Styling is in `styles.css`.
 
+Current release planning, availability/roster calendar, separate tablets/accessories stock reports, approval sharing and restart recovery: [implementation and continuation checkpoint](../docs/HANDOFF-RELEASE-PLANNING.md). `main.tsx` installs local diagnostics and a recovery boundary; `retail-plan.css` styles the new flows.
+
 ## Child Packages
 
 - [retail/](./retail/README.md): pure logic and storage for stock, sales, targets, segments, colours and reports.

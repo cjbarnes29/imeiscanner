@@ -1,7 +1,7 @@
 {
   "name": "imei-photo-scanner",
   "private": true,
-  "version": "1.26.0",
+  "version": "1.27.0",
   "type": "module",
   "scripts": {
     "predev": "node scripts/write-version.mjs && node scripts/copy-ocr-assets.mjs",
@@ -12,7 +12,7 @@
     "android:assets": "node scripts/copy-android-assets.mjs",
     "laptop": "node server/index.mjs",
     "check:private": "node scripts/check-private-data.mjs",
-    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs && node scripts/test-learning.mjs && node scripts/test-crop-engine.mjs && node scripts/test-crop-apply.mjs && node scripts/test-frame-quality.mjs && node scripts/test-seed-layout.mjs && node scripts/test-crop-queue.mjs && node scripts/test-ocr-config.mjs && node scripts/test-scan-report.mjs && node scripts/test-fail-reason.mjs && node scripts/test-retail.mjs && node scripts/test-retail-v2.mjs && node scripts/test-stall-guard.mjs && node scripts/test-archive.mjs && node scripts/test-privacy-check.mjs && node scripts/test-label-issue.mjs && node scripts/test-camera-mode.mjs && node scripts/test-brand-conformance.mjs && node --test e2e/phone-tools/page-snapshot.test.mjs",
+    "test": "node scripts/test-records.mjs && node scripts/test-device-splitting.mjs && node scripts/test-people.mjs && node scripts/test-models.mjs && node scripts/test-custom-models.mjs && node scripts/test-multi-detect.mjs && node scripts/test-learning.mjs && node scripts/test-crop-engine.mjs && node scripts/test-crop-apply.mjs && node scripts/test-frame-quality.mjs && node scripts/test-seed-layout.mjs && node scripts/test-crop-queue.mjs && node scripts/test-ocr-config.mjs && node scripts/test-scan-report.mjs && node scripts/test-fail-reason.mjs && node scripts/test-retail.mjs && node scripts/test-retail-v2.mjs && node scripts/test-release-plan.mjs && node scripts/test-diagnostics.mjs && node scripts/test-stall-guard.mjs && node scripts/test-archive.mjs && node scripts/test-privacy-check.mjs && node scripts/test-label-issue.mjs && node scripts/test-camera-mode.mjs && node scripts/test-brand-conformance.mjs && node --test e2e/phone-tools/page-snapshot.test.mjs",
     "laptop:build": "npm run build && npm run laptop",
     "pretypecheck": "node scripts/write-version.mjs",
     "typecheck": "tsc -b",
@@ -21,6 +21,7 @@
   "dependencies": {
     "@fontsource/dm-mono": "^5.3.0",
     "@fontsource/dm-sans": "^5.3.0",
+    "@huggingface/transformers": "4.3.2",
     "@tesseract.js-data/eng": "^1.0.0",
     "@zxing/browser": "^0.2.1",
     "docx": "^9.15.3",
@@ -38,6 +39,6 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "~5.6.2",
-    "vite": "^6.0.7"
+    "vite": "6.4.6"
   }
 }

@@ -140,6 +140,11 @@ try{
   await waitFor(`/finished/.test(document.querySelector('.queue-banner')?.innerText||'')`,'background rescan finished',600000);
   await sleep(1500);
   let store=await readStore();
+  // New crop records follow the upload disposition flow before opening another editor.
+  if(await run(`!!document.querySelector('[aria-label="Where should these phones go?"]')`)){
+    await click('.plan-modal button','Store for now');
+    await waitFor(`!document.querySelector('[aria-label="Where should these phones go?"]')`,'upload choice closed');
+  }
   assert.ok(!store.records.some(r=>r.id==='p1'),'photo 1 was replaced by its crops');
   const crops1=store.records.filter(r=>r.src==='p1');
   assert.equal(crops1.length,found,'one record per box: '+JSON.stringify(store.records.map(r=>({id:r.id.slice(0,6),src:r.src,imei:r.imei,name:r.name}))));
@@ -178,6 +183,7 @@ try{
   await waitFor(`/Crop \\/ edit photo/.test(document.querySelector('.studio-title strong')?.textContent||'')`,'editor');
   await autoDone();
   const dims=await run(`(()=>{const i=document.querySelector('.studio-viewport img');return [i.naturalWidth,i.naturalHeight]})()`);
+  assert.equal(await run(`!!document.querySelector('[aria-label="Where should these phones go?"]')`),false,'upload choice cannot cover the photo editor');
   if(!await labels()){const r=await imgRect();await drag(r.x+r.w*0.05,r.y+r.h*0.05,r.x+r.w*0.5,r.y+r.h*0.3);await waitFor(`/1 label/.test(document.querySelector('.studio-title b').textContent)`,'a box');}
   const n=await labels();
   const box0=await run(`document.querySelector('.studio-box').style.cssText`);
@@ -242,7 +248,10 @@ try{
   await sleep(400);
   await run(`document.querySelector('button[aria-label="More"]').click()`);
   await waitFor(`!!document.querySelector('.more-list')`,'more menu');
-  await click('.more-list button','People');
+  await click('.more-list button','Give & share');
+  await waitFor(`!!document.querySelector('.people-sharing-tabs')`,'Give & share');
+  await run(`document.querySelector('button[aria-label="Show all details"]')?.click()`);
+  await click('.people-sharing-tabs button','People');
   await waitFor(`!!document.querySelector('.people-search')`,'People tab');
   await click('.people-tab button','+ Add person');
   await waitFor(`!!document.querySelector('.people-tab input[aria-label="Person name"]')`,'name box');

@@ -19,6 +19,17 @@ function open(): Promise<IDBDatabase> {
 }
 const wrap = <T,>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
 
+/** Roster reference files are private attachments, never scanner photos or record: entries. */
+export async function saveRosterFile(id: string, blob: Blob): Promise<void> {
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error('Invalid roster file reference.');
+  const db = await open();
+  try { await new Promise<void>((resolve, reject) => { const tx = db.transaction(TABLE, 'readwrite'); tx.objectStore(TABLE).put(blob, `retail:roster-file:${id}`); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error); }); } finally { db.close(); }
+}
+export async function loadRosterFile(id: string): Promise<Blob | undefined> {
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) return undefined;
+  const db = await open(); try { return await wrap(db.transaction(TABLE, 'readonly').objectStore(TABLE).get(`retail:roster-file:${id}`)); } finally { db.close(); }
+}
+
 export async function loadRetail(): Promise<RetailState> {
   const db = await open();
   try { const value = await wrap(db.transaction(TABLE, 'readonly').objectStore(TABLE).get(STATE_KEY)); return value ? cleanState(value) : emptyState(); }
