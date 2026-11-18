@@ -69,6 +69,30 @@ C('whatsapp', {}, "prepare today's WhatsApp report", 'make the whatsapp report f
 // ---- must NOT change anything (questions, hypotheticals, negations)
 C('none', {}, 'what happens if i delete bilal', 'should i remove asha', 'how do i delete a person', "i don't want to delete bilal", 'do not remove asha', 'can i add a person later', 'what does rename do', 'how many phones do we have', 'what is my target', 'who is on leave today', 'how is asha doing', 'hello', 'thanks', 'what can you do', 'is bilal available today', 'never delete anyone', 'cancel', 'why was asha removed', 'tell me about bilal');
 
+// ---- HELD-OUT: written after the wording work, never used to tune it. If these score far below the tuned groups, the improvement is overfitted.
+const H = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: true, ...extra }); };
+H('people.add', { names: ['Tariq'] }, 'add a new promoter named Tariq', 'hey, can you register Tariq as a new person', 'add Tariq to my team', 'we need a promoter called Tariq', 'create a person for Tariq', 'put Tariq into the people list', 'add promoter Tariq please', 'new team member Tariq');
+H('people.add', { names: ['Imran', 'Faisal'] }, 'i hired two people, Imran and Faisal', 'add 2 people Imran Faisal', 'we have two new promoters imran and faisal');
+H('people.rename', { id: 'p1', to: 'Ashley' }, 'change Asha to Ashley', "Asha's name is wrong, it should be Ashley", 'please change asha to ashley', "update Asha's name to Ashley please", 'rename asha, she is ashley');
+H('people.delete', { id: 'p2' }, 'Bilal quit, take him out of the app', 'remove bilal from my people list', 'i want to delete bilal', 'erase bilal', 'bilal is gone, please remove him from the team', 'bilal has left the company, delete him');
+H('read', {}, 'who works for me', 'show the people list', 'list all my staff');
+H('calendar', {}, 'Asha has a day off on friday', 'Bilal is on holiday from 24 nov to 28 nov', "Asha won't be in tomorrow", 'Bilal will be sick next monday', 'asha is off on 25/11', 'mark Bilal on leave for 3 days from monday', 'Asha is out of office until friday', 'Bilal is not coming in on the 22nd of november', 'bilal sick today', 'put asha on holiday next week');
+H('none', {}, 'is asha on leave tomorrow', 'what if bilal is sick', 'how do i mark leave', 'asha is a good promoter', 'bilal is working hard today', 'delete is a scary word', "don't mark asha on leave", 'remove all the clutter', 'who is off tomorrow', 'can i add a person here');
+
+// ---- FRESH: a second held-out batch, written blind after the first one was used for tuning. Score it once; do not tune against it.
+const F = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: 2, ...extra }); };
+F('people.add', { names: ['Yasir', 'Mubashir'] }, 'hey add Yasir and Mubashir as people');
+F('people.add', { names: ['Noor'] }, "I'd like to add a promoter called Noor", 'welcome a new promoter, Noor', 'add new person Noor', 'register a new staff member named Noor', 'include Noor in my team please');
+F('people.add', { names: ['Hira', 'Sadia', 'Maria'] }, 'add three promoters: Hira, Sadia and Maria');
+F('people.add', { names: ['Rafay', 'Arham'] }, 'create 2 new people called Rafay and Arham');
+F('people.rename', { id: 'p1', to: 'Aisha' }, 'can you rename Asha to Aisha for me', "make Asha's name Aisha", 'change the promoter Asha into Aisha');
+F('people.rename', { id: 'p2', to: 'Billy' }, 'Bilal wants to be called Billy now', 'call Bilal Billy from now on');
+F('people.delete', { id: 'p1' }, 'Asha is no longer with us, remove her from the list', 'please get rid of Asha from the app', 'can you take Asha off my team');
+F('people.delete', { id: 'p2' }, "Bilal doesn't work here anymore so delete him", 'remove promoter Bilal for me please');
+F('read', {}, 'give me a list of all the promoters', 'how many promoters are there', 'who is working for me');
+F('calendar', {}, 'Asha is on sick leave from monday until wednesday', 'Bilal is away on the 28th', 'put Bilal down as unavailable next friday', 'Asha will not be working on 30 nov', 'Bilal has the day off tomorrow', 'Asha is taking leave from 2 dec to 5 dec', 'Bilal is going on holiday for 5 days from 1 dec', "Asha can't make it tomorrow", 'mark asha as absent on monday');
+F('none', {}, 'will asha be on leave tomorrow', 'if I delete bilal what happens to his phones', 'asha is on top of the target', "I'll rename things later", 'remove the filter', 'did bilal take leave yesterday', 'who is on holiday next week', 'what is the best way to add people', 'no need to delete anyone', "stop, don't remove asha");
+
 const hasChange = p => !!(p.giving.length || p.people || p.business || p.report || p.settings || p.additions?.length);
 const kindOf = p => {
   if (!p.handled) return 'none';
@@ -95,9 +119,12 @@ for (const c of cases) {
   results.push({ ...c, actual, ok, asked: !ok && actual === 'blocked', note: p.blockers[0] || '' });
 }
 const group = {};
-for (const r of results) { const g = (group[area[r.expected]] ||= { total: 0, ok: 0, asked: 0 }); g.total++; if (r.ok) g.ok++; else if (r.asked) g.asked++; }
+for (const r of results) { const g = (group[(r.heldout === 2 ? 'FRESH ' : r.heldout ? 'HELD-OUT ' : '') + area[r.expected]] ||= { total: 0, ok: 0, asked: 0 }); g.total++; if (r.ok) g.ok++; else if (r.asked) g.asked++; }
 const total = results.length, passed = results.filter(r => r.ok).length, asked = results.filter(r => r.asked).length;
 console.log(`\nEveryday-language check: ${passed} of ${total} understood correctly (${(100 * passed / total).toFixed(0)}%). ${asked} more were understood but the assistant asked for details; ${total - passed - asked} were missed or wrong.\n`);
 for (const [name, g] of Object.entries(group)) console.log(`${name.padEnd(28)} ${String(g.ok).padStart(3)}/${String(g.total).padEnd(3)} ok${g.asked ? `, ${g.asked} asked back` : ''}`);
 if (process.argv.includes('--show-failures')) { console.log('\nNot understood correctly:'); for (const r of results.filter(r => !r.ok)) console.log(`- [${r.expected} -> ${r.actual}] ${r.t}${r.note ? '   (' + r.note.slice(0, 80) + ')' : ''}`); }
+// the safety group is a hard rule: a question, a "what if" or a negation must NEVER be turned into a change
+const unsafe = results.filter(r => r.expected === 'none' && !r.ok);
+if (unsafe.length) { console.log('\nUNSAFE: these must not change anything but did:'); for (const r of unsafe) console.log('- ' + r.t); process.exit(1); }
 const min = process.argv.indexOf('--min'); if (min > 0 && 100 * passed / total < +process.argv[min + 1]) { console.log(`\nBelow the required ${process.argv[min + 1]}%.`); process.exit(1); }
