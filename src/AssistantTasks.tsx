@@ -7,6 +7,7 @@ import { actionClasses, autopilotUsedToday, decideStep, finishTask, handoverSumm
 import { withAudit } from './retail/data';
 import { waitForManualIdle } from './processing-options';
 import { recordDiagnostic } from './diagnostics';
+import { notifyWhatsAppReady } from './whatsapp-ready';
 import { setActivity } from './assistant-activity';
 import type { AssistantMode, AssistantTask } from './retail/types';
 import type { RetailCtx } from './retail/ui-helpers';
@@ -103,6 +104,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         commitAssistantRequest(ctx, requestId, { override: !!opts.override, notify: false });
         edit(ctx, taskId, t => patchStep(t, step.id, { status: 'done', requestId, doneAt: nowIso(), error: undefined }, nowIso()));
         ran++;
+        if (!opts.manual && classes.includes('whatsapp')) notifyWhatsAppReady((ctx.latest?.() || ctx.state).deliveryPackets?.filter(p => p.kind === 'report' && p.status === 'prepared').slice(-1)[0]); // nobody is watching: tell the person it is ready (they still tap Send)
         if (classes.includes('add-stock') || classes.includes('remove')) { message = 'Applied. This step changed the phone list, so the next step waits: approve again to continue.'; break; }
       } catch (e) {
         const why = (e as Error).message;

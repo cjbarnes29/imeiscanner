@@ -33,5 +33,10 @@ try{
   assert.equal(await run(`AndroidScanner.routineKeeperStopRequested()`),false,'no stray Turn off request');
   // a past or absurd time is refused: nothing starts
   await run(`AndroidScanner.routineKeeper(true,'in the past',${Date.now()-60000});true`);await sleep(1500);assert.ok(!stillRunning(),'a time in the past never starts the helper');
+  // "Your WhatsApp report is ready": the bridge posts a notification whose tap opens WhatsApp. The app itself never sends anything.
+  assert.equal(await run(`typeof AndroidScanner.whatsappReady`),'function','the page has the WhatsApp ready bridge');
+  await run(`AndroidScanner.whatsappReady('group','','Daily Report 2026-11-18\\nA17 : 03/10');true`);await sleep(2000);
+  assert.match(adb('shell','dumpsys','notification'),/imei-lens-ready/,'the report-ready notification is posted (channel imei-lens-ready)');
+  assert.equal(adb('shell','dumpsys','package',PKG).match(/POST_NOTIFICATIONS: granted=true/)?.length,1,'notifications are allowed for the test app');
   console.log('PASS: routine helper on the emulator: foreground service + notification + exact alarm, woke the page at the due time, stopped when switched off, refused a past time.');
 }catch(error){console.error('FAIL:',error.message);process.exitCode=1;}finally{try{await run(`AndroidScanner.routineKeeper(false,'',0);true`);}catch{/* already off */}ws.close();}

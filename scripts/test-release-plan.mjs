@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['routine-keeper', 'assistant-settings', 'retail/assistant-tasks', 'retail/routine-schedule', 'retail/capabilities', 'retail/routines', 'retail/attention', 'processing-options', 'home-options', 'retail/assistant-actions', 'people', 'phone-names', 'samsung-models', 'retail/types', 'retail/planning', 'retail/dated-reports', 'retail/autogive', 'retail/allocation', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'retail/delivery', 'retail/auto-workflow', 'retail/local-assistant', 'retail/accessory-report', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['whatsapp-ready', 'routine-keeper', 'assistant-settings', 'retail/assistant-tasks', 'retail/routine-schedule', 'retail/capabilities', 'retail/routines', 'retail/attention', 'processing-options', 'home-options', 'retail/assistant-actions', 'people', 'phone-names', 'samsung-models', 'retail/types', 'retail/planning', 'retail/dated-reports', 'retail/autogive', 'retail/allocation', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'retail/delivery', 'retail/auto-workflow', 'retail/local-assistant', 'retail/accessory-report', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -89,7 +89,7 @@ check('upcoming giving simulates only known unassigned stock and never mutates o
 check('automatic giving rechecks eligibility after Held becomes Available without changing upload IDs',()=>{const s=base(),rows=[{...records[0],personId:''}];s.giveMode='auto';const before=AU.autoGiveSignature(s,month,today,rows);const next={...s,recordMeta:{...s.recordMeta,[rows[0].id]:{segment:'flagship1'}}};assert.notEqual(AU.autoGiveSignature(next,month,today,rows),before);assert.equal(AU.runAutoGive(next,month,today,[{id:'me',name:'Demo'}],rows).changes[0].personId,'me');});
 check('calendar exposes model quantities and planned dates, replaces proposals with approved reservations, and never changes stock',()=>{const s=base(),snapshot=JSON.stringify(s),opts={...AW.DEFAULT_WORKFLOW,days:3};const people=[{id:'me',name:'Demo'}];const rows=AW.automationCalendar(s,records,people,today,opts);assert.equal(rows.reduce((n,r)=>n+r.recordIds.length,0),30);assert.equal(new Set(rows.map(r=>r.date)).size,3);assert.ok(rows.every(r=>r.status==='proposed'&&r.kind==='release'&&r.recordIds.every(id=>records.find(p=>p.id===id)?.model==='SM-S948B')));assert.equal(JSON.stringify(s),snapshot);const approved=PL.approvePlan(s,records,PL.draftPlan(s,records,{...request,method:'spread',until:'2026-11-20'}));const calendar=AW.automationCalendar(approved,records,people,today,opts);assert.ok(calendar.every(r=>r.status==='approved'));assert.equal(calendar.reduce((n,r)=>n+r.recordIds.length,0),30);});
 
-const KP=await load('routine-keeper');const AS=await load('retail/assistant-actions'), SET=await load('assistant-settings'); const TK=await load('retail/assistant-tasks');const RSCH=await load('retail/routine-schedule');
+const KP=await load('routine-keeper'), WR=await load('whatsapp-ready');const AS=await load('retail/assistant-actions'), SET=await load('assistant-settings'); const TK=await load('retail/assistant-tasks');const RSCH=await load('retail/routine-schedule');
 const preferences=new Map();globalThis.localStorage={getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,v),removeItem:k=>preferences.delete(k)};globalThis.window={dispatchEvent:()=>{}};
 const team=[{id:'maya',name:'Maya Demo'},{id:'noor',name:'Noor Demo'},{id:'lee',name:'Lee Demo'}];
 const phones=records.slice(0,20).map(r=>({...r,personId:'',model:'SM-F956B'}));
@@ -228,6 +228,26 @@ check('the Android routine helper is told the next due time only when it changes
   assert.equal(KP.syncRoutineKeeper({assistantRoutines:rs},now,'2026-11-18',true,5,undefined),'','no bridge (a browser): nothing happens');
   assert.equal(KP.keeperStopRequested({routineKeeperStopRequested:()=>true}),true);assert.equal(KP.keeperStopRequested(undefined),false);
   const o=AW.readWorkflowOptions();assert.ok(o.autopilotAllow.includes('targets')&&o.autopilotAllow.includes('give'),'Autopilot may split targets by default, no manual step');assert.equal(o.routineGraceMinutes,5);assert.equal(o.keepRoutinesAlive,true);
+});
+check('WhatsApp report: the assistant only PREPARES the daily message (never sends), Undo can remove it, Autopilot may prepare it, and the notification fires only for a prepared message',()=>{
+  const ask="prepare today's WhatsApp report",st=pending(ask),p=AS.previewAssistant(st,phones,team,today,ask);
+  assert.ok(p.handled&&!p.blockers.length,p.blockers.join(' '));
+  const pk=p.business.after.deliveryPackets.at(-1);
+  assert.deepEqual([pk.kind,pk.status,pk.destination,pk.releaseIds.length,pk.recordIds.length],['report','prepared','group',0,0]);assert.match(pk.text,/Daily Report/);assert.ok(p.lines.some(l=>/only prepared/i.test(l)),'says it is only prepared');
+  assert.deepEqual(p.business.before.deliveryPackets,[],'Undo returns to the packets there were before');
+  assert.deepEqual(TK.actionClasses(p,ask),['whatsapp']);
+  assert.equal(TK.decideStep('autopilot',p,['whatsapp'],{allow:AW.readWorkflowOptions().autopilotAllow,dailyCap:20,usedToday:0}).action,'apply','Autopilot may prepare it');
+  assert.equal(TK.decideStep('copilot',p,['whatsapp'],{allow:[],dailyCap:20,usedToday:0}).action,'hold','Copilot waits for the batch approval');
+  for(const wording of ['send the whatsapp report','share today whatsapp report','make me a daily WhatsApp stock report for the group']){const q=AS.previewAssistant(st,phones,team,today,wording);assert.ok(q.handled&&q.business,wording);assert.equal(q.business.after.deliveryPackets.at(-1).status,'prepared','still only prepared: '+wording);}
+  assert.ok(AS.previewAssistant(st,phones,team,today,'send the whatsapp report').lines.some(l=>/never send/i.test(l)),'a "send" request says it will not send');
+  const again=AS.previewAssistant({...st,deliveryPackets:[pk]},phones,team,today,ask);assert.equal(again.business.after.deliveryPackets.length,1,'a second ask the same day refreshes the prepared message');
+  const afterOpen=AS.previewAssistant({...st,deliveryPackets:[{...pk,status:'opened'}]},phones,team,today,ask);assert.equal(afterOpen.business.after.deliveryPackets.length,2,'an opened or sent message is kept, a new one is prepared');
+  const O=AW.WORKFLOW_KEY;globalThis.localStorage.setItem(O,JSON.stringify({destination:'mobile',phone:''}));assert.ok(AS.previewAssistant(st,phones,team,today,ask).blockers.length,'a mobile destination without a valid number is refused');
+  globalThis.localStorage.setItem(O,JSON.stringify({destination:'mobile',phone:'+971 50 123 4567'}));const m=AS.previewAssistant(st,phones,team,today,ask).business.after.deliveryPackets.at(-1);assert.deepEqual([m.destination,m.phone],['mobile','971501234567']);globalThis.localStorage.removeItem(O);
+  const calls=[],bridge={whatsappReady:(d,ph,t)=>calls.push([d,ph,t])};
+  assert.equal(WR.notifyWhatsAppReady(pk,bridge),true);assert.deepEqual(calls[0],['group','',pk.text]);
+  assert.equal(WR.notifyWhatsAppReady({...pk,status:'sent-by-user'},bridge),false,'nothing to notify once it was sent');assert.equal(WR.notifyWhatsAppReady({...pk,text:'  '},bridge),false);assert.equal(WR.notifyWhatsAppReady(undefined,bridge),false);assert.equal(WR.notifyWhatsAppReady(pk,undefined),false,'no bridge (a browser): nothing happens');assert.equal(calls.length,1);
+  assert.equal(D.cleanState({...D.emptyState(),deliveryPackets:[pk,{...pk,id:'x',kind:'bogus'}]}).deliveryPackets.map(x=>x.kind).join(),'report,','the kind survives loading; an unknown kind is dropped');
 });
 delete globalThis.localStorage;delete globalThis.window;
 console.log(count+' release-planning checks passed');

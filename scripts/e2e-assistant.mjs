@@ -29,7 +29,10 @@ const types={'.js':'text/javascript','.css':'text/css','.html':'text/html','.was
 const server=createServer(async(req,res)=>{try{const p=decodeURIComponent(req.url.split('?')[0]);const file=join('dist',p==='/'?'index.html':p);const data=await readFile(file);res.writeHead(200,{'content-type':types[extname(file)]||'application/octet-stream'});res.end(data);}catch{res.writeHead(404);res.end();}}).listen(4204);
 if(await fetch('http://127.0.0.1:9364/json').then(()=>true,()=>false))throw new Error('Port 9364 is used by an old browser: stop the leftover headless msedge (profile imei-retail-*) first.');
 const profile=await mkdtemp(join(tmpdir(),'imei-retail-'));
-const proc=spawn(browser,['--headless=new','--disable-gpu','--remote-debugging-port=9364',`--user-data-dir=${profile}`,'--window-size=420,1000','--no-first-run','about:blank'],{stdio:'ignore'});
+// Voice (E2E_VOICE=1 only, needs internet once for the 43 MB model): a spoken sentence made with Windows speech is played by the browser's fake microphone.
+const VOICE=process.env.E2E_VOICE==='1';let voiceWav='';
+if(VOICE){voiceWav=join(tmpdir(),'imei-voice-give.wav');const ps=`Add-Type -AssemblyName System.Speech;$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;$s.SetOutputToWaveFile('${voiceWav}',(New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000,[System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,[System.Speech.AudioFormat.AudioChannel]::Mono)));$s.Speak('Give four Fold six to Maya and ten to Noor');$s.Dispose()`;spawnSync('powershell',['-NoProfile','-Command',ps]);if(!existsSync(voiceWav))throw new Error('could not make the spoken test sentence');}
+const proc=spawn(browser,['--headless=new','--disable-gpu','--remote-debugging-port=9364',`--user-data-dir=${profile}`,'--window-size=420,1000','--no-first-run','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream',...(VOICE?[`--use-file-for-fake-audio-capture=${voiceWav}`]:[]),'about:blank'],{stdio:'ignore'});
 function stopBrowsersOf(dir){const tag=dir.split(/[\\/]/).pop();spawnSync('powershell',['-NoProfile','-Command',`Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe'" | Where-Object { $_.CommandLine -like '*${tag}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],{stdio:'ignore'});}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let targets;for(let i=0;i<60;i++){try{targets=await (await fetch('http://127.0.0.1:9364/json')).json();if(targets.some(t=>t.type==='page'))break;}catch{}await sleep(500);}
@@ -309,8 +312,34 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
     assert.ok(['done','failed','review'].includes(task.status),'the task finished or says why: '+JSON.stringify(task.steps.map(s=>s.error)));
     console.log('auto give task:',task.status,JSON.stringify(task.steps.map(s=>s.error||'applied')));
   }
+  // WhatsApp reporting: the assistant PREPARES the daily report message; it is never opened or sent by itself (WhatsApp needs the person's own Send tap)
+  {
+    await run(`window.__opened=0;window.open=()=>{window.__opened++;return null;};true`);
+    await ask("prepare today's WhatsApp report");task=await until(t=>t.mode==='autopilot'&&/WhatsApp report/i.test(t.text),'whatsapp task');
+    assert.equal(task.status,'done','Autopilot prepared it by itself: '+JSON.stringify(task.steps.map(s=>s.error)));
+    await sleep(800);const st=await readDb('retail:state'),packet=st.deliveryPackets.at(-1);
+    assert.deepEqual([packet.kind,packet.status,packet.destination],['report','prepared','group'],'a prepared daily report message is saved');assert.match(packet.text,/Daily Report/);
+    assert.equal(await run(`window.__opened`),0,'WhatsApp was not opened and nothing was sent');assert.ok(st.assistantRequests.some(r=>/WhatsApp report/i.test(r.text)&&r.status==='applied'),'the step has its own receipt (Undo available)');
+    await toHome();await run(`document.querySelectorAll('.delivery-packets').forEach(d=>{d.open=true;});document.querySelector('.delivery-packets')?.scrollIntoView({block:'start'})`);await sleep(300);
+    assert.match(await body(),/Daily report/,'Home lists the prepared report');assert.match(await body(),/not sent/i,'and says it is not sent');await capture('46-whatsapp-report-prepared',true);
+  }
   try{await run(`document.querySelector('[aria-label="Settings"]')?.click()`);await sleep(600);await run(`[...document.querySelectorAll('details')].forEach(d=>{const t=d.querySelector('summary')?.textContent||'';if(/AI integration|Giving, plans/.test(t))d.open=true;})`);await sleep(200);assert.ok(await run(`!!document.querySelector('[aria-label="Assistant mode"]')`),'mode selector is in Settings');await run(`document.querySelector('.assistant-modes').scrollIntoView({block:'start'})`);await capture('44-assistant-mode-settings',true);await run(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Close')?.click()`);await sleep(300);}catch(e){if(/mode selector/.test(e.message))throw e;console.log('settings screenshot skipped:',e.message);}
   await setMode('assistant');
+}
+// Voice input: speak, see the transcript, fix it, nothing runs by itself. Real recording, real offline model (downloaded once).
+if(VOICE){
+  await openChat();assert.ok(await run(`!!document.querySelector('[aria-label="Speak to the assistant"]')`),'the Speak button is in the chat');
+  const before=(await readDb('retail:state')).assistantRequests.length;
+  await run(`document.querySelector('[aria-label="Speak to the assistant"]').click()`);await waitFor(`!!document.querySelector('[aria-label="Voice download"]')`,'one-time download notice');
+  assert.match(await body(),/one-time download of about 43 MB/,'it says what is downloaded');await capture('47-voice-download-notice',true);
+  await click('.voice-consent button','Download and speak');await waitFor(`!!document.querySelector('.voice-recording')`,'recording started after the model loaded',240000);
+  assert.match(await body(),/Listening · 00:0/,'it shows that it is listening');await sleep(3800);await capture('48-voice-listening',true);
+  await click('.voice-recording button','Stop and understand');
+  await waitFor(`document.querySelector('[aria-label="Ask local assistant"]').value.length>5`,'transcript in the question box',180000);
+  const heard=await run(`document.querySelector('[aria-label="Ask local assistant"]').value`);console.log('voice heard:',heard);
+  assert.match(heard,/give 4 fold ?6 to maya/i,'the spoken command was understood: '+heard);assert.match(heard,/10 to noor/i,'and the second person was corrected to a known name: '+heard);
+  assert.match(await body(),/Heard: /,'the transcript is shown so it can be fixed');await capture('49-voice-transcript',true);
+  assert.equal((await readDb('retail:state')).assistantRequests.length,before,'speaking changed nothing: it only filled the box');
 }
 await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: every asked question made or answered and nothing approved or submitted by the chat; search bar finds and opens screens; natural-wording target split previewed, approved and undone; unknown commands explained; summary replies and working next steps; round assistant button, small card with history suggestions; report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
 }catch(error){console.error(error.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}

@@ -8,8 +8,8 @@ android {
         applicationId 'com.imeilens.scanner'
         minSdk 24
         targetSdk 35
-        versionCode 45
-        versionName '1.27.2'
+        versionCode 46
+        versionName '1.27.3'
         // Isolated phone test build: ./gradle :app:assembleDebug -PphoneTest installs NEXT TO the real app (own app id, own data,
         // own name) and can never overwrite it or touch its records. Without the property the normal ids are used.
         if (project.hasProperty('phoneTest')) {

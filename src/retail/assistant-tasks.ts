@@ -31,6 +31,7 @@ export function actionClasses(preview: AssistantPreview, text: string): string[]
   if ('workSchedules' in after || 'leaveTransfers' in after) out.add('calendar');
   if ('accessoryStock' in after || 'accessoryReport' in after) out.add('accessory');
   if ('assistantRoutines' in after) out.add('routine');
+  if ('deliveryPackets' in after) out.add('whatsapp');
   return [...out];
 }
 
