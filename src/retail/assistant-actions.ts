@@ -8,6 +8,7 @@ import {reportItems,parseReport} from './stockreport';
 import {dateKey,isDateKey,monthOf,type PeopleOp,type RetailState,type StockReport} from './types';
 import {previewPeople,inversePeopleOps} from './people-commands';
 import {leaveMatch} from './calendar-commands';
+import {guardVerdict} from './guard';
 import type {RetailRecord} from './ui-helpers';
 import {isSold} from './sales';
 import {luhnValid} from '../imei-validate';
@@ -54,7 +55,18 @@ function parseStoreTarget(q: string, state: RetailState): { segment: { id: strin
   return { segment: named[0], value: +value };
 }
 
-export function previewAssistant(state:RetailState,records:RetailRecord[],people:{id:string;name:string}[],today:string,text:string,fileReport?:{date:string;text:string;category:'phones'|'accessories'}):AssistantPreview{
+const changesData=(p:AssistantPreview)=>!!(p.giving.length||p.business||p.report||p.settings||p.additions?.length||p.people?.ops.length);
+/** The one door for every sentence: chat, tasks, routines and Autopilot all come through here. Only a plain request can produce a change; a question, "what if", plan, past statement or unclear request never can (answers such as the people list stay). */
+export function previewAssistant(...args:Parameters<typeof previewAssistantRaw>):AssistantPreview{
+  const [,,,,text,fileReport]=args;
+  if(fileReport)return previewAssistantRaw(...args);
+  const verdict=guardVerdict(text);
+  if(verdict.kind==='negated'||verdict.kind==='ambiguous')return{handled:true,lines:[],blockers:[verdict.message],warnings:[],giving:[]};
+  const preview=previewAssistantRaw(...args);
+  if(verdict.kind!=='command'&&(changesData(preview)||preview.blockers.length))return{handled:false,lines:[],blockers:[],warnings:[],giving:[]};
+  return preview;
+}
+function previewAssistantRaw(state:RetailState,records:RetailRecord[],people:{id:string;name:string}[],today:string,text:string,fileReport?:{date:string;text:string;category:'phones'|'accessories'}):AssistantPreview{
   const out:AssistantPreview={handled:false,lines:[],blockers:[],warnings:[],giving:[]};
   // "give phones by the limits every day at 9:00": a routine with a time. It is saved here; it runs on its own while the app is open, in your assistant mode.
   const scheduled=fileReport?null:parseSchedule(text);

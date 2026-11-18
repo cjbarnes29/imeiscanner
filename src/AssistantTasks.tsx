@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useWorkflowOptions } from './AutoWorkflow';
 import { readWorkflowOptions } from './retail/auto-workflow';
 import { previewAssistant } from './retail/assistant-actions';
+import { guardVerdict } from './retail/guard';
 import { commitAssistantRequest, queueAssistant } from './AssistantReview';
 import { actionClasses, autopilotUsedToday, decideStep, finishTask, handoverSummary, isStaleError, MAX_STEP_RETRIES, newTask, patchStep, splitSteps, taskProgress, upsertTask, type StepDecision } from './retail/assistant-tasks';
 import { withAudit } from './retail/data';
@@ -44,7 +45,7 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   const options = readWorkflowOptions(), mode = options.assistantMode, state = ctx.latest?.() || ctx.state;
   // 1. An explicit sequence ("A, then B") whose every part is understood becomes a task: safer than trusting one parse of a combined sentence.
   const parts = splitSteps(text);
-  const understood = (list: string[]) => list.every((t, i) => { const p = previewAssistant(state, ctx.records, ctx.people, ctx.today, t); return p.handled && (i > 0 || (!p.blockers.length && actionable(p))); });
+  const understood = (list: string[]) => list.every((t, i) => { if (guardVerdict(t).kind !== 'command') return false; const p = previewAssistant(state, ctx.records, ctx.people, ctx.today, t); return p.handled && (i > 0 || (!p.blockers.length && actionable(p))); });
   let steps: string[] = [];
   if (parts.length >= 2 && understood(parts)) steps = parts;
   else {
@@ -88,7 +89,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
       if (stopped.has(taskId)) continue;
       ctx = fresh(base);
       const state = ctx.latest?.() || ctx.state, preview = previewAssistant(state, ctx.records, ctx.people, ctx.today, step.text), classes = actionClasses(preview, step.text);
-      const decision: StepDecision = opts.manual
+      const decision: StepDecision = guardVerdict(step.text).kind !== 'command' ? { action: 'blocked', reason: 'This does not read as a clear request, so nothing was applied.' } : opts.manual
         ? preview.blockers.length ? { action: 'blocked', reason: preview.blockers.join(' ') } : !classes.length ? { action: 'hold', reason: 'Nothing to change for this step.' } : preview.warnings.length && !opts.override ? { action: 'hold', reason: 'This step has warnings. Tick “I reviewed the warnings” and approve again.' } : { action: 'apply', reason: 'Approved by you.' }
         : decideStep(task.mode, preview, classes, { allow: options.autopilotAllow, dailyCap: options.autopilotDailyCap, usedToday: autopilotUsedToday(state, ctx.today) });
       if (decision.action !== 'apply') {
