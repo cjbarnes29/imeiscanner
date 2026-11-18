@@ -16,7 +16,7 @@ import androidx.core.app.NotificationCompat;
 /**
  * Keeps the app alive while a timed routine is waiting, so Android does not close it, and wakes it at the due time.
  * - An ongoing notification says what is next, with a "Turn off" button.
- * - An alarm (AlarmManager.setAlarmClock: exact, works in Doze, needs no special permission) fires RoutineAlarmReceiver at the due time.
+ * - An alarm (AlarmManager.setAlarmClock: exact and allowed in Doze; needs USE_EXACT_ALARM / SCHEDULE_EXACT_ALARM, else a best-effort alarm is used) fires RoutineAlarmReceiver at the due time.
  * - It holds no wake lock between routines. The receiver holds the CPU for two minutes around the due time only.
  * The routine logic stays in the page (one place, one set of business rules); this service never changes business data.
  * If the person swipes the app away the page is gone: the service says so and stops, instead of pretending routines still run.
@@ -30,6 +30,8 @@ public final class RoutineKeeperService extends Service {
     static volatile boolean stopRequested;
     private static volatile boolean running;
     private static volatile long armedAt = -1;
+    /** False when Android refused an exact alarm: the routine may then start a few minutes late (and be skipped by the grace rule). */
+    private static volatile boolean exact = true;
 
     static boolean isRunning() { return running; }
     static long armedAt() { return armedAt; }
@@ -54,6 +56,7 @@ public final class RoutineKeeperService extends Service {
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("AI LENS timed routines are on")
             .setContentText(RoutineKeeperPlan.notificationText(label))
+            .setSubText(exact ? null : "Android may delay it: allow Alarms & reminders for AI LENS")
             .setContentIntent(openApp(context)).setOnlyAlertOnce(true).setOngoing(true)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Turn off", stop)
             .build();
@@ -63,7 +66,13 @@ public final class RoutineKeeperService extends Service {
     static void on(Context context, String label, long atMillis) {
         long at = RoutineKeeperPlan.alarmAt(System.currentTimeMillis(), atMillis);
         if (at < 0) { off(context); return; }
-        Intent intent = new Intent(context, RoutineKeeperService.class).putExtra("label", RoutineKeeperPlan.cleanLabel(label)).putExtra("at", at);
+        String clean = RoutineKeeperPlan.cleanLabel(label);
+        if (running) { // already a foreground service: update it in place (Android 12+ may refuse to start one from the background)
+            arm(context, at);
+            ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).notify(ID, build(context, clean));
+            return;
+        }
+        Intent intent = new Intent(context, RoutineKeeperService.class).putExtra("label", clean).putExtra("at", at);
         try { androidx.core.content.ContextCompat.startForegroundService(context, intent); }
         catch (Exception error) { android.util.Log.w("IMEI-Lens", "Could not start the routine helper", error); }
     }
@@ -78,10 +87,22 @@ public final class RoutineKeeperService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    /**
+     * Exact when Android allows it (permission USE_EXACT_ALARM on Android 13+, SCHEDULE_EXACT_ALARM on 12), otherwise a
+     * best-effort alarm that Android may delay. It never throws: a refused alarm must not close the app.
+     */
     private static void arm(Context context, long at) {
         AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        // setAlarmClock is exact, is allowed while the phone dozes, and needs no extra permission
-        alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(at, openApp(context)), alarmIntent(context));
+        PendingIntent target = alarmIntent(context);
+        exact = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms();
+        try {
+            if (exact) alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(at, openApp(context)), target);
+            else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, target);
+        } catch (SecurityException refused) {
+            exact = false;
+            android.util.Log.w("IMEI-Lens", "Exact alarm refused; using a best-effort alarm", refused);
+            try { alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, target); } catch (RuntimeException ignored) { android.util.Log.w("IMEI-Lens", "No alarm could be set", ignored); }
+        }
         armedAt = at;
     }
 

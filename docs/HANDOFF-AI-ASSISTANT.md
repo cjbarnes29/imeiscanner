@@ -15,7 +15,7 @@ Read after `docs/CLAUDE-START-HERE.md`. Standing rules still apply: APK-only del
 | Handover summary | `handoverSummary()`; chat "handover summary"; button under Tasks | Last 24 hours + what is waiting, from saved data, no model tokens. |
 | Auto give tool | `AUTO_GIVE` branch in `src/retail/assistant-actions.ts` | "auto give" / "divide phones per person": the Give & share rules (`recommendFor`) with per-person limits; previewed, then approved like any give. |
 | Timed routines | `src/retail/routine-schedule.ts`, `src/RoutineLearning.tsx` | "give phones by the limits every day at 9:00" (also weekdays, named days, am/pm). Routine = text + `time` + `days` + `runs` history. Runs **at its time only**: later than `routineGraceMinutes` (default 5) it is skipped and logged as missed. Run now never uses up the day's run. Multi-step routines become tasks in every mode. |
-| Android helper | `RoutineKeeperService.java`, `RoutineAlarmReceiver.java`, `RoutineKeeperPlan.java`, `src/routine-keeper.ts` | Foreground service (type specialUse, notification with Turn off) keeps the app alive while a timed routine waits. `AlarmManager.setAlarmClock` (exact, works in Doze, no special permission) wakes the page at the due time (`retaillens-routine-wake` event). CPU held at most 2 minutes around the due time. Swiping the app away stops it and says so. Switch: "Keep the app running in the background" in Settings. |
+| Android helper | `RoutineKeeperService.java`, `RoutineAlarmReceiver.java`, `RoutineKeeperPlan.java`, `src/routine-keeper.ts` | Foreground service (type specialUse, notification with Turn off) keeps the app alive while a timed routine waits. `AlarmManager.setAlarmClock` (exact, works in Doze) wakes the page at the due time (`retaillens-routine-wake` event). CPU held at most 2 minutes around the due time. Needs `USE_EXACT_ALARM` (Android 13+, auto-granted; Google Play restricts it to alarm/calendar apps, fine for sideloaded APKs) or `SCHEDULE_EXACT_ALARM` (Android 12). If Android refuses, it falls back to a best-effort alarm and the notification says so. Swiping the app away stops it and says so. Switch: "Keep the app running in the background" in Settings. |
 
 ## How a timed routine runs
 1. Chat sentence -> `parseSchedule` -> routine saved (needs approval in Assistant/Copilot; applies in Autopilot because class `routine` is allowed).
@@ -33,6 +33,7 @@ Read after `docs/CLAUDE-START-HERE.md`. Standing rules still apply: APK-only del
 - `npm test` (includes 74 release-planning checks: task engine, modes, handover, schedule parser, due rules, keeper sync, load validation).
 - Browser: `e2e-assistant` (Copilot approve-once + Undo, Autopilot auto-apply + held step, chat cannot change mode, timed routine saved from one sentence / ran at its time / once a day / history / Run now, "auto give" applied), plus layout, retail, simple, workforce, schedules, automation.
 - Android JVM: `RoutineKeeperPlanTest` (alarm validity, 2-minute CPU limit, label cleaning). Run: `:app:testDebugUnitTest -PphoneTest --offline`.
+- Emulator: `scripts/check-android-routine-helper.mjs` (isolated test app, `ADB_SERIAL=emulator-5554`, devtools forwarded to 9229) calls the real bridge and checks the foreground service, notification, alarm, the page wake event, switch-off and a refused past time. `scripts/check-android-upgrade.mjs before|after` proves `install -r` keeps data.
 - Screenshots: `phase2-results/assistant-actions/40..45*.png` (git-ignored).
 
 ## Not verified / known limits
@@ -45,6 +46,7 @@ Read after `docs/CLAUDE-START-HERE.md`. Standing rules still apply: APK-only del
 - No independent code review has been done. Request one before release.
 
 ## Gotchas found while building
+- **The first emulator run crashed the app**: `setAlarmClock` throws `SecurityException` on Android 12+ without an exact-alarm permission. Unit and browser tests cannot see this. Always run `check-android-routine-helper.mjs` on the emulator after any native change, and never ship an APK that was not started on the emulator.
 - `ctx.records` is a snapshot of the last draw. Multi-step tasks must use `ctx.latestRecords()` (added in `App.tsx` via `recordsRef`, mirrored synchronously in `assignOwners`) or a later step can reuse phones given by the step before.
 - A sentence the old parser already understood as one request must not be split ("change flagship 3 target to 12 and divide it to promoters"). `startAssistantTask` tries an explicit sequence first, then the whole sentence, then falls back to the old single-request path.
 - The Home "waiting requests" limit is 20 (audit item M8). Clarification requests also count; reject them or the task/routine steps are stopped by the limit.
