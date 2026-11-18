@@ -38,7 +38,7 @@ function rejectRequest(ctx: RetailCtx, requestId: string, why: string) {
 }
 
 /** Turns one chat message into a task. Returns handled=false when the normal single-request path should answer instead. */
-export function startAssistantTask(base: RetailCtx, text: string): { handled: boolean; message: string } {
+export function startAssistantTask(base: RetailCtx, text: string): { handled: boolean; message: string; taskId?: string } {
   const ctx = fresh(base);
   const options = readWorkflowOptions(), mode = options.assistantMode, state = ctx.latest?.() || ctx.state;
   // 1. An explicit sequence ("A, then B") whose every part is understood becomes a task: safer than trusting one parse of a combined sentence.
@@ -58,8 +58,8 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   const task = newTask(crypto.randomUUID(), text.slice(0, 1000), mode, steps, nowIso(), () => `${Date.now().toString(36)}-${++n}`);
   saveTask(ctx, { ...task, status: 'review' }, ['assistant task started', `${mode}: ${text.slice(0, 200)} · ${steps.length} step${steps.length === 1 ? '' : 's'}`]);
   recordDiagnostic('assistant-task-start');
-  if (mode === 'autopilot') { void runTask(ctx, task.id, { manual: false }); return { handled: true, message: `Autopilot started ${steps.length} step${steps.length === 1 ? '' : 's'}. Allowed steps apply by themselves; anything else waits for you under Tasks on Home.` }; }
-  return { handled: true, message: mode === 'copilot' ? `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Review it under Tasks on Home, then approve it once.` : `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Under Tasks on Home you approve each step.` };
+  if (mode === 'autopilot') { void runTask(ctx, task.id, { manual: false }); return { handled: true, taskId: task.id, message: `Autopilot started ${steps.length} step${steps.length === 1 ? '' : 's'}. Allowed steps apply by themselves; anything else waits for you under Tasks on Home.` }; }
+  return { handled: true, taskId: task.id, message: mode === 'copilot' ? `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Review it under Tasks on Home, then approve it once.` : `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Under Tasks on Home you approve each step.` };
 }
 
 type RunOptions = { manual: boolean; one?: boolean; override?: boolean };

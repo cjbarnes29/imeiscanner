@@ -267,8 +267,10 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
   const setMode=async mode=>{await run(`localStorage.setItem(${JSON.stringify(KEY)},JSON.stringify({assistantMode:${JSON.stringify(mode)}}));window.dispatchEvent(new Event('retaillens-workflow-change'))`);await sleep(200);};
   const assigned=async()=>{await sleep(800);return(await readDb('record:')).filter(r=>r.personId).length;};
   const lastTask=async()=>(await readDb('retail:state')).assistantTasks?.at(-1);
-  const until=async(check,label)=>{for(let i=0;i<60;i++){const t=await lastTask();if(t&&check(t))return t;await sleep(300);}throw new Error('task never reached: '+label);};
+  const until=async(check,label)=>{for(let i=0;i<60;i++){const t=await lastTask();if(t&&check(t))return t;await sleep(300);}throw new Error('task never reached: '+label+' · last task: '+JSON.stringify(await lastTask()));};
   const showTasks=async()=>run(`document.querySelector('.assistant-tasks').open=true;document.querySelector('.assistant-tasks').scrollIntoView({block:'start'})`);
+  // the earlier questions leave requests waiting on Home (limit 20); reject them so the task steps below are not stopped by that limit
+  await tap('Home');await sleep(500);for(let i=0;i<30;i++){const clicked=await run(`(()=>{const b=[...document.querySelectorAll('.assistant-requests .assistant-request button')].find(b=>/^Reject/.test(b.textContent.trim())&&!b.disabled);if(!b)return false;b.click();return true;})()`);if(!clicked)break;await sleep(150);}
   const g0=await assigned();
   await setMode('copilot');await ask('give 2 Fold6 to Maya, then give 3 Fold6 to Noor');await toHome();await waitFor(`!!document.querySelector('.assistant-tasks [data-task-id]')`,'task on Home');
   let task=await lastTask();assert.equal(task.mode,'copilot');assert.equal(task.steps.length,2);assert.ok(task.steps.every(s=>s.status==='pending'),'Copilot applies nothing before the single approval');assert.equal(await assigned(),g0);
@@ -288,6 +290,25 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
   assert.equal(task.steps[0].status,'pending');assert.match(task.steps[0].error,/not allowed to change: settings/);assert.equal(await run(`localStorage.getItem('retaillens-processing-v1')`),before,'a held step changes nothing');
   await toHome();await showTasks();await capture('43-task-autopilot-held',true);await click('.assistant-tasks button','Reject the rest');await until(t=>t.status==='rejected','rejected');
   await ask('set assistant mode to assistant');assert.equal(await run(`JSON.parse(localStorage.getItem(${JSON.stringify(KEY)})).assistantMode`),'autopilot','the chat cannot change the mode');
+  // A timed routine, like a Claude routine: saved from one sentence, runs by itself at its time, once a day, keeps a history, and has Run now.
+  {
+    const t=new Date(Date.now()-60000),hhmm=`${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`,g1=await assigned();
+    await ask(`give 1 Fold6 to Maya every day at ${hhmm}`);
+    let st;for(let i=0;i<100;i++){st=await readDb('retail:state');if(st.assistantRoutines?.some(r=>r.time===hhmm&&r.lastRun))break;await sleep(300);}
+    let routine=st.assistantRoutines?.find(r=>r.time===hhmm);assert.ok(routine,'the routine was saved with its time');assert.equal(routine.text,'give 1 Fold6 to Maya');assert.deepEqual(routine.days,[]);
+    assert.ok(routine.lastRun,'it ran by itself at its time');assert.equal(routine.lastRun.kind,'task');assert.equal(routine.lastPrepared,today,'today is marked done');
+    assert.equal(await assigned(),g1+1,'Autopilot gave the phone from the routine');
+    await sleep(1500);st=await readDb('retail:state');assert.equal(st.assistantRoutines.find(r=>r.time===hhmm).runs.length,1,'it runs once a day, not on every check');
+    await toHome();await run(`document.querySelector('.routine-learning').open=true;document.querySelector('.routine-learning').scrollIntoView({block:'start'})`);await sleep(300);
+    assert.match(await body(),new RegExp(`Every day at ${hhmm}`),'the schedule is shown');assert.match(await body(),/Last run/,'the last run is shown');await capture('45-timed-routine',true);
+    await run(`[...document.querySelectorAll('.routine-learning button')].find(b=>b.textContent.trim()==='Run now').click()`);
+    for(let i=0;i<60;i++){st=await readDb('retail:state');if(st.assistantRoutines.find(r=>r.time===hhmm).runs.length>=2)break;await sleep(300);}
+    routine=st.assistantRoutines.find(r=>r.time===hhmm);assert.equal(routine.runs.length,2,'Run now adds a run to the history');assert.equal(await assigned(),g1+2,'and does the work');assert.equal(routine.lastPrepared,today);
+    // "auto give" (the Give & share rules with each person's limits) is a tool the assistant can run, and so can a routine
+    await ask('auto give');task=await until(t=>t.mode==='autopilot'&&/auto give/.test(t.text),'auto give task');
+    assert.ok(['done','failed','review'].includes(task.status),'the task finished or says why: '+JSON.stringify(task.steps.map(s=>s.error)));
+    console.log('auto give task:',task.status,JSON.stringify(task.steps.map(s=>s.error||'applied')));
+  }
   try{await run(`document.querySelector('[aria-label="Settings"]')?.click()`);await sleep(600);await run(`[...document.querySelectorAll('details')].forEach(d=>{const t=d.querySelector('summary')?.textContent||'';if(/AI integration|Giving, plans/.test(t))d.open=true;})`);await sleep(200);assert.ok(await run(`!!document.querySelector('[aria-label="Assistant mode"]')`),'mode selector is in Settings');await run(`document.querySelector('.assistant-modes').scrollIntoView({block:'start'})`);await capture('44-assistant-mode-settings',true);await run(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Close')?.click()`);await sleep(300);}catch(e){if(/mode selector/.test(e.message))throw e;console.log('settings screenshot skipped:',e.message);}
   await setMode('assistant');
 }

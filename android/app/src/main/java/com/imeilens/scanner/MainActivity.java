@@ -37,6 +37,17 @@ import java.util.UUID;
 public final class MainActivity extends Activity {
     private static final String WORK_NAME = "imei-lens-background-scan";
     private WebView webView;
+    /** The live page, so the routine alarm can wake it (RoutineAlarmReceiver). Cleared when the screen is destroyed. */
+    private static volatile MainActivity current;
+
+    /** Tells the page to check its timed routines now. False when the page is not alive (the app was closed). */
+    static boolean wakePage() {
+        final MainActivity live = current;
+        if (live == null || live.webView == null) return false;
+        live.webView.post(() -> live.webView.evaluateJavascript("window.dispatchEvent(new Event('retaillens-routine-wake'))", null));
+        return true;
+    }
+
     private android.webkit.PermissionRequest cameraRequest;
 
     // Phone camera: the permission request that is waiting for the user's answer (person, mode), if any.
@@ -75,6 +86,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         RecoveryDiagnostics.install(this);
+        current = this;
         cleanStaleCache();
         if (state == null) handleShare(getIntent());
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
@@ -338,6 +350,11 @@ public final class MainActivity extends Activity {
             catch (Exception ignored) { }
         }
         return queue;
+    }
+
+    @Override protected void onDestroy() {
+        if (current == this) current = null;
+        super.onDestroy();
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -717,6 +734,18 @@ public final class MainActivity extends Activity {
         /** The crop queue's progress. While active, an ongoing notification and a wake lock keep the app working when minimized. */
         @JavascriptInterface public void queueStatus(int done, int total, boolean active) {
             if (active) QueueService.show(MainActivity.this, done, total); else QueueService.hide(MainActivity.this);
+        }
+
+        /** The page reports when the next timed routine is due (epoch milliseconds, 0 = none): Android keeps the app alive and wakes it then. */
+        @JavascriptInterface public void routineKeeper(boolean on, String label, double atMillis) {
+            if (on && atMillis > 0) RoutineKeeperService.on(MainActivity.this, label, (long) atMillis); else RoutineKeeperService.off(MainActivity.this);
+        }
+
+        /** True once if the notification's Turn off button was tapped. */
+        @JavascriptInterface public boolean routineKeeperStopRequested() {
+            boolean value = RoutineKeeperService.stopRequested;
+            RoutineKeeperService.stopRequested = false;
+            return value;
         }
 
         /** True once if the notification's Pause button was tapped. */

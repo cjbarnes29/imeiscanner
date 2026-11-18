@@ -1,3 +1,4 @@
+import type { TimedRoutine } from './routine-schedule';
 /**
  * RetailLens data model. IMEI Lens stays the scanning engine (records, photos, people); everything here is kept apart from the scan records, under its
  * own "retail:" keys, and refers to records only by id / IMEI. Nothing in this folder touches a picture or changes a scan record.
@@ -147,7 +148,7 @@ export type LeaveTransfer = { id: string; personId: string; start: DateKey; end:
 
 export type RetailState = {
   version: 1;
-  assistantRoutines?:{id:string;text:string;enabled:boolean;lastPrepared?:string}[];
+  assistantRoutines?:TimedRoutine[];
   assistantFiles?:{id:string;name:string;type:string;bytes:number;at:string;status:'queued'|'reading'|'ready'|'failed';text:string;note:string;truncated?:boolean}[];
   assistantTasks?: AssistantTask[];
   assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>}[];

@@ -76,3 +76,5 @@ section.modal.settings-modal>.modal-head{width:100%;max-width:100%;margin:0 0 8p
 
 .task-bar{height:8px;border-radius:4px;background:#233446;margin:8px 0;overflow:hidden}.task-bar span{display:block;height:100%;background:#4fd1a1}.assistant-tasks ol{margin:6px 0 6px 18px;padding:0}.assistant-modes{border:1px solid var(--line,#304253);border-radius:12px;padding:10px;margin:10px 0}
 .assistant-tasks>summary{min-height:44px;display:flex;align-items:center;flex-wrap:wrap;gap:4px}.assistant-tasks .plan-link,.assistant-tasks .practice-choice{min-height:44px}
+
+.routine-schedule{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}.routine-schedule input[type=time]{min-height:44px}.routine-schedule [role=group]{display:flex;flex-wrap:wrap;gap:6px}.routine-schedule .chip{min-width:44px;min-height:44px;background:#16283a;color:#dbe7f0;border:1px solid #304253;border-radius:10px}.routine-schedule .chip.on{background:#2f8f6f;color:#fff;border-color:#4fd1a1}.routine-runs summary{min-height:44px;display:flex;align-items:center}
