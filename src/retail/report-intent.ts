@@ -41,7 +41,10 @@ export function monthInRequest(text: string, today: string): Month | '' {
 
 export function parseReportIntent(text: string, people: { id: string; name: string }[], today: string): ReportIntent | null {
   const raw = text.trim();
-  if (!raw || raw.length > 400 || !MAKE.test(raw)) return null;
+  // a request names a file kind right away too: "excel report for Asha", "simple notes of my targets", "a spreadsheet summary for october"
+  const bare = /^(?:an?\s+|the\s+|my\s+|our\s+)?(?:excel|xlsx|spreadsheet|power\s*point|pptx?|slides?|slide\s*deck|presentation|simple\s+notes?)\s+(?:report|summary|overview|of|for)\b/i.test(raw)
+    || /^(?:an?\s+|the\s+|my\s+|our\s+)?(?:report|summary|overview)\s+(?:as|in|to)\s+(?:an?\s+)?(?:excel|xlsx|spreadsheet|power\s*point|pptx?|slides?|presentation|notes?)\b/i.test(raw);
+  if (!raw || raw.length > 400 || (!MAKE.test(raw) && !bare)) return null;
   // the existing report commands win: editing a report line, or the dated WhatsApp stock report without a file kind
   if (/\b(?:set|edit|update|change)\b[^.]*\breport\b/i.test(raw) && !FORMAT.some(([, re]) => re.test(raw))) return null;
   if (/\bwhats\s*app\b|\bstock\s+report\b|\bdated\s+report\b/i.test(raw)) return null;

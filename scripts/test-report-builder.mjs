@@ -150,6 +150,10 @@ assert.equal(P('build an excel report for october').month, '2026-10'); assert.eq
 assert.equal(P('make an excel report for november 2026').month, '2026-11');
 assert.equal(P('create an excel report for Zorro').personUnclear, true, 'an unknown name is reported, never guessed'); assert.equal(P('create an excel report for Zorro').personId, '');
 assert.equal(P('create an excel report for everyone').personUnclear, false);
+// a file kind first is enough, without a verb
+assert.equal(P('excel report for Asha').format, 'xlsx'); assert.equal(P('excel report for Asha').personId, 'p1'); assert.equal(P('powerpoint of this month').format, 'pptx'); assert.equal(P('a spreadsheet summary for october').month, '2026-10');
+assert.equal(P('simple notes of my targets').format, 'notes'); assert.equal(P('report as powerpoint').format, 'pptx'); assert.equal(P('presentation for last month').month, '2026-10');
+for (const t of ['excel', 'notes about stock', 'powerpoint', 'excel is great', 'report', 'my notes']) assert.equal(P(t), null, `"${t}" alone is not a report request`);
 // the existing report commands are left alone
 for (const t of ['set report Fold6 to 6', 'prepare today report', 'check my report', 'give 4 Fold6 to Asha', 'make the report for whatsapp', 'what is my report', 'Turn off auto-detection', 'make 4 Fold6 available']) assert.equal(P(t), null, `"${t}" is not an app-report request`);
 assert.equal(R.monthInRequest('last month', '2026-01-05'), '2025-12', 'last month across a year end'); assert.equal(R.monthInRequest('december', '2026-11-18'), '2025-12', 'a month still to come means last year');

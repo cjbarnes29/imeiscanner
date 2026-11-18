@@ -47,3 +47,8 @@ Open findings after the Claude continuation session. Only things that were check
 ## Artifacts built 2026-11-18 (not published)
 
 Built from commit `6e0ef94` (branch `ux/photo-editor`, pushed): `AI-LENS-6e0ef94.apk` (`com.imeilens.scanner`, 1.27.1, code 44, SHA-256 `bb5e0c48af6ef5fe9dfdeafca5e13c6da3551deff953f318a31a4d9e579d41ee`) and `AI-LENS-Test-6e0ef94.apk` (`com.imeilens.scanner.phonetest`, SHA-256 `efd779eb596adbaa0d296e4f1be4899b3139eda102562a9bf998437150214a31`), both signed with certificate `f2a58bb2…a387a27`. Package ids and signing unchanged. The test APK installed and started on the emulator with 0 crashes. **Not published**: the upload was approved but blocked by the permission check; see `docs/HANDOFF-AI-LENS.md`. Still open from the findings above: H1 (emulator suite), H2 (in-place upgrade retention), M6 (Office files), plus the real-phone check.
+
+**Medium (added after the small-chat round)**
+- M8. Many questions in a row leave many requests pending on Home (cap 20; the 44-question browser battery left 19). Informational requests are saved as answered, but actionable ones wait for review. Consider a bulk reject or expiry.
+- M9. The user's "manual save everywhere" request is not built (Settings switch Automatic / Manual with Save and Discard on edit screens). Home and Targets redesign not started.
+- M10. The round assistant button was checked in a browser at 411 px and 360 px with 130% zoom (layout test passes) but not on an emulator or phone; it can overlap content at the right edge.

@@ -10,6 +10,9 @@ import { useProcessingOptions, useEditingActivity, useManualEdit, useTypingPrior
 import { backgroundDeferred, waitForManualIdle, manualEditRevision, isPhotoBeingEdited, hasManualEditor } from './processing-options';
 import { SwipeNotice,SwipeToast,SwipeUndoBar } from './SwipeNotice';
 import { AssistantMascot } from './AssistantMascot';
+import { AssistantBubble } from './AssistantBubble';
+import { NavSearch } from './NavSearch';
+import type { NavItem, NavThen } from './retail/nav-search';
 import { RecoveryPanel } from './RecoveryPanel';
 import { recordDiagnostic,beginDiagnosticOperation } from './diagnostics';
 import { activeIssue, issueTextFor } from './label-issue';
@@ -2117,6 +2120,21 @@ export default function App() {
     else { setMainView('results'); setRecordsTab(view); }
     window.scrollTo({ top: 0 });
   }
+  /** Where a search result leads. Only opens things; after the screen is open it may press a button or open a section once that has appeared. */
+  function finishNav(then: NavThen, attempt: number) {
+    const el = (then.press ? [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim().startsWith(then.press as string) && !b.disabled) : document.querySelector(then.open as string)) as HTMLElement | undefined | null;
+    if (el) { if (then.open) (el as HTMLDetailsElement).open = true; else el.click(); el.scrollIntoView?.({ block: 'center' }); return; }
+    if (attempt < 14) window.setTimeout(() => finishNav(then, attempt + 1), 200);
+  }
+  function runNav(item: NavItem) {
+    setNavOpen(false);
+    const t = item.target;
+    if (t.kind === 'assistant') { setAssistantPrompt(t.prompt); setAssistantAsk(!!t.prompt); setAssistantSettingsMode(false); setAssistantFull(false); setAssistantOpen(true); window.setTimeout(() => { setAssistantPrompt(undefined); setAssistantAsk(false); }, 800); return; }
+    if (t.kind === 'settings') { setModelSourcesOpen(false); setSettingsOpen(true); return; }
+    if (!(t.kind === 'view' && ['scan', 'records', 'export'].includes(t.view))) setSimpleView(false);
+    if (t.kind === 'view') openView(t.view); else openMore(t.section);
+    if (t.then) { const then = t.then; window.setTimeout(() => finishNav(then, 0), 250); }
+  }
   /** The title of the screen that is open, and a short status line under it. */
   const viewInfo = (() => {
     const back = recordsTab !== 'records' && !(recordsTab === 'retail' && ['today', 'report', 'targets'].includes(retailSub));
@@ -2182,7 +2200,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [assistantPlan,setAssistantPlan]=useState<PlanRequest|null>(null);
   useBackLayer(!!assistantPlan,()=>setAssistantPlan(null),'assistant-plan');
-  const [assistantSettingsMode,setAssistantSettingsMode]=useState(false);
+  const [assistantSettingsMode,setAssistantSettingsMode]=useState(false),[assistantFull,setAssistantFull]=useState(false),[navOpen,setNavOpen]=useState(false),[assistantAsk,setAssistantAsk]=useState(false);
+  useBackLayer(navOpen, () => setNavOpen(false), 'nav-search');
   const [assistantOpen,setAssistantOpen]=useState(false),[assistantPrompt,setAssistantPrompt]=useState<string>();
   useBackLayer(assistantOpen,()=>setAssistantOpen(false),'global-assistant');
   useEffect(()=>{const reuse=(event:Event)=>{const text=(event as CustomEvent).detail;if(typeof text==='string'){setAssistantPrompt(text.slice(0,1000));setAssistantOpen(true);}};window.addEventListener(ASSISTANT_REUSE,reuse);return()=>window.removeEventListener(ASSISTANT_REUSE,reuse);},[]);
@@ -4966,7 +4985,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="top-actions"><button type="button" className="settings-btn assistant-launch" aria-label="Open assistant" title="Assistant · ask or review" disabled={!retailLoaded||!inventoryLoaded} onClick={()=>{setAssistantSettingsMode(false);setAssistantOpen(true);}}><AssistantMascot extra={assistantExtra}/></button>
+        <div className="top-actions"><button type="button" className="settings-btn" aria-label="Search" title="Search screens, settings and tools" onClick={() => setNavOpen(true)}><Search size={18} /></button>
           <div className="mode-toggle" role="group" aria-label="Interface mode">
             <button aria-pressed={simpleView} onClick={() => setSimpleView(true)}>Simple</button>
             <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
@@ -4980,8 +4999,10 @@ export default function App() {
         </div>
       </header>
 
+      <NavSearch open={navOpen} onClose={() => setNavOpen(false)} onGo={runNav} savedQuestions={retail.savedQuestions || []} />
+      <AssistantBubble disabled={!retailLoaded||!inventoryLoaded} open={assistantOpen} extra={assistantExtra} onToggle={()=>{if(assistantOpen&&!assistantFull&&!assistantSettingsMode){setAssistantOpen(false);return;}setAssistantSettingsMode(false);setAssistantFull(false);setAssistantOpen(true);}}/>
       {assistantPlan&&<PlanEditor ctx={assistantCtx} initial={assistantPlan} close={()=>setAssistantPlan(null)}/>}
-      {assistantOpen&&retailLoaded&&<div className="modal-backdrop assistant-backdrop"><section className="modal assistant-panel" role="dialog" aria-modal="true" aria-label="Assistant"><div className="modal-head"><h2>Assistant</h2><AssistantMascot showLabel extra={assistantExtra}/><HelpButton topic="AI assistant: request, review and Undo"/><button className="subtle-btn" onClick={()=>setAssistantOpen(false)}>Close assistant</button></div><p className="settings-help">Ask from any tab. Review the proposed output before approval; receipts and Undo remain in Home history.</p><LocalAI summary={!assistantSettingsMode&&workflowOptions.assistantIconMode==='summary'} ctx={assistantCtx} initialPrompt={assistantPrompt} onDraft={draft=>{const personId=draft.personId||retail.settings.myPersonId||retailPeople[0]?.id||'';setAssistantOpen(false);setSimpleView(false);openView('home');setAssistantPlan({...automaticSuggestion(retail,retailRecords,personId,todayKey,readWorkflowOptions()).request,...draft});}}/></section></div>}
+      {assistantOpen&&retailLoaded&&(!assistantFull&&!assistantSettingsMode?<div className="assistant-quick-wrap"><section className="assistant-panel assistant-quick" role="dialog" aria-label="Assistant"><div className="assistant-quick-head"><strong>What do you want to do?</strong><button type="button" className="subtle-btn assistant-quick-close" aria-label="Close assistant" onClick={()=>setAssistantOpen(false)}>✕</button></div><AssistantMascot showLabel extra={assistantExtra}/><LocalAI quick summary askOnOpen={assistantAsk} ctx={assistantCtx} initialPrompt={assistantPrompt} onDraft={draft=>{const personId=draft.personId||retail.settings.myPersonId||retailPeople[0]?.id||'';setAssistantOpen(false);setSimpleView(false);openView('home');setAssistantPlan({...automaticSuggestion(retail,retailRecords,personId,todayKey,readWorkflowOptions()).request,...draft});}}/><div className="assistant-quick-foot"><button type="button" className="plan-link" onClick={()=>setAssistantFull(true)}>Open the full assistant</button><HelpButton topic="AI assistant: request, review and Undo"/></div></section></div>:<div className="modal-backdrop assistant-backdrop"><section className="modal assistant-panel" role="dialog" aria-modal="true" aria-label="Assistant"><div className="modal-head"><h2>Assistant</h2><AssistantMascot showLabel extra={assistantExtra}/><HelpButton topic="AI assistant: request, review and Undo"/><button className="subtle-btn" onClick={()=>setAssistantOpen(false)}>Close assistant</button></div><p className="settings-help">Ask from any tab. Review the proposed output before approval; receipts and Undo remain in Home history.</p><LocalAI summary={!assistantSettingsMode&&workflowOptions.assistantIconMode==='summary'} ctx={assistantCtx} initialPrompt={assistantPrompt} onDraft={draft=>{const personId=draft.personId||retail.settings.myPersonId||retailPeople[0]?.id||'';setAssistantOpen(false);setSimpleView(false);openView('home');setAssistantPlan({...automaticSuggestion(retail,retailRecords,personId,todayKey,readWorkflowOptions()).request,...draft});}}/></section></div>)}
       {settingsOpen && <SettingsPanel onResetScans={()=>{setSettingsOpen(false);setResetOpen(true);}} onOpenLocalAI={() => {setSettingsOpen(false);setAssistantSettingsMode(true);setAssistantOpen(true);}} modelsOnly={modelSourcesOpen} onOpenModelManager={() => { setSettingsOpen(false); openMore('segments'); }} onOpenBackup={() => { setSettingsOpen(false); openMore('data'); }} onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={applyCustomModelNames} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
         <h2>Check this</h2>

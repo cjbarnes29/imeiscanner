@@ -74,6 +74,18 @@ const state={version:1,settings:{myPersonId:'me',myThreshold:100,lowStock:2,repo
 await run(`localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('retaillens-processing-v1',JSON.stringify({autoFindBoxes:false,autoReview:false,autoSplit:false,autoRetry:false}));new Promise(resolve=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const db=o.result,t=db.transaction('inventory','readwrite'),store=t.objectStore('inventory');store.put(${JSON.stringify(state)},'retail:state');for(const r of ${JSON.stringify(rows)})store.put(r,'record:'+r.id);t.oncomplete=()=>{db.close();resolve(true);};};})`);
 await send('Page.navigate',{url:'http://localhost:4204/'});await sleep(1000);await run(`[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent))?.click()`);await sleep(500);
 await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-panel')`,'global assistant');await sleep(1000);await capture('17-assistant-panel');
+// the assistant is a small card with a prompt box and suggestions taken from history, opened from the round button; the big panel is one tap further
+assert.equal(await run(`!!document.querySelector('.assistant-panel.assistant-quick')`),true,'the assistant opens as a small card');
+assert.equal(await run(`document.querySelector('.assistant-quick-wrap').getBoundingClientRect().height<window.innerHeight*0.7`),true,'the card is small');
+assert.match(await run(`document.querySelector('.assistant-quick-head').innerText`),/What do you want to do\?/);
+const chipTexts=await run(`[...document.querySelectorAll('.assistant-chips .chip')].map(b=>b.textContent.trim())`);
+assert.ok(chipTexts.length>=3&&chipTexts.length<=6,'suggestions: '+chipTexts.join(' | '));
+await run(`document.querySelector('.assistant-chips .chip').click()`);
+await waitFor(`!!document.querySelector('.assistant-quick .assistant-answer')`,'a tapped suggestion is asked at once');
+assert.equal(await run(`document.querySelector('[aria-label="Ask local assistant"]').value`),chipTexts[0],'and its words are in the box');
+await setInput('.assistant-panel [aria-label="Ask local assistant"]','');
+assert.equal(await run(`!!document.querySelector('.assistant-panel .assistant-questions')`),false,'no long question lists inside the small card');
+assert.equal(await run(`!!document.querySelector('.assistant-bubble')&&!document.querySelector('.top-actions .assistant-launch')`),true,'the round button, not a header icon');
 const openChat=async()=>{if(!await run(`!!document.querySelector('.assistant-panel')`)){await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-panel')`,'the chat opens from the header');await sleep(300);}};
 const ask=async(text)=>{await openChat();await setInput('.assistant-panel [aria-label="Ask local assistant"]',text);await click('.assistant-panel button','Get answer');await sleep(350);};
 const toHome=async()=>{await click('.assistant-panel button','Review requests on Home');await waitFor(`!document.querySelector('.assistant-panel')&&!!document.querySelector('.assistant-requests')`,'Home review');await sleep(300);};
@@ -85,10 +97,10 @@ assert.match(await run(`document.querySelector('.assistant-panel .plan-ai-status
 const faceState=()=>run(`document.querySelector('.assistant-launch .ai-mascot')?.dataset.state||''`);
 await waitFor(`document.querySelector('.assistant-launch .ai-mascot')?.dataset.state==='ready'`,'the face says something is ready for review');
 assert.equal(await run(`document.querySelector('.assistant-panel .ai-mascot-label').innerText`),'Something is ready for your review on Home','the chat says it in words too');
-let saved=await readDb('retail:state');assert.equal((await readDb('record:')).filter(r=>r.personId).length,0,'nothing is given by asking');assert.equal(saved.assistantRequests[0].status,'pending');
+let saved=await readDb('retail:state');assert.equal((await readDb('record:')).filter(r=>r.personId).length,0,'nothing is given by asking');assert.equal(saved.assistantRequests.find(r=>/^give 4 Fold6/.test(r.text)).status,'pending');
 // 2. Home shows the full preview; approving gives 4 and 10, and the receipt has Undo
 await toHome();await waitFor(`!!document.querySelector('.assistant-requests .assistant-request')`,'request preview on Home');await atReview();await capture('18-give-preview',true);
-await click('.assistant-requests .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.assistantRequests[0].status,'applied');assert.equal((await readDb('record:')).filter(r=>r.personId==='me').length,4);assert.equal((await readDb('record:')).filter(r=>r.personId==='asha').length,10);
+await click('.assistant-requests .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.assistantRequests.find(r=>/^give 4 Fold6/.test(r.text)).status,'applied');assert.equal((await readDb('record:')).filter(r=>r.personId==='me').length,4);assert.equal((await readDb('record:')).filter(r=>r.personId==='asha').length,10);
 await run(`document.querySelector('.assistant-requests>details').open=true`);await capture('19-approved-action-receipt',true);
 await click('.assistant-requests button','Undo this action');await sleep(500);assert.equal((await readDb('record:')).filter(r=>r.personId).length,0,'Undo hands every phone back');await capture('20-undo-result',true);
 await waitFor(`document.querySelector('.assistant-launch .ai-mascot')?.dataset.state!=='ready'`,'nothing is waiting for review any more, so the face is no longer in the ready state');
@@ -155,10 +167,99 @@ assert.match(await run(`window.__blobs[3].type`),/^text\/plain/);assert.match(aw
 assert.equal(JSON.stringify((await readDb('record:')).map(r=>[r.id,r.personId]).sort()),ownersBefore,'making and sending reports changed no phone owner');
 assert.equal((await readDb('retail:state')).releases?.length||0,0,'and recorded no sale');
 await atReview();await capture('24-make-a-report',true);
+// the suggestions now come from what was asked, and the full assistant is one tap further
+await openChat();
+const historyChips=await run(`[...document.querySelectorAll('.assistant-chips .chip')].map(b=>b.textContent.trim())`);
+assert.ok(historyChips.includes('Turn off auto-detection')&&historyChips.some(t=>/powerpoint report for last month/i.test(t)),'suggestions follow the history: '+historyChips.join(' | '));
+await click('.assistant-panel button','Open the full assistant');
+await waitFor(`!!document.querySelector('.assistant-backdrop .assistant-panel')&&!document.querySelector('.assistant-quick')`,'the full assistant opens');
+await click('.assistant-backdrop button','Close assistant');await waitFor(`!document.querySelector('.assistant-panel')`,'the full assistant closes');
+await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-quick')`,'the round button opens the small card again');
+await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!document.querySelector('.assistant-panel')`,'and closes it');
+// natural wording: the sentence the user typed is understood, previewed first, approved and undone; nothing changes before approval
+await ask('change flagship 3 target to 12 and divide it to promoters');
+await waitFor(`/saved for review on Home/.test(document.querySelector('.assistant-panel .plan-ai-status')?.innerText||'')`,'understood as a request to review');
+await toHome();await atReview();
+await waitFor(`/Flagship 3: store target 12; equal base split across 3 people/.test(document.querySelector('.assistant-requests .assistant-request')?.innerText||'')`,'the preview shows the division between the promoters');
+await capture('25-target-split-preview',true);
+const flag3=async()=>{const st=await readDb('retail:state');const t=st.targets?.[today.slice(0,7)]||{};return ['me','asha','c'].map(id=>t[id]?.lines?.find(l=>l.segment==='flagship3')?.target);};
+assert.ok(!(await flag3()).some(v=>v===4),'nothing is applied before approval');
+await click('.assistant-requests .assistant-request button','Approve changes');await sleep(700);
+assert.deepEqual(await flag3(),[4,4,4],'12 divided equally between the 3 promoters');
+await click('.assistant-requests button','Undo this action');await sleep(700);
+assert.ok(!(await flag3()).some(v=>v===4),'Undo takes the division back');
+// a command that cannot be turned into a reviewable change is explained, not answered with an unrelated calculation
+await ask('make the sky blue');
+await waitFor(`/could not turn this into a change/.test(document.querySelector('.assistant-quick .assistant-answer-title')?.innerText||'')`,'a not-understood command is explained');
+assert.match(await run(`document.querySelector('.assistant-quick .plan-ai-status').innerText`),/Nothing was changed/);
+assert.ok(await run(`document.querySelectorAll('.assistant-quick .assistant-answer li').length>=3`),'with examples to try');
+// replies are a headline and a few bullets; suggested next steps ask the question when tapped
+await ask('How much real stock do we have?');
+await waitFor(`!!document.querySelector('.assistant-quick .assistant-answer-title')&&!/could not turn/.test(document.querySelector('.assistant-quick .assistant-answer-title').innerText)`,'a stock answer');
+assert.ok(await run(`document.querySelectorAll('.assistant-quick .assistant-answer li').length<=5`),'the small chat shows a summary only');
+assert.ok(await run(`document.querySelectorAll('.assistant-quick .assistant-next .chip').length>=2`),'next steps are offered');
+const firstTitle=await run(`document.querySelector('.assistant-quick .assistant-answer-title').innerText`);
+const stepText=await run(`document.querySelector('.assistant-quick .assistant-next .chip').textContent.trim()`);
+await run(`document.querySelector('.assistant-quick .assistant-next .chip').click()`);
+await waitFor(`document.querySelector('[aria-label="Ask local assistant"]').value===${JSON.stringify(stepText)}&&document.querySelector('.assistant-quick .assistant-answer-title')&&document.querySelector('.assistant-quick .assistant-answer-title').innerText!==${JSON.stringify(firstTitle)}`,'tapping a next step asks it and shows its answer');
+await capture('26-small-chat-answer');
+// EVERY question asked in the chat is made or answered, and the chat never approves or submits anything by itself
+const snapshot=async()=>{const st=await readDb('retail:state');const recs=await readDb('record:');return JSON.stringify({owners:recs.map(r=>[r.id,r.personId]).sort(),sales:(st.sales||[]).map(x=>[x.id,x.submitted,x.voided]),releases:st.releases?.length||0,targets:st.targets,allocations:(st.allocations||[]).length,applied:(st.assistantRequests||[]).filter(r=>r.status==='applied').length,processing:await run(`localStorage.getItem('retaillens-processing-v1')`),workflow:await run(`localStorage.getItem('retaillens-auto-workflow-v1')`)});};
+const stateBefore=await snapshot();
+const QUESTIONS=['Check my report','How much real stock do we have?','Plan to reach 70 percent today','Check and explain my settings','Make a PowerPoint report for this month','Show only plans and warnings on Home','Store uploads automatically','Turn off auto-detection',
+  'what can you do','how many phones are unassigned','which segment should I push this month','what is my target for flagship 3','show my targets','who needs help','how do I share my targets',
+  'give 4 Fold6 to Maya and 10 to Noor','set report Fold6 to 6','prepare today report','store 2 Fold6','make 2 Fold6 available','remove 1 Fold6 from stock','set Buds4 stock to 8',
+  'split store target 120 for Flagship 1 among everyone','change flagship 3 target to 12 and divide it to promoters','set store target for Flagship 2 to 20 and share it among everyone','mark Maya not available from 2026-12-20 to 2026-12-22','create daily routine to prepare today report','add phone stock F956 IMEI 490154209100009',
+  'change flagship 3 target to 12','change flagship 3 target to 12 and divide it to Maya','make the sky blue','delete everything','give phones','do not apply anything',
+  'make a powerpoint report for last month','excel report for Noor','simple notes of my targets','build a spreadsheet summary for october',
+  'zzzz qqqq','what is the capital of France','12345','???','a','x'.repeat(300)];
+const historyLength=async()=>(await readDb('retail:state')).assistantRequests?.length||0;
+const unanswered=[];
+for(const q of QUESTIONS){
+  const n0=await historyLength();await ask(q);
+  let n1=n0;for(let i=0;i<60&&n1<=n0;i++){await sleep(150);n1=await historyLength();}
+  await sleep(200);
+  const reply=await run(`(document.querySelector('.assistant-quick .assistant-answer-title')?.innerText||'')+' '+(document.querySelector('.assistant-quick .plan-ai-status')?.innerText||'')`);
+  const explainedFull=/too many requests/.test(reply);
+  if(!(n1>n0||explainedFull)||!reply.trim())unanswered.push(`"${q.slice(0,50)}": saved=${n1>n0}, reply="${reply.trim().slice(0,60)}"`);
+}
+assert.deepEqual(unanswered,[],`every question must be saved and replied to: ${unanswered.join(' | ')}`);
+assert.equal(await snapshot(),stateBefore,'the chat approved, applied or submitted nothing: no owner, sale, submission, target, allocation or setting changed');
+assert.equal((await readDb('retail:state')).assistantRequests.filter(r=>r.status==='applied').length,JSON.parse(stateBefore).applied,'no request was applied by asking');
+// the search bar: opens from the header, finds screens by name, by related word and with a typo, and opens them
+const openSearch=async()=>{await run(`document.querySelector('[aria-label="Search"]').click()`);await waitFor(`!!document.querySelector('.nav-search')`,'the search opens');};
+const searchFor=async text=>{await setInput('.nav-search [aria-label="Search screens, settings and tools"]',text);await sleep(250);};
+await run(`(()=>{const q=document.querySelector('.assistant-panel');if(q)document.querySelector('[aria-label="Close assistant"]').click();return true})()`);
+await openSearch();
+assert.ok(await run(`document.querySelectorAll('.nav-search-results button').length>=4`),'before typing: recent and popular places');
+await capture('27-search-start');
+await searchFor('backup');
+assert.match(await run(`document.querySelector('.nav-search-results button strong').innerText`),/Backup and data/);
+await run(`document.querySelector('.nav-search-results button').click()`);
+await waitFor(`!!document.querySelector('.retail-data')&&!document.querySelector('.nav-search')`,'Backup and data opens');
+await openSearch();await searchFor('targts');
+assert.match(await run(`document.querySelector('.nav-search-results button strong').innerText`),/^Targets$/,'a typo still finds Targets');
+await run(`document.querySelector('.nav-search-results button').click()`);
+await waitFor(`!!document.querySelector('.retail-targets')`,'Targets opens');
+await openSearch();await searchFor('edit all');
+await run(`document.querySelector('.nav-search-results button').click()`);
+await waitFor(`!!document.querySelector('.tg-people-grid')`,'Edit all opens straight to the screen with every person and segment',20000);
+await openSearch();await searchFor('powerpoint');
+assert.match(await run(`document.querySelector('.nav-search-results button strong').innerText`),/Make a report/);
+await run(`document.querySelector('.nav-search-results button').click()`);
+await waitFor(`!!document.querySelector('.assistant-report-files[open]')`,'Make a report opens on Home',20000);
+await openSearch();await searchFor('zebra stripes');
+assert.match(await run(`document.querySelector('.nav-search-results button strong').innerText`),/Ask the assistant: “zebra stripes”/,'nothing matched: the assistant is offered');
+await run(`document.querySelector('.nav-search-results button').click()`);
+await waitFor(`!!document.querySelector('.assistant-quick .assistant-answer-title')`,'the assistant asked it at once',20000);
+await run(`document.querySelector('[aria-label="Close assistant"]').click()`);
+await openSearch();await run(`document.querySelector('.nav-search input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+await waitFor(`!document.querySelector('.nav-search')`,'Escape closes the search');
+assert.equal(await snapshot(),stateBefore,'searching and navigating changed no data');
 await waitFor(`['idle','checking','waiting','ready'].includes(document.querySelector('.assistant-launch .ai-mascot')?.dataset.state)`,'the face is showing');
 await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await sleep(200);
 assert.equal(await run(`getComputedStyle(document.querySelector('.assistant-launch .ai-mascot .eye')).animationName`),'none','with reduced motion nothing on the face animates');
 assert.equal(await run(`document.querySelector('.assistant-launch .ai-mascot').getAttribute('aria-label').length>8`),true,'and the state is still given in words');
 await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await sleep(200);
-await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
+await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: every asked question made or answered and nothing approved or submitted by the chat; search bar finds and opens screens; natural-wording target split previewed, approved and undone; unknown commands explained; summary replies and working next steps; round assistant button, small card with history suggestions; report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
 }catch(error){console.error(error.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}

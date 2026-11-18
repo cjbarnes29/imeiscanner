@@ -39,6 +39,13 @@ What changed in each Android app / web release since 1.7. The web and the Androi
 - Shared report text opens Report on an empty app and replaces the previous shared text when the app is already open.
 - Enlarged small controls in target editing, sharing, giving, person filtering and exports. Android asset copying removes stale web bundles before packaging.
 
+## Unreleased — small assistant chat, search bar, replies you can scan
+- **A round assistant button on every screen** (above the bottom bar) replaces the header icon. It opens a **small chat card**: "What do you want to do?", a box, and **suggestions taken from your own history** (what you ask often, the latest, saved questions; a few starters only when there is little history). Tapping a suggestion asks it straight away. "Open the full assistant" is one tap further.
+- **Replies are laid out as a headline and a few short bullets** with the important numbers in bold; the small chat shows only the summary and the full text stays on Home. **"What next?" buttons under each answer now work**: tapping one asks that question.
+- **Natural wording for the target split:** "change flagship 3 target to 12 and divide it to promoters" is understood, shown as a preview first (12 → 4, 4, 4), applied only when you approve, and undoable. Unclear wording is questioned, not guessed; a command that cannot be turned into a change says so and lists examples instead of showing an unrelated calculation. A report request can start with the file kind ("excel report for Asha").
+- **Search bar** (magnifier in the header): type a screen, tool or setting (a small typo is fine) and tap it: Targets, Backup and data, Make a report, Edit all targets and sold, Give and share and more; saved questions appear too. With nothing typed it shows recent and popular places; if nothing matches it offers to ask the assistant.
+- **Tests:** every question in a 44-question battery gets a saved entry and a visible reply, and the chat never approves, applies or submits anything (`scripts/test-assistant-coverage.mjs`, the assistant browser test, and a source check that only the Home review card's Approve button can apply a request). Also `test-assistant-suggestions`, `test-nav-search`.
+
 ## Unreleased — Undo popups leave by themselves
 - The Undo popups ("Asha deleted. Undo", "3 duplicates archived…", "photo deleted…") now leave after **2 seconds** (the person-delete one used to stay 12 seconds, the others until Dismiss) and can be **swiped sideways** away sooner. While a finger is on a popup the clock waits, so Undo can still be pressed. Browser test: `scripts/e2e-undo-bar.mjs`.
 

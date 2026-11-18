@@ -50,6 +50,7 @@ jobs:
           2. It installs as **AI LENS Test**, next to your current app, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **Assistant:** a round button on every screen opens a small chat with suggestions from your history; replies are a headline and bullets; "What next?" buttons work; "change flagship 3 target to 12 and divide it to promoters" is understood (preview first). **Search bar** in the header to jump to any screen or setting.
           - **Reports from the assistant:** ask for an Excel, PowerPoint or simple-notes report (Home → Make a report), then download it or send it on WhatsApp; built from the app's own numbers, no IMEI numbers, nothing changed.
           - **1.27.1 automation:** shared Automatic/Manual processing, edit-priority background crop checks, Home attention/assistant and today/coming-days suggestions, global target policy and IMEI calendar model quantities. Sale release and final WhatsApp Send still require review.
           - **Daily plans and Stored:** Home shows Release today / Not today, true stock and upcoming editable quantities. Auto recalculates proposals; it never confirms sales automatically.
