@@ -197,3 +197,26 @@ The user asked for the AI to make a report from the app's data as Excel, PowerPo
 - UI: `src/AssistantReportFiles.tsx` = Home > Assistant review > **Make a report** (month, person, three buttons; the finished report offers **Download** and **Send on WhatsApp**: files go through the existing `ctx.shareFile` share menu, notes through `ctx.whatsapp` = wa.me link; notes can also be shared/copied or saved as .txt). Final send is the person's tap in WhatsApp; delivery is never claimed. The chat only understands the request, stores the choices (`localStorage['retaillens-report-request-v1']` + event) and says to open Home. Making a report changes no data.
 - Tests: `scripts/test-report-builder.mjs` (in `npm test`: model numbers, notes, Excel read back with exceljs, PowerPoint package checked part by part, awkward characters, long lists, request parsing) and new steps in `scripts/e2e-assistant.mjs` (chat request -> Home card filled in -> real .pptx/.xlsx blobs -> notes -> nothing changed). Also opened with python-pptx and openpyxl in a throwaway venv (6 slides, 6 sheets, percent format).
 - Not verified: the files in Microsoft PowerPoint / Excel themselves or on a phone, and slide text fit in PowerPoint (sizes are conservative; no renderer was available). Reports use no model: the optional on-device model is not involved.
+
+## Checkpoint — APKs built from 6e0ef94, NOT published (Claude, 2026-11-18)
+
+**Standing decision (user, 2026-11-18): deliver APKs only. No standalone web build, web deploy or web release.** The web app is built only as part of making the APK. Test the APK on an emulator (isolated `.phonetest` app); do not present browser-only runs as release evidence. Also in `CLAUDE.md`.
+
+State: branch `ux/photo-editor`, pushed commit **6e0ef94** (earlier: f92d930). Source version 1.27.1, Android versionCode 44.
+
+Built from that clean commit (web build re-stamped, `node scripts/copy-android-assets.mjs`, gradle debug builds), in `phase2-results/builds/` (git-ignored):
+
+| File | Package | Label | SHA-256 | Size |
+|---|---|---|---|---|
+| `AI-LENS-6e0ef94.apk` | `com.imeilens.scanner` (code 44, 1.27.1) | AI LENS | `bb5e0c48af6ef5fe9dfdeafca5e13c6da3551deff953f318a31a4d9e579d41ee` | 50,366,375 |
+| `AI-LENS-Test-6e0ef94.apk` | `com.imeilens.scanner.phonetest` (code 44, 1.27.1-phonetest) | AI LENS Test | `efd779eb596adbaa0d296e4f1be4899b3139eda102562a9bf998437150214a31` | 50,367,437 |
+
+Both are signed with the existing debug certificate `f2a58bb2e0ba7296dba017d3a89070deb7f959b80b0af17bce7d6a4dfa387a27` (apksigner verified), so the regular APK can update an installed AI LENS / RetailLens in place; code 44 is above the published 43. Both bundles contain the assistant face, Make a report, Send on WhatsApp and Month outlook. The test APK was installed on `emulator-5554` (test app only) and started with 0 crashes.
+
+**Publishing was approved by the user but BLOCKED by the permission check** (twice): the publisher script has to read the stored GitHub login through `git credential fill`, which the check refuses. Nothing was uploaded and no tag or release exists. To publish, the user can run this in their own terminal:
+
+`python "C:\Users\carlou\Desktop\imeiscanner-main\github-live\phase2-results\release-planner\publish-ai-lens-release.py" 6e0ef94`
+
+It creates the pre-release tag `ai-lens-6e0ef94` (never "latest", not merged to main) with both APKs and `SHA256SUMS-6e0ef94.txt`, and it refuses to run unless HEAD is 6e0ef94 and the app sources are unmodified. Alternatives: add a permission rule allowing that script; or push a `beta-v*` tag (the workflow then publishes only a CI-built isolated test APK, with old RetailLens naming; a CI-built regular APK must NOT be offered because the CI debug key differs from the installed one). After publishing, verify the public download bytes against the hashes above.
+
+Not done / needs the user: emulator cold boot in Android Studio (the emulator logged Android media and Docs "not responding" and the suite failed in its first flows), then run `e2e\scripts\run-e2e.ps1` on the new test APK; in-place upgrade retention test of the regular APK over an installed old build (`scripts/check-android-upgrade.mjs`); a real-phone check; opening a generated report in Microsoft PowerPoint / Excel.

@@ -19,6 +19,10 @@ The full standard is [docs/APP-QUALITY-STANDARDS.md](docs/APP-QUALITY-STANDARDS.
 4. Add a line to `CHANGELOG.md` and to the release notes in `.github/workflows/beta-release.yml`.
 5. Report honestly: what passed, what failed, what was not tested on a real phone.
 
+## Deliverables: APK only (user decision, 2026-11-18)
+
+Deliver Android APKs only: no standalone web build, web deploy or web release. The web app is built only as part of making the APK (it is bundled inside). Test the APK: install the isolated test app (`com.imeilens.scanner.phonetest`) on an emulator and run the emulator suite; do not present browser-only runs as release evidence. Never install or reset the real app.
+
 ## Standing rules
 - Commit, push, merge and release only when the user asks in that conversation. Earlier approval does not carry over.
 - Releases: push a `beta-v*` tag; the workflow builds the debug-signed APK. History rewrites and force-push need explicit approval.

@@ -1,3 +1,5 @@
+> **Newer state: read `docs/HANDOFF-AI-LENS.md` (Progress update and Checkpoint sections) and follow `docs/APP-QUALITY-STANDARDS.md`. APK only: no web builds or web releases.**
+
 # LIVE WORKING CHECKPOINT — AI LENS 1.27.1 / code 44
 
 2026-11-18: User renamed RetailLens to **AI LENS**. Preserve package/signature/storage/schema compatibility. Latest steering: AI icon is a SUMMARY CHAT for questions/checks; detailed outputs, action approvals, warnings, results, Undo and file interpretation belong on HOME. AI integration settings allow optional detailed workspace, automatic check summaries and follow-up suggestions. Optional Qwen inference is not a continuous background task.
