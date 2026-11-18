@@ -1,3 +1,9 @@
+# Current starting point
+
+Read [CLAUDE-START-HERE.md](CLAUDE-START-HERE.md) first, then [HANDOFF-AI-LENS.md](HANDOFF-AI-LENS.md). Those documents include later committed assistant, report, search and APK checkpoints. The material below is retained as historical planning context and must not be used as the current release/source status.
+
+---
+
 > **Newer state: read `docs/HANDOFF-AI-LENS.md` (Progress update and Checkpoint sections) and follow `docs/APP-QUALITY-STANDARDS.md`. APK only: no web builds or web releases.**
 
 # LIVE WORKING CHECKPOINT — AI LENS 1.27.1 / code 44

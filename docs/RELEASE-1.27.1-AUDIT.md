@@ -1,4 +1,10 @@
-# RetailLens 1.27.1 / Android code 44 audit
+# AI LENS 1.27.1 / Android code 44 audit
+
+## Read the current checkpoint first
+
+[CLAUDE-START-HERE.md](CLAUDE-START-HERE.md) is the current handoff index. HEAD inspected: `9fee3a8`. The source now includes later assistant bubble/chat/search changes; local APKs are from6e0ef94 and do not include those changes. Later classified findings and artifact notes below supersede the initial validation snapshot. No tests or application changes were made during this documentation-only refresh.
+
+Open priorities include Manual/Automatic save controls, Home/Targets redesign, remaining file/routine integration coverage, APK emulator/upgrade checks and physical-device/Office verification. Existing browser/developer results are not a completed release quality gate.
 
 ## Current source and scope
 
