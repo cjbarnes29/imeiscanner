@@ -2,7 +2,7 @@
 
 ## Current continuation checkpoint
 
-For the in-progress Store / Give & Share / daily planning changes, read [docs/HANDOFF-RELEASE-PLANNING.md](docs/HANDOFF-RELEASE-PLANNING.md) first. It records the latest user decisions, verified work, pending checks, and artifact locations. Auto calculates proposals; **releases always require the user's confirmation**.
+For Store / Give & Share / daily planning continuation, read [docs/HANDOFF-RELEASE-PLANNING.md](docs/HANDOFF-RELEASE-PLANNING.md) first, then [the1.27.0 release audit](docs/RELEASE-1.27.0-AUDIT.md). Source11432a7 and its APKs/gallery are published. The docs record the latest decisions, verified work, remaining test coverage and artifact locations. Auto calculates proposals; **releases always require the user's confirmation**.
 
 The checkpoint also covers separate shift/IMEI calendars, tablet/accessory report stock, final report editing, approval-based WhatsApp preparation, recovery/diagnostics and APK upgrade verification. Do not combine accessory balances with phone IMEI stock, treat a roster as phone uploads, or mark an opened WhatsApp message delivered. Preserve installed package/signing and data; use isolated emulator test builds only.
 

@@ -1,8 +1,8 @@
 # RetailLens: progress, decisions, how to resume
 
-## In progress — Store and daily plans, 2026-11-18
+## Delivered — Store, plans, calendars and reports, 2026-11-18
 
-The current uncommitted feature work is documented in [HANDOFF-RELEASE-PLANNING.md](HANDOFF-RELEASE-PLANNING.md). This supersedes older Store-only semantics: stored unsold phones count in real stock, confirmed releases count as sales, and report inclusion is tracked separately. The user clarified that Auto refreshes daily proposals, never confirms releases; Home should prominently show Release today / Not today and upcoming editable days. Dated report drafts and final verification are still in progress at this checkpoint.
+Source11432a7 was committed and pushed on ux/photo-editor; APKs1.27.0/code43 and the18-picture gallery are [published](https://github.com/cjbarnes29/imeiscanner/releases/tag/retaillens-test-11432a7). [Claude handoff](HANDOFF-RELEASE-PLANNING.md) records exact decisions; [release audit](RELEASE-1.27.0-AUDIT.md) records checks, hashes and limits. Stored unsold phones count in real stock; confirmed releases count as sales; reporting remains separate. Auto refreshes proposals, never confirms sales. Shift schedules/IMEI activity and tablet-accessory balances remain distinct. In-place isolated emulator upgrade preserved saved test data; physical-phone endurance and real WhatsApp delivery remain untested.
 
 ## GitHub checkpoint — 2026-11-18
 

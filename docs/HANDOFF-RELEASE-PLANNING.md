@@ -1,6 +1,6 @@
 # Claude continuation checkpoint — 2026-11-18
 
-Read this before CLAUDE.md. Branch `ux/photo-editor`, starting published commit `74fa186`. Current version1.27.0 / Android code43; previous local test APK is code42. Work below is implemented; final release validation is in progress. Never present an older APK as containing it. User explicitly authorized implementation, commit, push, APK and GitHub download in this conversation. Do not merge main or rewrite history.
+Read this before CLAUDE.md. Branch `ux/photo-editor`, source commit `11432a7` (started from74fa186). Delivered version1.27.0 / Android code43; previous local test APK is code42. [Published prerelease](https://github.com/cjbarnes29/imeiscanner/releases/tag/retaillens-test-11432a7), [final release audit](RELEASE-1.27.0-AUDIT.md). Later docs/tool commits do not change APK application source. User explicitly authorized implementation, commit, push, APK and GitHub download in this conversation. Do not merge main or rewrite history.
 
 ## Decisions that must remain true
 
@@ -59,7 +59,7 @@ Export12 categories: phone stock, targets, plans, pending reporting, dated draft
 - Privacy check passed0 new leaks in331files; CI privacy passed before staging. Only synthetic IMEIs prefix49015420 in test code/public artifacts.
 - npm audit: ExcelJS/uuid moderate paths and picomatch ReDoS high paths through Vite/fdir/tinyglobby remain. Vite6.4.6 removed older direct dev-server advisories. Do not force old vulnerable downgrades or claim zero findings. Save final audit.
 
-Remaining release steps: commit/push; rebuild web after source commit for correct stamp; copy Android assets; build APK; compare old/new certificate+package+code42→43; `adb install -r` test-only emulator upgrade preserving synthetic data; verify embedded assets; publish prerelease APK/checksum/gallery and verify URLs. Never touch production installed data. Update this checkpoint with observed final outcomes. Previous certificate SHA256 was checked; synthetic emulator upgrade baseline contains1 record/photo and audit sentinel.
+Release completed: source committed/pushed11432a7; rebuilt/stamped web copied into both APKs; all46 assets verified; matching certificate/package and code42→43 checked. `adb install -r` on the isolated emulator retained1 synthetic record/photo/IMEI/model and saved audit sentinel. Native recovery bridge/startup health passed. APKs, checksums and18-picture gallery were published as prerelease/latest=false. All5 public downloads returned200 and matched expected bytes; both APK hashes matched. Real installed app data was never touched. See final audit for hashes/limits. Remaining work is the explicitly listed physical-device/file-layout/AI coverage, not an unfinished release.
 
 Artifacts: ignored `phase2-results/release-planner`, screenshots01..37. `node scripts/build-change-gallery.mjs` produces a self-contained HTML gallery and ZIP with18 curated demo screenshots. Gallery contains no actual user attachments. Previous `retaillens-test-74fa186` APK is old. `scripts/check-android-upgrade.mjs before|after` checks the isolated emulator WebView forwarded to9229, stores only hashes/counts in its local evidence, and verifies retained records/photos/audit after install-r.
 
