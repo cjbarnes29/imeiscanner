@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/leave-bridge', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -651,4 +651,49 @@ console.log('retail v2: all checks passed');
   st = G.putTarget(G.putTarget(D.emptyState(), mk('p1', 100)), mk('p2'));
   assert.match(FC.outlookFor(st, ['p1', 'p2'], '2026-11-10').lines[0].text, /On track for 120%/, 'one of them has no limit: 120% still counts');
   console.log('month outlook ok');
+}
+
+// Shift Calendar -> annual leave bridge (synthetic people a, b, c). Rosters only PROPOSE leave; targets never change by themselves.
+{
+  const LB = await load('retail/leave-bridge'), AV = await load('retail/availability');
+  const month = '2026-11', today = '2026-11-18';
+  const base = (windows, extra = {}) => {
+    let s = D.emptyState();
+    s.targets = { [month]: Object.fromEntries(['a', 'b', 'c'].map(id => [id, { personId: id, month, source: 'manual', importedAt: 'now', lines: [{ segment: 'flagship1', target: 40, achieved: 0 }] }])) };
+    s.workSchedules = { a: { offWeekdays: [], offDates: [], annualLeave: [], windows, ...extra } };
+    return s;
+  };
+  const al = (start, end, code = 'AL') => ({ id: 'w' + start + code, start, end, available: false, code });
+  const targets = s => ['a', 'b', 'c'].map(id => s.targets[month][id].lines[0].target);
+
+  let s = base([al('2026-11-18', '2026-11-22')]);
+  let ranges = LB.rosterLeaveRanges(s);
+  assert.deepEqual(ranges.map(r => [r.personId, r.start, r.end, r.leaveDays]), [['a', '2026-11-18', '2026-11-22', 5]], 'AL window becomes one proposed range');
+  const preview = LB.previewRosterLeave(s, ranges[0], ['b', 'c'], today);
+  assert.deepEqual([preview.monthDays, preview.leaveDays, preview.divisor, preview.segments[0].total, preview.segments[0].shares.map(p => p.units)], [30, 5, 25, 8, [4, 4]], '40/(30-5)*5=8, split 4+4');
+  assert.deepEqual(targets(s), [40, 40, 40], 'preview changes nothing');
+  assert.deepEqual(targets(AV.applyLeaveTransfer(s, preview)), [32, 44, 44], 'approved preview gives 32/44/44');
+  assert.deepEqual(LB.rosterLeaveRanges(base([al('2026-11-18', '2026-11-22', 'SL'), al('2026-11-18', '2026-11-22', 'MXOFF')])), [], 'only AL counts');
+  assert.equal(LB.leaveMark(s, 'a', '2026-11-19'), 'roster'); assert.equal(LB.leaveMark(s, 'b', '2026-11-19'), null);
+
+  const saved = LB.saveRosterLeave(s, ranges[0], 'Asha');
+  assert.deepEqual(targets(saved), [40, 40, 40], 'saving the range never changes targets');
+  assert.equal(saved.workSchedules.a.annualLeave.length, 1); assert.match(saved.audit.at(-1).what, /leave target/);
+  assert.deepEqual(LB.rosterLeaveRanges(saved), [], 'same days are not proposed twice');
+  assert.throws(() => LB.saveRosterLeave(saved, ranges[0], 'Asha'), /overlap/);
+  assert.equal(LB.leaveMark(saved, 'a', '2026-11-19'), 'leave');
+
+  const draft = { ...preview, status: 'draft', adjustmentsApplied: false }, withDraft = { ...saved, leaveTransfers: [draft] };
+  assert.equal(LB.leaveMark(withDraft, 'a', '2026-11-19'), 'saved');
+  assert.equal(LB.leaveMark(AV.applyLeaveTransfer(saved, preview), 'a', '2026-11-19'), 'applied');
+  const cancelled = { ...base([al('2026-11-18', '2026-11-22')]), leaveTransfers: [{ ...preview, status: 'cancelled' }] };
+  assert.equal(LB.rosterLeaveRanges(cancelled).length, 1, 'a cancelled adjustment lets the days be proposed again');
+  assert.deepEqual(LB.rosterLeaveRanges({ ...s, leaveTransfers: [preview] }), [], 'an active adjustment hides the proposal');
+
+  s = base([al('2026-11-18', '2026-11-22')], { annualLeave: [{ id: 'hand', start: '2026-11-20', end: '2026-11-21' }] });
+  assert.deepEqual(LB.rosterLeaveRanges(s).map(r => [r.start, r.end, r.leaveDays]), [['2026-11-18', '2026-11-19', 2], ['2026-11-22', '2026-11-22', 1]], 'hand-entered days are never counted twice');
+
+  s = base([al('2026-11-29', '2026-12-02')]);
+  assert.deepEqual(LB.rosterLeaveRanges(s).map(r => [r.month, r.start, r.end]), [['2026-11', '2026-11-29', '2026-11-30'], ['2026-12', '2026-12-01', '2026-12-02']], 'one range per month');
+  console.log('shift calendar to annual leave bridge ok');
 }

@@ -52,6 +52,7 @@ jobs:
           ### What is new
           - **Assistant:** a round button on every screen opens a small chat with suggestions from your history; replies are a headline and bullets; "What next?" buttons work; "change flagship 3 target to 12 and divide it to promoters" is understood (preview first). **Search bar** in the header to jump to any screen or setting.
           - **Reports from the assistant:** ask for an Excel, PowerPoint or simple-notes report (Home → Make a report), then download it or send it on WhatsApp; built from the app's own numbers, no IMEI numbers, nothing changed.
+          - **Annual leave from the Shift Calendar:** AL days in a roster show the calculated target effect and can be saved as leave (targets change only after the reviewed calculation). **Hide suggestions** switch in Settings and in the small chat.
           - **1.27.1 automation:** shared Automatic/Manual processing, edit-priority background crop checks, Home attention/assistant and today/coming-days suggestions, global target policy and IMEI calendar model quantities. Sale release and final WhatsApp Send still require review.
           - **Daily plans and Stored:** Home shows Release today / Not today, true stock and upcoming editable quantities. Auto recalculates proposals; it never confirms sales automatically.
           - **Saved work calendars and AL targets:** Off/annual leave skips automatic transfers; manual overrides warn and are recorded. Divisors and shares are editable. Store120 splits40 each; AL40/(30-5)*5=8 adjusts to32/44/44 while retaining store120.
