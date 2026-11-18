@@ -1,10 +1,10 @@
-# RetailLens: how to work in this project
+# AI LENS: how to work in this project
 
 ## Current continuation checkpoint
 
-For Store / Give & Share / daily planning continuation, read [docs/HANDOFF-RELEASE-PLANNING.md](docs/HANDOFF-RELEASE-PLANNING.md), then [the 1.27.1 audit](docs/RELEASE-1.27.1-AUDIT.md). Current work is version 1.27.1 / code 44. Follow that audit for the exact source, APK and validation checkpoint. Auto calculates proposals; **releases always require the user's confirmation**.
+Start with [docs/CLAUDE-START-HERE.md](docs/CLAUDE-START-HERE.md), then [the AI assistant handoff, the newest](docs/HANDOFF-AI-ASSISTANT.md), then [the detailed handoff](docs/HANDOFF-AI-LENS.md) and [the audit](docs/RELEASE-1.27.1-AUDIT.md). The start document distinguishes current committed source from older APKs and supersedes stale “uncommitted / not built” notes. The latest user request in this session is documentation-only handoff; do not treat that as a new instruction to change code or publish.
 
-The checkpoint also covers separate shift/IMEI calendars, tablet/accessory report stock, final report editing, approval-based WhatsApp preparation, recovery/diagnostics and APK upgrade verification. Do not combine accessory balances with phone IMEI stock, treat a roster as phone uploads, or mark an opened WhatsApp message delivered. Preserve installed package/signing and data; use isolated emulator test builds only.
+Keep Home as the full review surface, assistant responses concise, and all release/stock/report/calendar invariants intact. Preserve package/signing/data compatibility. APK-only deliverables and isolated emulator verification remain required.
 
 Offline retail app (React + TypeScript + Vite in an Android WebView, with a native Android scanner). Package id `com.imeilens.scanner` must never change. Signing config stays untouched.
 

@@ -1,5 +1,11 @@
 # AI LENS — live continuation handover
 
+## Current handoff index — documentation-only refresh
+
+**Read [CLAUDE-START-HERE.md](CLAUDE-START-HERE.md) first.** Repository HEAD inspected for this refresh is `9fee3a8`; it was clean before the documentation edits. Newer commits already implement activity visuals, report files, the pending-cap fix, floating small chat and navigation search. APKs exist from6e0ef94 but are older than current source and are not recorded as published. The latest user asked only to finish docs for forwarding; no code/release work was performed in this refresh.
+
+The initial sections below are a **historical implementation snapshot**, followed by later Claude progress/checkpoints. Their initial c095684/uncommitted/no-APK and activity-TODO statements are obsolete. Use the start document and latest checkpoints for current status; retain this history for architecture and decisions.
+
 Updated 2026-11-18, 09:44 UTC / 13:44 Dubai. **Read this document first, and follow [APP-QUALITY-STANDARDS.md](APP-QUALITY-STANDARDS.md) for all work.** It supersedes the older checkpoints in HANDOFF-RELEASE-PLANNING.md.
 
 ## Current state — do not mistake this for a finished release

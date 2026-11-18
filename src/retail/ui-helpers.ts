@@ -12,6 +12,8 @@ export type RetailCtx = {
   /** Saves the new state. `why` is kept with the snapshot before it (Undo); '' = a trivial change, no snapshot. */
   change: (next: RetailState, why: string) => void;
   records: RetailRecord[];
+  /** Records as they are right now, even in the middle of a multi-step task (`records` is a snapshot of the last screen draw). */
+  latestRecords?: () => RetailRecord[];
   people: { id: string; name: string }[];
   today: DateKey;
   /** Sets the owner of phones (an approved Give, or its undo). */

@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['assistant-settings', 'retail/capabilities', 'retail/routines', 'retail/attention', 'processing-options', 'home-options', 'retail/assistant-actions', 'people', 'phone-names', 'samsung-models', 'retail/types', 'retail/planning', 'retail/dated-reports', 'retail/autogive', 'retail/allocation', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'retail/delivery', 'retail/auto-workflow', 'retail/local-assistant', 'retail/accessory-report', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['whatsapp-ready', 'routine-keeper', 'assistant-settings', 'retail/assistant-tasks', 'retail/routine-schedule', 'retail/capabilities', 'retail/routines', 'retail/attention', 'processing-options', 'home-options', 'retail/assistant-actions', 'people', 'phone-names', 'samsung-models', 'retail/types', 'retail/planning', 'retail/dated-reports', 'retail/autogive', 'retail/allocation', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'retail/delivery', 'retail/auto-workflow', 'retail/local-assistant', 'retail/accessory-report', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -89,7 +89,7 @@ check('upcoming giving simulates only known unassigned stock and never mutates o
 check('automatic giving rechecks eligibility after Held becomes Available without changing upload IDs',()=>{const s=base(),rows=[{...records[0],personId:''}];s.giveMode='auto';const before=AU.autoGiveSignature(s,month,today,rows);const next={...s,recordMeta:{...s.recordMeta,[rows[0].id]:{segment:'flagship1'}}};assert.notEqual(AU.autoGiveSignature(next,month,today,rows),before);assert.equal(AU.runAutoGive(next,month,today,[{id:'me',name:'Demo'}],rows).changes[0].personId,'me');});
 check('calendar exposes model quantities and planned dates, replaces proposals with approved reservations, and never changes stock',()=>{const s=base(),snapshot=JSON.stringify(s),opts={...AW.DEFAULT_WORKFLOW,days:3};const people=[{id:'me',name:'Demo'}];const rows=AW.automationCalendar(s,records,people,today,opts);assert.equal(rows.reduce((n,r)=>n+r.recordIds.length,0),30);assert.equal(new Set(rows.map(r=>r.date)).size,3);assert.ok(rows.every(r=>r.status==='proposed'&&r.kind==='release'&&r.recordIds.every(id=>records.find(p=>p.id===id)?.model==='SM-S948B')));assert.equal(JSON.stringify(s),snapshot);const approved=PL.approvePlan(s,records,PL.draftPlan(s,records,{...request,method:'spread',until:'2026-11-20'}));const calendar=AW.automationCalendar(approved,records,people,today,opts);assert.ok(calendar.every(r=>r.status==='approved'));assert.equal(calendar.reduce((n,r)=>n+r.recordIds.length,0),30);});
 
-const AS=await load('retail/assistant-actions'), SET=await load('assistant-settings');
+const KP=await load('routine-keeper'), WR=await load('whatsapp-ready');const AS=await load('retail/assistant-actions'), SET=await load('assistant-settings'); const TK=await load('retail/assistant-tasks');const RSCH=await load('retail/routine-schedule');
 const preferences=new Map();globalThis.localStorage={getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,v),removeItem:k=>preferences.delete(k)};globalThis.window={dispatchEvent:()=>{}};
 const team=[{id:'maya',name:'Maya Demo'},{id:'noor',name:'Noor Demo'},{id:'lee',name:'Lee Demo'}];
 const phones=records.slice(0,20).map(r=>({...r,personId:'',model:'SM-F956B'}));
@@ -137,6 +137,132 @@ check('hide-suggestions switch hides every suggestion kind, keeps individual cho
   const hide=SET.interpretSettings('hide all suggestions');assert.ok(hide&&hide.workflow.hideSuggestions===true,'chat command proposes hiding');
   const show=SET.interpretSettings('show suggestions');assert.ok(show&&show.workflow.hideSuggestions===false,'chat command proposes showing');
   const stored={...o,hideSuggestions:true,leaveSuggestions:false};globalThis.localStorage.setItem(AW.WORKFLOW_KEY,JSON.stringify(stored));const back=AW.readWorkflowOptions();assert.equal(back.hideSuggestions,true);assert.equal(back.leaveSuggestions,false);globalThis.localStorage.removeItem(AW.WORKFLOW_KEY);
+});
+check('multi-step tasks: splitting keeps single commands whole and never splits a negated request',()=>{
+  assert.deepEqual(TK.splitSteps('store 4 Fold6 and set report Fold6 to 6, then mark Maya unavailable from 2026-11-20 to 2026-11-22'),['store 4 Fold6','set report Fold6 to 6','mark Maya unavailable from 2026-11-20 to 2026-11-22']);
+  assert.deepEqual(TK.splitSteps('give 4 Fold6 to Maya and 10 to Noor'),['give 4 Fold6 to Maya and 10 to Noor'],'one give with two people is one step');
+  assert.deepEqual(TK.splitSteps('do not give 4 Fold6 to Maya'),['do not give 4 Fold6 to Maya']);
+  assert.deepEqual(TK.splitSteps('   '),[]);assert.equal(TK.splitSteps(Array.from({length:20},(_,i)=>'store '+(i+1)+' Fold6').join('; ')).length,TK.MAX_TASK_STEPS,'step count is capped');
+});
+check('action classes come from the real preview, so permissions follow what a step would change',()=>{
+  const cls=text=>{const s=pending(text);return TK.actionClasses(AS.previewAssistant(s,phones,team,today,text),text);};
+  assert.ok(cls('store 4 Fold6').includes('stock'));
+  assert.ok(cls('give 4 Fold6 to Maya').includes('give'));
+  assert.deepEqual(cls('set report Fold6 to 6'),['report']);
+  assert.deepEqual(cls('mark Maya unavailable from 2026-11-20 to 2026-11-22').sort(),['calendar','targets'],'leave also moves targets, so Autopilot needs both allowed');
+  assert.ok(cls('turn off auto-detection').includes('settings'));
+  assert.ok(cls('remove 2 Fold6 from stock').includes('remove'),'removal is its own class');
+});
+check('Autopilot applies only allowed, warning-free, non-removal steps within the daily cap; Assistant and Copilot never self-apply',()=>{
+  const ok={handled:true,lines:[],blockers:[],warnings:[],giving:[]},ap={allow:['stock','give'],dailyCap:2,usedToday:0};
+  assert.equal(TK.decideStep('assistant',ok,['give'],ap).action,'hold');assert.equal(TK.decideStep('copilot',ok,['give'],ap).action,'hold');
+  assert.equal(TK.decideStep('autopilot',ok,['give'],ap).action,'apply');assert.equal(TK.decideStep('autopilot',ok,['stock','give'],ap).action,'apply');
+  assert.equal(TK.decideStep('autopilot',ok,['targets'],ap).action,'hold','kind not allowed');
+  assert.equal(TK.decideStep('autopilot',ok,['remove'],{...ap,allow:['remove','stock']}).action,'hold','removal never self-applies, even if listed');
+  assert.equal(TK.decideStep('autopilot',{...ok,warnings:['x']},['give'],ap).action,'hold','warnings need a person');
+  assert.equal(TK.decideStep('autopilot',{...ok,blockers:['unclear']},['give'],ap).action,'blocked');
+  assert.equal(TK.decideStep('autopilot',ok,['give'],{...ap,usedToday:2}).action,'hold','daily cap');
+  assert.equal(TK.decideStep('autopilot',ok,[],ap).action,'hold','empty step changes nothing');
+});
+check('task progress, status, retries, daily cap counting and handover summary are derived from saved data',()=>{
+  let n=0,t=TK.newTask('t1','store 4 Fold6 and give 4 Fold6 to Maya','autopilot',['store 4 Fold6','give 4 Fold6 to Maya'],'2026-11-18T08:00:00.000Z',()=>'s'+(++n));
+  assert.equal(TK.taskProgress(t).percent,0);t=TK.finishTask(t,'x');assert.equal(t.status,'review','pending steps mean review');
+  t=TK.patchStep(t,'s1',{status:'done',doneAt:'2026-11-18T08:01:00.000Z'},'x');assert.equal(TK.taskProgress(t).percent,50);
+  t=TK.patchStep(t,'s2',{status:'failed',error:'An IMEI assignment changed.',attempts:3},'x');assert.equal(TK.finishTask(t,'x').status,'failed');
+  assert.equal(TK.autopilotUsedToday({assistantTasks:[t]},'2026-11-18'),1,'counted from saved tasks');assert.equal(TK.autopilotUsedToday({assistantTasks:[t]},'2026-11-19'),0);
+  t=TK.patchStep(t,'s2',{status:'done',doneAt:'2026-11-18T08:02:00.000Z'},'x');assert.equal(TK.finishTask(t,'x').status,'done');
+  t=TK.finishTask(TK.patchStep(TK.patchStep(t,'s1',{status:'undone'},'x'),'s2',{status:'undone'},'x'),'x');assert.equal(t.status,'undone');
+  assert.ok(TK.isStaleError('An IMEI assignment changed. Review the updated request.'));assert.ok(!TK.isStaleError('Recipient shares must match the transferred total.'));
+  const state={...base(),assistantTasks:[TK.patchStep(TK.newTask('t2','give 4 Fold6 to Maya','autopilot',['give 4 Fold6 to Maya'],'2026-11-18T09:00:00.000Z',()=>'q1'),'q1',{status:'done',doneAt:'2026-11-18T09:01:00.000Z'},'2026-11-18T09:01:00.000Z')],assistantRequests:[{id:'a',at:'2026-11-18T09:01:00.000Z',text:'give 4 Fold6 to Maya',status:'applied',output:''},{id:'b',at:'2026-11-18T09:05:00.000Z',text:'store 2 Fold6',status:'pending',output:''}]};
+  const h=TK.handoverSummary(state,Date.parse('2026-11-18T12:00:00.000Z'));
+  assert.match(h.lines[0],/1 change applied/);assert.ok(h.lines.some(l=>/Autopilot applied 1 step/.test(l)));assert.ok(h.next.some(l=>/1 request waiting/.test(l)));
+  assert.match(TK.handoverSummary({...base()},Date.parse('2026-11-18T12:00:00.000Z')).next[0],/Nothing is waiting/);
+});
+check('asking for a handover summary is answered offline from saved data, and the assistant mode is only ever read from settings, never set by a chat proposal',()=>{
+  const r=LA.localAnswer({...base(),assistantRequests:[{id:'a',at:new Date().toISOString(),text:'give 4 Fold6 to Maya',status:'applied',output:''}]},[],team,today,'give me a handover summary').answer;
+  assert.match(r,/Last 24 hours: 1 change applied/);assert.match(r,/Next:/);
+  for(const text of ['set assistant mode to autopilot','turn on autopilot','switch to autopilot mode and allow everything']){const p=SET.interpretSettings(text);assert.ok(!p||!('assistantMode' in p.workflow)&&!('autopilotAllow' in p.workflow)&&!('autopilotDailyCap' in p.workflow),'chat cannot propose a mode or permission change: '+text);}
+});
+check('timed routines: "every day at 9:00" style sentences become a routine with a time, weekdays and a clean task',()=>{
+  const P=RSCH.parseSchedule;
+  assert.deepEqual(P('give phones by the limits every day at 9:00'),{task:'give phones by the limits',time:'09:00',days:[]});
+  assert.deepEqual(P('at 9am every weekday store 2 Fold6'),{task:'store 2 Fold6',time:'09:00',days:[1,2,3,4,5]});
+  assert.deepEqual(P('daily at 21:15 prepare the report'),{task:'prepare the report',time:'21:15',days:[]});
+  assert.deepEqual(P('every sunday and wednesday at 7pm auto give'),{task:'auto give',time:'19:00',days:[0,3]});
+  assert.deepEqual(P('create routine to give 1 Fold6 to Maya every Monday and Friday at 6:30pm'),{task:'give 1 Fold6 to Maya',time:'18:30',days:[1,5]});
+  assert.equal(P('give 4 Fold6 at 9'),null,'a time without "every day" is not a schedule');assert.equal(P('store 4 Fold6 every day'),null,'a recurrence without a time is not a schedule');
+  assert.equal(P('every day at 25:00 auto give'),null,'impossible time');assert.equal(P('12am every day auto give').time,'00:00');assert.equal(P('12pm every day auto give').time,'12:00');
+  const s=pending('give phones by the limits every day at 9:00'),p=AS.previewAssistant(s,phones,team,today,'give phones by the limits every day at 9:00'),saved=p.business.after.assistantRoutines.at(-1);
+  assert.ok(p.handled&&!p.blockers.length);assert.deepEqual([saved.text,saved.time,saved.days,saved.enabled],['give phones by the limits','09:00',[],true]);assert.match(p.lines[0],/Every day at 09:00/);
+  assert.ok(AS.previewAssistant(s,phones,team,today,'create daily routine to prepare today’s report').business.after.assistantRoutines.every(r=>!r.time),'the old untimed routine sentence still works');
+  const dupe=AS.previewAssistant({...s,assistantRoutines:[saved]},phones,team,today,'give phones by the limits every day at 9:00');assert.ok(dupe.blockers.length,'the same routine at the same time is not saved twice');
+});
+check('a timed routine is due only on its days, after its time, once a day, and is skipped when the app opens too late',()=>{
+  const at=(h,m,day=3)=>new Date(2026,10,18+(day-3),h,m),r={id:'r',text:'auto give',enabled:true,time:'09:00',days:[]},D=(x,when,last)=>RSCH.routineDueNow({...x,lastPrepared:last},when,'2026-11-18',5);
+  assert.equal(D(r,at(8,59)).due,false,'before the time');assert.equal(D(r,at(9,0)).due,true,'at the time');assert.equal(D(r,at(9,2)).late,false,'two minutes is on time');assert.equal(D(r,at(9,3)).late,true,'three minutes is marked late');
+  assert.deepEqual([D(r,at(10,0)).due,D(r,at(10,0)).late,D(r,at(10,0)).skip],[true,true,true],'an hour later: it does NOT run, it is skipped');
+  assert.equal(D(r,at(9,6)).skip,true,'more than 5 minutes late: skipped');assert.equal(D(r,at(9,5)).skip,false,'exactly the grace time is still allowed');
+  assert.equal(D(r,at(12,0),'2026-11-18').due,false,'already ran today');assert.equal(D({...r,enabled:false},at(12,0)).due,false,'paused');assert.equal(D({...r,time:undefined},at(12,0)).due,false,'no time: the old once-a-day rule applies elsewhere');
+  assert.equal(D({...r,days:[1,5]},at(12,0,3)).due,false,'Wednesday is not Monday or Friday');assert.equal(D({...r,days:[1,3]},at(12,0,3)).due,true);
+  assert.equal(RSCH.describeSchedule({time:'09:00',days:[]}),'Every day at 09:00');assert.equal(RSCH.describeSchedule({time:'18:00',days:[1,2,3,4,5]}),'Weekdays at 18:00');assert.equal(RSCH.describeSchedule({time:'18:30',days:[1,5]}),'Mon, Fri at 18:30');
+  assert.equal(RSCH.nextRun(r,at(8,0),'2026-11-18'),'Today 09:00');assert.equal(RSCH.nextRun({...r,lastPrepared:'2026-11-18'},at(12,0),'2026-11-18'),'Tomorrow 09:00');assert.equal(RSCH.nextRun({...r,enabled:false},at(8,0),'2026-11-18'),'Paused');
+  const run={at:'2026-11-18T09:00:00.000Z',kind:'task',note:'ok'},done=RSCH.addRun(r,run,'2026-11-18',true);assert.deepEqual([done.lastPrepared,done.runs.length],['2026-11-18',1]);assert.equal(RSCH.addRun(r,run,'2026-11-18',false).lastPrepared,undefined,'Run now never uses up the scheduled run');
+  let many=r;for(let i=0;i<14;i++)many=RSCH.addRun(many,{...run,note:'n'+i},'2026-11-18',false);assert.equal(many.runs.length,10,'history keeps the last 10 runs');
+});
+check('saved routines keep a valid time, weekdays and run history, and bad values are dropped when data loads',()=>{
+  const clean=D.cleanState({...D.emptyState(),assistantRoutines:[{id:'a',text:'auto give',enabled:true,time:'09:00',days:[1,5,5,9,'x'],lastPrepared:'2026-11-18',lastRun:{at:'2026-11-18T09:00:00.000Z',kind:'task',refId:'t',note:'ok',late:true},runs:[{at:'x1',kind:'task',note:'n'},{at:'x2',kind:'bogus',note:'bad kind'},{at:'',kind:'task',note:'no time'},...Array.from({length:14},(_,i)=>({at:'2026-11-1'+(i%9),kind:'request',note:'r'+i}))]},{id:'b',text:'old routine',enabled:true,time:'25:99',days:'nonsense'}]}).assistantRoutines;
+  assert.deepEqual([clean[0].time,clean[0].days,clean[0].lastRun.kind,clean[0].lastRun.late],['09:00',[1,5],'task',true]);assert.equal(clean[0].runs.length,10,'only valid runs, newest 10');assert.ok(clean[0].runs.every(r=>['task','request','answer','missed'].includes(r.kind)));
+  assert.deepEqual([clean[1].time,clean[1].days],[undefined,[]],'an impossible time is dropped; the routine itself is kept');
+});
+check('the Android routine helper is told the next due time only when it changes, and is switched off when there is nothing to wait for; Autopilot defaults allow targets',()=>{
+  const now=new Date(2026,10,18,8,0),rs=[{id:'a',text:'auto give',enabled:true,time:'09:00',days:[]},{id:'b',text:'give 1 Fold6 to Maya',enabled:true,time:'08:30',days:[]},{id:'c',text:'paused',enabled:false,time:'08:10',days:[]},{id:'d',text:'no time',enabled:true}];
+  const n=RSCH.nextRoutineAt(rs,now,'2026-11-18',5);assert.equal(n.at,new Date(2026,10,18,8,30).getTime());assert.match(n.label,/give 1 Fold6 to Maya at 08:30/);
+  assert.equal(RSCH.nextRoutineAt([{...rs[1],lastPrepared:'2026-11-18'}],now,'2026-11-18',5).at,new Date(2026,10,19,8,30).getTime(),'already ran today: tomorrow');
+  assert.equal(RSCH.nextRoutineAt([rs[1]],new Date(2026,10,18,8,36),'2026-11-18',5).at,new Date(2026,10,19,8,30).getTime(),'past its grace time: tomorrow');
+  assert.equal(RSCH.nextRoutineAt([{...rs[1],days:[5]}],now,'2026-11-18',5).at,new Date(2026,10,20,8,30).getTime(),'Friday only');
+  assert.equal(RSCH.nextRoutineAt([rs[2],rs[3]],now,'2026-11-18',5),null,'paused and untimed routines never wake the app');
+  const calls=[],bridge={routineKeeper:(on,label,at)=>calls.push([on,label,at])};KP.resetRoutineKeeperForTests();
+  KP.syncRoutineKeeper({assistantRoutines:rs},now,'2026-11-18',true,5,bridge);KP.syncRoutineKeeper({assistantRoutines:rs},now,'2026-11-18',true,5,bridge);assert.equal(calls.length,1,'unchanged: Android is not told twice');assert.deepEqual([calls[0][0],calls[0][2]],[true,n.at]);
+  KP.syncRoutineKeeper({assistantRoutines:rs},now,'2026-11-18',false,5,bridge);assert.deepEqual(calls[1],[false,'',0],'switched off by the setting');
+  KP.syncRoutineKeeper({assistantRoutines:[]},now,'2026-11-18',true,5,bridge);assert.equal(calls.length,2,'still off: nothing new to send');
+  assert.equal(KP.syncRoutineKeeper({assistantRoutines:rs},now,'2026-11-18',true,5,undefined),'','no bridge (a browser): nothing happens');
+  assert.equal(KP.keeperStopRequested({routineKeeperStopRequested:()=>true}),true);assert.equal(KP.keeperStopRequested(undefined),false);
+  const o=AW.readWorkflowOptions();assert.ok(o.autopilotAllow.includes('targets')&&o.autopilotAllow.includes('give'),'Autopilot may split targets by default, no manual step');assert.equal(o.routineGraceMinutes,5);assert.equal(o.keepRoutinesAlive,true);
+});
+check('WhatsApp report: the assistant only PREPARES the daily message (never sends), Undo can remove it, Autopilot may prepare it, and the notification fires only for a prepared message',()=>{
+  const ask="prepare today's WhatsApp report",st=pending(ask),p=AS.previewAssistant(st,phones,team,today,ask);
+  assert.ok(p.handled&&!p.blockers.length,p.blockers.join(' '));
+  const pk=p.business.after.deliveryPackets.at(-1);
+  assert.deepEqual([pk.kind,pk.status,pk.destination,pk.releaseIds.length,pk.recordIds.length],['report','prepared','group',0,0]);assert.match(pk.text,/Daily Report/);assert.ok(p.lines.some(l=>/only prepared/i.test(l)),'says it is only prepared');
+  assert.deepEqual(p.business.before.deliveryPackets,[],'Undo returns to the packets there were before');
+  assert.deepEqual(TK.actionClasses(p,ask),['whatsapp']);
+  assert.equal(TK.decideStep('autopilot',p,['whatsapp'],{allow:AW.readWorkflowOptions().autopilotAllow,dailyCap:20,usedToday:0}).action,'apply','Autopilot may prepare it');
+  assert.equal(TK.decideStep('copilot',p,['whatsapp'],{allow:[],dailyCap:20,usedToday:0}).action,'hold','Copilot waits for the batch approval');
+  for(const wording of ['send the whatsapp report','share today whatsapp report','make me a daily WhatsApp stock report for the group']){const q=AS.previewAssistant(st,phones,team,today,wording);assert.ok(q.handled&&q.business,wording);assert.equal(q.business.after.deliveryPackets.at(-1).status,'prepared','still only prepared: '+wording);}
+  assert.ok(AS.previewAssistant(st,phones,team,today,'send the whatsapp report').lines.some(l=>/never send/i.test(l)),'a "send" request says it will not send');
+  const again=AS.previewAssistant({...st,deliveryPackets:[pk]},phones,team,today,ask);assert.equal(again.business.after.deliveryPackets.length,1,'a second ask the same day refreshes the prepared message');
+  const afterOpen=AS.previewAssistant({...st,deliveryPackets:[{...pk,status:'opened'}]},phones,team,today,ask);assert.equal(afterOpen.business.after.deliveryPackets.length,2,'an opened or sent message is kept, a new one is prepared');
+  const O=AW.WORKFLOW_KEY;globalThis.localStorage.setItem(O,JSON.stringify({destination:'mobile',phone:''}));assert.ok(AS.previewAssistant(st,phones,team,today,ask).blockers.length,'a mobile destination without a valid number is refused');
+  globalThis.localStorage.setItem(O,JSON.stringify({destination:'mobile',phone:'+971 50 123 4567'}));const m=AS.previewAssistant(st,phones,team,today,ask).business.after.deliveryPackets.at(-1);assert.deepEqual([m.destination,m.phone],['mobile','971501234567']);globalThis.localStorage.removeItem(O);
+  const calls=[],bridge={whatsappReady:(d,ph,t)=>calls.push([d,ph,t])};
+  assert.equal(WR.notifyWhatsAppReady(pk,bridge),true);assert.deepEqual(calls[0],['group','',pk.text]);
+  assert.equal(WR.notifyWhatsAppReady({...pk,status:'sent-by-user'},bridge),false,'nothing to notify once it was sent');assert.equal(WR.notifyWhatsAppReady({...pk,text:'  '},bridge),false);assert.equal(WR.notifyWhatsAppReady(undefined,bridge),false);assert.equal(WR.notifyWhatsAppReady(pk,undefined),false,'no bridge (a browser): nothing happens');assert.equal(calls.length,1);
+  assert.equal(D.cleanState({...D.emptyState(),deliveryPackets:[pk,{...pk,id:'x',kind:'bogus'}]}).deliveryPackets.map(x=>x.kind).join(),'report,','the kind survives loading; an unknown kind is dropped');
+});
+check('one person target by chat: set/change forms, "my" and "everyone", clear errors, the store split is untouched, Undo snapshot, Autopilot class',()=>{
+  const b=base(),st={...b,settings:{...b.settings,myPersonId:'maya'},targets:{[month]:Object.fromEntries(['maya','noor','lee'].map(id=>[id,{personId:id,month,source:'manual',importedAt:'now',lines:[{segment:'flagship1',target:40,achieved:0}]}]))}};
+  const P=t=>AS.previewAssistant({...st,assistantRequests:[{id:'a',at:today,text:t,status:'pending',output:''}]},phones,team,today,t);
+  const T=(p,id)=>p.business.after.targets[month][id].lines.find(l=>l.segment==='flagship1').target;
+  let p=P("set Maya's Flagship 1 target to 12");assert.ok(p.handled&&!p.blockers.length,p.blockers.join(' '));assert.deepEqual(['maya','noor','lee'].map(id=>T(p,id)),[12,40,40],'only Maya changes');
+  assert.ok(p.lines.some(l=>/Maya Demo · .*: 40 → 12/.test(l)),'shows before and after');assert.ok(p.lines.some(l=>/120 → 92/.test(l)),'shows the total for all people');assert.ok(p.lines.some(l=>/Sold and achieved numbers are not changed/.test(l)));
+  assert.equal(p.business.before.targets,st.targets,'Undo returns to the targets there were before');assert.deepEqual(TK.actionClasses(p,"set Maya's Flagship 1 target to 12"),['targets']);
+  assert.equal(T(P('change Noor Flagship 1 target to 8'),'noor'),8);assert.equal(T(P("set Maya's target for Flagship 1 to 15"),'maya'),15);assert.equal(T(P('set my Flagship 1 target to 10'),'maya'),10,'"my" is the person set as me');
+  p=P("set everyone's Flagship 1 target to 20");assert.deepEqual(['maya','noor','lee'].map(id=>T(p,id)),[20,20,20]);
+  assert.match(P("set Maya's Flagship 1 target to 40").blockers.join(' '),/already 40/);
+  assert.match(P('set Flagship 1 target to 12').blockers.join(' '),/store target to divide/,'no person named: the older question about the store target is kept');
+  assert.match(P("set Maya's Banana target to 12").blockers.join(' '),/Choose one saved segment/,'unknown segment');
+  const split=P('change flagship 1 target to 12 and divide it to promoters');assert.ok(!split.lines.some(l=>/Sold and achieved/.test(l)),'a divide sentence is still the store-target split, not a one-person edit');
+  assert.ok(!P('set report Fold6 to 6').lines.some(l=>/Sold and achieved/.test(l)),'other set commands are not captured');
 });
 delete globalThis.localStorage;delete globalThis.window;
 console.log(count+' release-planning checks passed');

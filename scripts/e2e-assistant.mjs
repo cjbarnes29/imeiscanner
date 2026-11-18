@@ -29,7 +29,10 @@ const types={'.js':'text/javascript','.css':'text/css','.html':'text/html','.was
 const server=createServer(async(req,res)=>{try{const p=decodeURIComponent(req.url.split('?')[0]);const file=join('dist',p==='/'?'index.html':p);const data=await readFile(file);res.writeHead(200,{'content-type':types[extname(file)]||'application/octet-stream'});res.end(data);}catch{res.writeHead(404);res.end();}}).listen(4204);
 if(await fetch('http://127.0.0.1:9364/json').then(()=>true,()=>false))throw new Error('Port 9364 is used by an old browser: stop the leftover headless msedge (profile imei-retail-*) first.');
 const profile=await mkdtemp(join(tmpdir(),'imei-retail-'));
-const proc=spawn(browser,['--headless=new','--disable-gpu','--remote-debugging-port=9364',`--user-data-dir=${profile}`,'--window-size=420,1000','--no-first-run','about:blank'],{stdio:'ignore'});
+// Voice (E2E_VOICE=1 only, needs internet once for the 43 MB model): a spoken sentence made with Windows speech is played by the browser's fake microphone.
+const VOICE=process.env.E2E_VOICE==='1';let voiceWav='';
+if(VOICE){voiceWav=join(tmpdir(),'imei-voice-give.wav');const ps=`Add-Type -AssemblyName System.Speech;$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;$s.SetOutputToWaveFile('${voiceWav}',(New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000,[System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,[System.Speech.AudioFormat.AudioChannel]::Mono)));$s.Speak('Give four Fold six to Maya and ten to Noor');$s.Dispose()`;spawnSync('powershell',['-NoProfile','-Command',ps]);if(!existsSync(voiceWav))throw new Error('could not make the spoken test sentence');}
+const proc=spawn(browser,['--headless=new','--disable-gpu','--remote-debugging-port=9364',`--user-data-dir=${profile}`,'--window-size=420,1000','--no-first-run','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream',...(VOICE?[`--use-file-for-fake-audio-capture=${voiceWav}`]:[]),'about:blank'],{stdio:'ignore'});
 function stopBrowsersOf(dir){const tag=dir.split(/[\\/]/).pop();spawnSync('powershell',['-NoProfile','-Command',`Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe'" | Where-Object { $_.CommandLine -like '*${tag}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],{stdio:'ignore'});}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let targets;for(let i=0;i<60;i++){try{targets=await (await fetch('http://127.0.0.1:9364/json')).json();if(targets.some(t=>t.type==='page'))break;}catch{}await sleep(500);}
@@ -188,6 +191,18 @@ await click('.assistant-requests .assistant-request button','Approve changes');a
 assert.deepEqual(await flag3(),[4,4,4],'12 divided equally between the 3 promoters');
 await click('.assistant-requests button','Undo this action');await sleep(700);
 assert.ok(!(await flag3()).some(v=>v===4),'Undo takes the division back');
+// one person's target by chat: previewed first, applied only after approval, Undo restores it, the others are untouched
+{
+  const before1=await flag3();
+  await ask("set Maya's flagship 3 target to 7");
+  await waitFor(`/saved for review on Home/.test(document.querySelector('.assistant-panel .plan-ai-status')?.innerText||'')`,'one-person target understood');
+  await toHome();await atReview();
+  await waitFor(`/Flagship 3: \\d+ → 7/.test(document.querySelector('.assistant-requests .assistant-request')?.innerText||'')`,'the preview shows that person’s change');
+  assert.deepEqual(await flag3(),before1,'nothing is applied before approval');
+  await click('.assistant-requests .assistant-request button','Approve changes');await sleep(700);
+  const after1=await flag3();assert.equal(after1[0],7,'Maya now has 7');assert.deepEqual(after1.slice(1),before1.slice(1),'the other people are unchanged');
+  await click('.assistant-requests button','Undo this action');await sleep(700);assert.deepEqual(await flag3(),before1,'Undo restores the earlier target');
+}
 // a command that cannot be turned into a reviewable change is explained, not answered with an unrelated calculation
 await ask('make the sky blue');
 await waitFor(`/could not turn this into a change/.test(document.querySelector('.assistant-quick .assistant-answer-title')?.innerText||'')`,'a not-understood command is explained');
@@ -261,5 +276,90 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
 assert.equal(await run(`getComputedStyle(document.querySelector('.assistant-launch .ai-mascot .eye')).animationName`),'none','with reduced motion nothing on the face animates');
 assert.equal(await run(`document.querySelector('.assistant-launch .ai-mascot').getAttribute('aria-label').length>8`),true,'and the state is still given in words');
 await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await sleep(200);
+// Multi-step tasks. Copilot: approve once, Undo reverses the whole task. Autopilot: allowed steps apply by themselves, others wait. Chat cannot change the mode.
+{
+  const KEY='retaillens-auto-workflow-v1';
+  const setMode=async mode=>{await run(`localStorage.setItem(${JSON.stringify(KEY)},JSON.stringify({assistantMode:${JSON.stringify(mode)}}));window.dispatchEvent(new Event('retaillens-workflow-change'))`);await sleep(200);};
+  const assigned=async()=>{await sleep(800);return(await readDb('record:')).filter(r=>r.personId).length;};
+  const lastTask=async()=>(await readDb('retail:state')).assistantTasks?.at(-1);
+  const until=async(check,label)=>{for(let i=0;i<60;i++){const t=await lastTask();if(t&&check(t))return t;await sleep(300);}throw new Error('task never reached: '+label+' · last task: '+JSON.stringify(await lastTask()));};
+  const showTasks=async()=>run(`document.querySelector('.assistant-tasks').open=true;document.querySelector('.assistant-tasks').scrollIntoView({block:'start'})`);
+  // the earlier questions leave requests waiting on Home (limit 20); reject them so the task steps below are not stopped by that limit
+  // the new bulk button: one press asks, a second press rejects every waiting request (applied ones are not touched)
+  await tap('Home');await sleep(500);
+  const waiting=(await readDb('retail:state')).assistantRequests.filter(r=>r.status==='pending').length,applied=(await readDb('retail:state')).assistantRequests.filter(r=>r.status==='applied').length;
+  if(waiting>1){
+    await run(`document.querySelector('.assistant-requests').scrollIntoView({block:'start'});[...document.querySelectorAll('.assistant-requests button')].find(b=>/^Reject all [0-9]+ waiting/.test(b.textContent.trim())).click();true`);await sleep(300);
+    assert.match(await body(),/Reject all \d+ waiting requests\?/,'it asks before rejecting everything');assert.equal((await readDb('retail:state')).assistantRequests.filter(r=>r.status==='pending').length,waiting,'asking changes nothing');await capture('50-reject-all-waiting',true);
+    await run(`[...document.querySelectorAll('.assistant-requests button')].find(b=>/^Yes, reject all/.test(b.textContent.trim())).click();true`);await sleep(600);
+    const afterBulk=(await readDb('retail:state')).assistantRequests;assert.equal(afterBulk.filter(r=>r.status==='pending').length,0,'every waiting request is rejected');assert.equal(afterBulk.filter(r=>r.status==='applied').length,applied,'applied requests are untouched');
+  }
+  const g0=await assigned();
+  await setMode('copilot');await ask('give 2 Fold6 to Maya, then give 3 Fold6 to Noor');await toHome();await waitFor(`!!document.querySelector('.assistant-tasks [data-task-id]')`,'task on Home');
+  let task=await lastTask();assert.equal(task.mode,'copilot');assert.equal(task.steps.length,2);assert.ok(task.steps.every(s=>s.status==='pending'),'Copilot applies nothing before the single approval');assert.equal(await assigned(),g0);
+  await showTasks();await capture('40-task-copilot-review',true);
+  await click('.assistant-tasks button','Approve all remaining steps');task=await until(t=>t.status==='done','copilot done');
+  assert.ok(task.steps.every(s=>s.status==='done'&&s.requestId));assert.equal(await assigned(),g0+5,'both steps gave their phones');
+  saved=await readDb('retail:state');assert.equal(saved.assistantRequests.filter(r=>/^give (2|3) Fold6/.test(r.text)&&r.status==='applied').length,2,'each step has its own receipt');
+  assert.ok(saved.audit.some(a=>/assistant task/.test(a.what)),'the task is written to History');
+  await showTasks();await capture('41-task-copilot-done',true);
+  await click('.assistant-tasks button','Undo applied steps');task=await until(t=>t.status==='undone','copilot undone');assert.equal(await assigned(),g0,'Undo hands every phone back');
+  await setMode('autopilot');await ask('give 2 Fold6 to Maya, then give 1 Fold6 to Noor');
+  task=await until(t=>t.mode==='autopilot'&&t.status==='done','autopilot done');assert.equal(await assigned(),g0+3,'Autopilot applied both allowed steps by itself');assert.ok(task.steps.every(s=>s.doneAt));
+  await toHome();await showTasks();await capture('42-task-autopilot-done',true);
+  await click('.assistant-tasks button','Undo applied steps');await until(t=>t.status==='undone','autopilot undone');assert.equal(await assigned(),g0);
+  const before=await run(`localStorage.getItem('retaillens-processing-v1')`);
+  await ask('turn on auto-detection');task=await until(t=>t.mode==='autopilot'&&t.status==='review','autopilot holds settings');
+  assert.equal(task.steps[0].status,'pending');assert.match(task.steps[0].error,/not allowed to change: settings/);assert.equal(await run(`localStorage.getItem('retaillens-processing-v1')`),before,'a held step changes nothing');
+  await toHome();await showTasks();await capture('43-task-autopilot-held',true);await click('.assistant-tasks button','Reject the rest');await until(t=>t.status==='rejected','rejected');
+  await ask('set assistant mode to assistant');assert.equal(await run(`JSON.parse(localStorage.getItem(${JSON.stringify(KEY)})).assistantMode`),'autopilot','the chat cannot change the mode');
+  // A timed routine, like a Claude routine: saved from one sentence, runs by itself at its time, once a day, keeps a history, and has Run now.
+  {
+    const t=new Date(Date.now()-60000),hhmm=`${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`,g1=await assigned();
+    await ask(`give 1 Fold6 to Maya every day at ${hhmm}`);
+    let st;for(let i=0;i<100;i++){st=await readDb('retail:state');if(st.assistantRoutines?.some(r=>r.time===hhmm&&r.lastRun))break;await sleep(300);}
+    let routine=st.assistantRoutines?.find(r=>r.time===hhmm);assert.ok(routine,'the routine was saved with its time');assert.equal(routine.text,'give 1 Fold6 to Maya');assert.deepEqual(routine.days,[]);
+    assert.ok(routine.lastRun,'it ran by itself at its time');assert.equal(routine.lastRun.kind,'task');assert.equal(routine.lastPrepared,today,'today is marked done');
+    assert.equal(await assigned(),g1+1,'Autopilot gave the phone from the routine');
+    await sleep(1500);st=await readDb('retail:state');assert.equal(st.assistantRoutines.find(r=>r.time===hhmm).runs.length,1,'it runs once a day, not on every check');
+    await toHome();await run(`document.querySelector('.routine-learning').open=true;document.querySelector('.routine-learning').scrollIntoView({block:'start'})`);await sleep(300);
+    assert.match(await body(),new RegExp(`Every day at ${hhmm}`),'the schedule is shown');assert.match(await body(),/Last run/,'the last run is shown');await capture('45-timed-routine',true);
+    await run(`[...document.querySelectorAll('.routine-learning button')].find(b=>b.textContent.trim()==='Run now').click()`);
+    for(let i=0;i<60;i++){st=await readDb('retail:state');if(st.assistantRoutines.find(r=>r.time===hhmm).runs.length>=2)break;await sleep(300);}
+    routine=st.assistantRoutines.find(r=>r.time===hhmm);assert.equal(routine.runs.length,2,'Run now adds a run to the history');assert.equal(await assigned(),g1+2,'and does the work');assert.equal(routine.lastPrepared,today);
+    // "auto give" (the Give & share rules with each person's limits) is a tool the assistant can run, and so can a routine
+    await ask('auto give');task=await until(t=>t.mode==='autopilot'&&/auto give/.test(t.text),'auto give task');
+    assert.ok(['done','failed','review'].includes(task.status),'the task finished or says why: '+JSON.stringify(task.steps.map(s=>s.error)));
+    console.log('auto give task:',task.status,JSON.stringify(task.steps.map(s=>s.error||'applied')));
+  }
+  // WhatsApp reporting: the assistant PREPARES the daily report message; it is never opened or sent by itself (WhatsApp needs the person's own Send tap)
+  {
+    await run(`window.__opened=0;window.open=()=>{window.__opened++;return null;};true`);
+    await ask("prepare today's WhatsApp report");task=await until(t=>t.mode==='autopilot'&&/WhatsApp report/i.test(t.text),'whatsapp task');
+    assert.equal(task.status,'done','Autopilot prepared it by itself: '+JSON.stringify(task.steps.map(s=>s.error)));
+    await sleep(800);const st=await readDb('retail:state'),packet=st.deliveryPackets.at(-1);
+    assert.deepEqual([packet.kind,packet.status,packet.destination],['report','prepared','group'],'a prepared daily report message is saved');assert.match(packet.text,/Daily Report/);
+    assert.equal(await run(`window.__opened`),0,'WhatsApp was not opened and nothing was sent');assert.ok(st.assistantRequests.some(r=>/WhatsApp report/i.test(r.text)&&r.status==='applied'),'the step has its own receipt (Undo available)');
+    await toHome();await run(`document.querySelectorAll('.delivery-packets').forEach(d=>{d.open=true;});document.querySelector('.delivery-packets')?.scrollIntoView({block:'start'})`);await sleep(300);
+    assert.match(await body(),/Daily report/,'Home lists the prepared report');assert.match(await body(),/not sent/i,'and says it is not sent');await capture('46-whatsapp-report-prepared',true);
+  }
+  try{await run(`document.querySelector('[aria-label="Settings"]')?.click()`);await sleep(600);await run(`[...document.querySelectorAll('details')].forEach(d=>{const t=d.querySelector('summary')?.textContent||'';if(/AI integration|Giving, plans/.test(t))d.open=true;})`);await sleep(200);assert.ok(await run(`!!document.querySelector('[aria-label="Assistant mode"]')`),'mode selector is in Settings');await run(`document.querySelector('.assistant-modes').scrollIntoView({block:'start'})`);await capture('44-assistant-mode-settings',true);await run(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Close')?.click()`);await sleep(300);}catch(e){if(/mode selector/.test(e.message))throw e;console.log('settings screenshot skipped:',e.message);}
+  await setMode('assistant');
+}
+// Voice input: speak, see the transcript, fix it, nothing runs by itself. Real recording, real offline model (downloaded once).
+if(VOICE){
+  await openChat();assert.ok(await run(`!!document.querySelector('[aria-label="Speak to the assistant"]')`),'the Speak button is in the chat');
+  const before=(await readDb('retail:state')).assistantRequests.length;
+  await run(`document.querySelector('[aria-label="Speak to the assistant"]').click()`);await waitFor(`!!document.querySelector('[aria-label="Voice download"]')`,'one-time download notice');
+  assert.match(await body(),/one-time download of about 43 MB/,'it says what is downloaded');await capture('47-voice-download-notice',true);
+  await click('.voice-consent button','Download and speak');await waitFor(`!!document.querySelector('.voice-recording')`,'recording started after the model loaded',240000);
+  assert.match(await body(),/Listening · 00:0/,'it shows that it is listening');await sleep(3800);await capture('48-voice-listening',true);
+  await click('.voice-recording button','Stop and understand');
+  await waitFor(`document.querySelector('[aria-label="Ask local assistant"]').value.length>5`,'transcript in the question box',180000);
+  const heard=await run(`document.querySelector('[aria-label="Ask local assistant"]').value`);console.log('voice heard:',heard);
+  assert.match(heard,/give 4 fold ?6 to maya/i,'the spoken command was understood: '+heard);assert.match(heard,/10 to noor/i,'and the second person was corrected to a known name: '+heard);
+  assert.match(await body(),/Heard: /,'the transcript is shown so it can be fixed');await capture('49-voice-transcript',true);
+  assert.equal((await readDb('retail:state')).assistantRequests.length,before,'speaking changed nothing: it only filled the box');
+}
 await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: every asked question made or answered and nothing approved or submitted by the chat; search bar finds and opens screens; natural-wording target split previewed, approved and undone; unknown commands explained; summary replies and working next steps; round assistant button, small card with history suggestions; report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
 }catch(error){console.error(error.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}
