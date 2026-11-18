@@ -39,22 +39,25 @@ Read after `docs/CLAUDE-START-HERE.md`. Standing rules still apply: APK-only del
 - Emulator: `scripts/check-android-routine-helper.mjs` (isolated test app, `ADB_SERIAL=emulator-5554`, devtools forwarded to 9229) calls the real bridge and checks the foreground service, notification, alarm, the page wake event, switch-off and a refused past time. `scripts/check-android-upgrade.mjs before|after` proves `install -r` keeps data.
 - Screenshots: `phase2-results/assistant-actions/40..45*.png` (git-ignored).
 
+## Merge status
+`ai/assistant-upgrade` was merged (no fast-forward, no conflicts) into `ux/photo-editor` as `45c6455`. The merged tree is identical to the AI branch. Nothing is merged into `main`. At the time of writing `ux/photo-editor` on origin is behind the local branch: **the merge is local until it is pushed**. Verified on the merged result: `tsc` clean, `npm test`, release workflow YAML parses (jobs `beta`, notes step intact), `npm run build`, all seven browser tests (assistant with the real-voice scenario), Android unit tests, both APKs built, and the emulator checks below.
+
 ## APK artifacts (local, git-ignored: `phase2-results/builds/`)
-Built from commit `ae46780` (the commit after it changes only this document). Version **1.27.3 / versionCode 46**. Both are debug-signed with the local certificate SHA-256 `f2a58bb2e0ba7296dba017d3a89070deb7f959b80b0af17bce7d6a4dfa387a27`, the same signer as the previous local APKs (`AI-LENS-6e0ef94.apk`, 1.27.1 / 44), so the regular APK installs over them as an update (data is kept).
+Built from the merge commit `45c6455` (later commits change only this document). Version **1.27.3 / versionCode 46**. Both are debug-signed with the local certificate SHA-256 `f2a58bb2e0ba7296dba017d3a89070deb7f959b80b0af17bce7d6a4dfa387a27`, the same signer as the previous local APKs (`AI-LENS-6e0ef94.apk`, 1.27.1 / 44), so the regular APK installs over them as an update (data is kept). This build includes everything in this document, including the one-person target tool and "Reject all waiting".
 
 | File | Package | Version | Size | SHA-256 |
 |---|---|---|---|---|
-| `AI-LENS-ae46780.apk` | `com.imeilens.scanner` | 1.27.3 / 46 | 50,605,371 bytes | `e7a34b92f70df1736db73fd4c811425fa54f60624d8d34610b16110a263b7918` |
-| `AI-LENS-Test-ae46780.apk` | `com.imeilens.scanner.phonetest` | 1.27.3-phonetest / 46 | 50,605,387 bytes | `01567725556b8e3191110ee3f283dbba092cb8a2e57d62488ac7c5fa80591abb` |
+| `AI-LENS-45c6455.apk` | `com.imeilens.scanner` | 1.27.3 / 46 | 50,606,519 bytes | `992c29e638b9671042f34043a2d33bb61e1f591537260eda1efcdfe4d3b296f2` |
+| `AI-LENS-Test-45c6455.apk` | `com.imeilens.scanner.phonetest` | 1.27.3-phonetest / 46 | 50,606,535 bytes | `7bbd8bcbd88a6b11c945b39e4d95587c6b522fd8846cfd92532b780820008443` |
 
 Permissions added across this work: `RECORD_AUDIO` (voice), `FOREGROUND_SERVICE_SPECIAL_USE` and `USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM` (routine helper), `WAKE_LOCK`. Android asks for the microphone and notifications when first needed.
 
-Emulator results on the build from `ae46780` (`emulator-5554`, Android 15, isolated test app only): `install -r` over 1.27.2-class code 45 kept the saved data (`check-android-upgrade.mjs` PASS); `check-android-routine-helper.mjs` PASS (foreground service, exact alarm, page wake, switch-off, past time refused); `check-android-voice.mjs` PASS (permission path, model download and load in the WebView, cached for offline); 0 crashes in the log. **The emulator has no microphone (`-no-audio`), so recording on Android was not verified.** The regular package `com.imeilens.scanner` was never installed or touched by these checks.
+Emulator results on the build from `45c6455` (`emulator-5554`, Android 15, isolated test app only): `install -r` over the previous code-46 build kept the saved data (`check-android-upgrade.mjs` PASS); `check-android-routine-helper.mjs` PASS (foreground service, exact alarm, page wake, switch-off, past time refused, WhatsApp-ready notification channel); `check-android-voice.mjs` PASS (permission path, model download and load in the WebView, cached for offline); 0 crashes in the log. **The emulator has no microphone (`-no-audio`), so recording on Android was not verified.** The regular package `com.imeilens.scanner` was never installed or touched by these checks.
 An in-place update only works on a phone whose installed app was signed with the same certificate. A build from GitHub CI uses a different debug certificate and cannot update a locally signed install (and the reverse). A first-time install of a differently signed build needs the old one removed, which loses data: back up first.
-Earlier APKs from `a9f698f` (crashed when a timed routine was saved) and `0ff9cd1` (before WhatsApp reporting and voice) are superseded; do not distribute them.
+Superseded APKs (do not distribute): `a9f698f` (crashed when a timed routine was saved), `0ff9cd1` (before WhatsApp and voice), `ae46780` (before the target tool and bulk reject).
 
 ## Real-phone checklist (not done yet)
-1. Install `AI-LENS-ae46780.apk` over the current app. Check the version in Settings reads 1.27.3 and the data is there.
+1. Install `AI-LENS-45c6455.apk` over the current app. Check the version in Settings reads 1.27.3 and the data is there.
 2. Voice: open the assistant, tap Speak, allow the microphone, say "give 4 Fold6 to Maya", Stop. Check the transcript and the editable box. First use needs internet once (43 MB).
 3. Timed routine: say or type "give 1 Fold6 to Maya every day at <a time 2 minutes ahead>". Leave the app in the background with the screen off. Check the notification "AI LENS timed routines are on" and that it ran at that minute.
 4. WhatsApp: "prepare today's WhatsApp report" in Autopilot. Check the notification, tap it, WhatsApp opens with the text; send it yourself; tap "I sent it".
