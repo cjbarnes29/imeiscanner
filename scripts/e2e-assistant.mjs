@@ -113,6 +113,12 @@ assert.equal(await run(`document.querySelector('.assistant-requests .assistant-r
 await run(`document.querySelector('.assistant-requests .assistant-request input[type=checkbox]').click()`);await click('.assistant-requests .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.reportDrafts[today].report.entries.find(r=>r.t==='item').sold,6);assert.equal(saved.releases?.length||0,0,'a report change records no sale');
 // 4. a settings request is also approved on Home
 await ask('Turn off auto-detection');await toHome();await click('.assistant-requests .assistant-request button','Approve changes');await sleep(300);assert.equal(await run(`JSON.parse(localStorage.getItem('retaillens-processing-v1')).autoFindBoxes`),false);await atReview();await capture('22-settings-action-result',true);
+// 4b. People by chat: the request is only a preview until Approve is pressed on Home; Approve must be ENABLED for a people change (it was not once), the people are saved, and Undo removes them again.
+{const peopleNow=()=>run(`JSON.parse(localStorage.getItem('imei-lens-people-v1')||'[]').map(p=>p.name)`);const before=await peopleNow();
+await ask('add 2 people omar and lee');assert.deepEqual(await peopleNow(),before,'the chat alone adds nobody');await toHome();
+assert.equal(await run(`[...document.querySelectorAll('.assistant-requests .assistant-request button')].find(b=>b.textContent.trim().startsWith('Approve changes'))?.disabled`),false,'Approve is enabled for a people change');
+await click('.assistant-requests .assistant-request button','Approve changes');await sleep(700);const added=await peopleNow();assert.ok(added.includes('Omar')&&added.includes('Lee'),'the two people are saved: '+added);
+await click('.assistant-requests button','Undo this action');await sleep(700);assert.deepEqual(await peopleNow(),before,'Undo removes them again');await atReview();}
 // 5. an app report (Excel, PowerPoint or simple notes) is asked for in the chat and made on Home; it can be downloaded or sent on WhatsApp. Making a report changes nothing.
 // WhatsApp is never really opened in this test: the browser's share and open functions are replaced by recorders.
 const ownersBefore=JSON.stringify((await readDb('record:')).map(r=>[r.id,r.personId]).sort());
