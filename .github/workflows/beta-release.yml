@@ -35,19 +35,19 @@ jobs:
         run: |
           gradle --project-dir android :app:assembleDebug -PphoneTest -PminifyDebug --stacktrace
           mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk "out/IMEI-Lens-Beta-${GITHUB_REF_NAME}.apk"
-          (cd out && sha256sum "IMEI-Lens-Beta-${GITHUB_REF_NAME}.apk" > "IMEI-Lens-Beta-${GITHUB_REF_NAME}.apk.sha256")
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/AI-LENS-Test-${GITHUB_REF_NAME}.apk"
+          (cd out && sha256sum "AI-LENS-Test-${GITHUB_REF_NAME}.apk" > "AI-LENS-Test-${GITHUB_REF_NAME}.apk.sha256")
       - name: Publish the pre-release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'NOTES'
-          ## BETA: RetailLens Test (Scan. Sell. Track. Achieve.)
+          ## BETA: AI LENS Test (Scan. Sell. Track. Achieve.)
           **This is a beta test build, not a production release.**
 
           ### Install
           1. On the phone, download the **.apk** file from the assets below and open it (allow installing from this source when asked).
-          2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
+          2. It installs as **AI LENS Test**, next to your current app, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
           - **Reports from the assistant:** ask for an Excel, PowerPoint or simple-notes report (Home → Make a report), then download it or send it on WhatsApp; built from the app's own numbers, no IMEI numbers, nothing changed.
@@ -81,11 +81,11 @@ jobs:
           - Earlier in this beta line: colour themes (Settings > Colour), Simple mode as Scan / Phones / Send, colours of each model, the sliding bottom bar and the More sheet.
 
           ### Known limits
-          - Debug-signed test build. Tested on the emulator and in automated tests; **not yet verified on a real phone**. Some emulator flows were unstable because the emulator itself was slow.
+          - Debug-signed test build. Tested in automated tests and a short check on the emulator; **not yet verified on a real phone**, and the full emulator suite has not passed on this build (the emulator itself was unhealthy). Some emulator flows were unstable because the emulator itself was slow.
           - Not tested with your real report or a real Promoter screenshot (colour abbreviations are matched by a rule; if one does not match, the line says so and you fix it). The Promoter screenshot import still reads the old segment names and asks you to choose your segment per line.
           - The WhatsApp media-folder watcher is not built (shared photos work). Glare and blur retake guidance is not included yet.
           NOTES
           gh release create "${GITHUB_REF_NAME}" out/*.apk out/*.sha256 \
-            --title "RetailLens BETA ${GITHUB_REF_NAME#beta-v}" \
+            --title "AI LENS Test BETA ${GITHUB_REF_NAME#beta-v}" \
             --prerelease --latest=false \
             --notes-file notes.md
