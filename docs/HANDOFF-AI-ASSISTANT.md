@@ -36,6 +36,18 @@ Read after `docs/CLAUDE-START-HERE.md`. Standing rules still apply: APK-only del
 - Emulator: `scripts/check-android-routine-helper.mjs` (isolated test app, `ADB_SERIAL=emulator-5554`, devtools forwarded to 9229) calls the real bridge and checks the foreground service, notification, alarm, the page wake event, switch-off and a refused past time. `scripts/check-android-upgrade.mjs before|after` proves `install -r` keeps data.
 - Screenshots: `phase2-results/assistant-actions/40..45*.png` (git-ignored).
 
+## APK artifacts (local, git-ignored: `phase2-results/builds/`)
+Built from commit `0ff9cd1` (later commits change only scripts and docs). Both are debug-signed with the local certificate SHA-256 `f2a58bb2e0ba7296dba017d3a89070deb7f959b80b0af17bce7d6a4dfa387a27`, the same signer as the previous local APKs (`AI-LENS-6e0ef94.apk`, 1.27.1 / 44), so the regular APK installs over them as an update.
+
+| File | Package | Version | SHA-256 |
+|---|---|---|---|
+| `AI-LENS-0ff9cd1.apk` | `com.imeilens.scanner` | 1.27.2 / 45 | `67ececabc7b8b7895f7d5307438f9b8e8cdede9517a1ef27cbe29cb33c057e6e` |
+| `AI-LENS-Test-0ff9cd1.apk` | `com.imeilens.scanner.phonetest` | 1.27.2-phonetest / 45 | `735565213c71833c1403cdf789e23209768af1cd244277044b3f52a40d105396` |
+
+Emulator (`emulator-5554`, Android 15, isolated test app only): `install -r` over 1.27.1 / 44 kept the saved data (`check-android-upgrade.mjs` PASS on the 44 to 45 upgrade and again on the fixed build); `check-android-routine-helper.mjs` PASS; 0 crashes in the log after the fixed install. The regular package `com.imeilens.scanner` was never installed or touched by these checks.
+An in-place update only works on a phone whose installed app was signed with the same certificate. A build from GitHub CI uses a different debug certificate and cannot update a locally signed install (and the reverse). A first-time install of a differently signed build needs the old one removed, which loses data: back up first.
+The APK from `a9f698f` was deleted: it crashed when a timed routine was saved (see Gotchas).
+
 ## Not verified / known limits
 - The Android helper is built and unit-tested, but **not yet proven on a real phone**: Doze behaviour with the screen off for a long time, OEM battery savers that kill foreground services, and notification permission denied are untested. Emulator smoke checks are listed in the release notes of the APK step.
 - Tasks and routines need the app process alive. If the user swipes the app away, routines cannot run (the app says so). After a phone restart alarms are gone until the app is opened once (no boot receiver).

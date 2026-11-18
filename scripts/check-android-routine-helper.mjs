@@ -14,22 +14,22 @@ const ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise(r=>ws.addEve
 ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(pending.has(m.id)){pending.get(m.id)(m);pending.delete(m.id);}});
 const run=async expression=>{const n=++id,result=new Promise((resolve,reject)=>{pending.set(n,resolve);setTimeout(()=>{if(pending.delete(n))reject(new Error('no answer from the page for: '+expression.slice(0,60)));},15000);});ws.send(JSON.stringify({id:n,method:'Runtime.evaluate',params:{expression,awaitPromise:true,returnByValue:true}}));const response=await result;if(response.result?.exceptionDetails)throw new Error(JSON.stringify(response.result.exceptionDetails).slice(0,300));return response.result?.result?.value;};
 const service=()=>adb('shell','dumpsys','activity','services',PKG);
-const stillRunning=()=>/RoutineKeeperService/.test(service());
+// A stopped service (or one left by an older, crashed process) can still be listed by name, so look at the foreground state of the record that belongs to the CURRENT process.
+const stillRunning=()=>{const pid=adb('shell','pidof',PKG).trim().split(/\s+/)[0];return service().split(/\n\s*\* ServiceRecord/).some(block=>/RoutineKeeperService/.test(block)&&block.includes(` ${pid}:${PKG}`)&&/foregroundId=1003/.test(block));};
 try{
   assert.equal(await run(`typeof AndroidScanner.routineKeeper`),'function','the page has the new routine helper bridge');
   assert.equal(await run(`typeof AndroidScanner.routineKeeperStopRequested`),'function');
   await run(`window.__wake=0;window.addEventListener('retaillens-routine-wake',()=>{window.__wake++;});true`);
   const at=Date.now()+25000;
   await run(`AndroidScanner.routineKeeper(true,'emulator check at 00:00',${at});true`);await sleep(2500);
-  const s=service();assert.match(s,/RoutineKeeperService/,'the helper service is running');assert.match(s,/isForeground=true/,'it is a foreground service');
-  const notes=adb('shell','dumpsys','notification');assert.match(notes,/AI LENS timed routines are on/,'the ongoing notification is shown');
+  const s=service();assert.ok(stillRunning(),'the helper service is running in the current app process');assert.match(s,/isForeground=true/,'it is a foreground service');assert.match(s,/types=0x40000000/,'of the special-use type');assert.match(s,/channel=imei-lens-routines/,'with its ongoing notification (Android hides the text from dumpsys, so the channel is checked)');
+  assert.match(adb('shell','dumpsys','package',PKG),/USE_EXACT_ALARM: granted=true/,'the exact-alarm permission is granted');
   const alarms=adb('shell','dumpsys','alarm');assert.match(alarms,/RoutineAlarmReceiver/,'the alarm is armed for the routine receiver');
   assert.equal(await run(`window.__wake`),0,'nothing wakes the page before the due time');
   const wait=at-Date.now()+6000;await sleep(Math.max(0,wait));
   assert.ok(await run(`window.__wake`)>=1,'at the due time Android woke the page (retaillens-routine-wake)');
   await run(`AndroidScanner.routineKeeper(false,'',0);true`);await sleep(2500);
   assert.ok(!stillRunning(),'switched off: the helper service stops');
-  assert.doesNotMatch(adb('shell','dumpsys','notification'),/AI LENS timed routines are on/,'and its notification is gone');
   assert.equal(await run(`AndroidScanner.routineKeeperStopRequested()`),false,'no stray Turn off request');
   // a past or absurd time is refused: nothing starts
   await run(`AndroidScanner.routineKeeper(true,'in the past',${Date.now()-60000});true`);await sleep(1500);assert.ok(!stillRunning(),'a time in the past never starts the helper');
