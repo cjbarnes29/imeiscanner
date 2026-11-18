@@ -1,4 +1,4 @@
-// RetailLens > Targets > Edit all: every person's target and sold count for every segment on one screen. One card per person, one row per segment with the
+// AI LENS > Targets > Edit all: every person's target and sold count for every segment on one screen. One card per person, one row per segment with the
 // segment's name, so every box says which segment it belongs to (a wide table lost its labels on a phone). Typing saves at once. Levels and the highest
 // level of a line stay in the segment screen ("Levels"). The arithmetic is in src/retail/targets.ts and pace.ts (unit-tested); this file only shows it.
 import { segLabel } from './retail/segments';

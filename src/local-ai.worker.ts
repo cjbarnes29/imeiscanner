@@ -22,9 +22,9 @@ worker.onmessage = async event => {
     }
     if (event.data.type === 'load') return;
     const result = await generator([
-      { role: 'system', content: 'You help plan phone releases. Use only the supplied summary. No IMEIs or photos are supplied. You cannot approve actions. Respond with ONLY JSON: {"explanation":"short helpful explanation", "method":"goal", "value":70, "reserve":0, "until":"YYYY-MM-DD"}. Valid methods: goal, points, spread, stored, quantity. value must be between 0 and 120 except quantity. Never claim a release or report happened. Calculations will be validated by the app.' },
+      { role: 'system', content: event.data.kind==='chat'?'Answer the user in clear short sentences using only the supplied saved-data summary. Explain plans, stock, reporting or availability. Do not output JSON. Do not invent quantities, claim to have approved or released anything, or say that messages were sent. If data is missing, explain what is needed. The app shows separate deterministic calculations.':'You help plan phone releases. Use only the supplied summary. No IMEIs or photos are supplied. You cannot approve actions. Respond with ONLY JSON: {"explanation":"short helpful explanation", "method":"goal", "value":70, "reserve":0, "until":"YYYY-MM-DD"}. Valid methods: goal, points, spread, stored, quantity. value must be between 0 and 120 except quantity. Never claim a release or report happened. Calculations will be validated by the app.' },
       { role: 'user', content: String(event.data.prompt || '').slice(0, 7000) }
     ], { max_new_tokens: 220, do_sample: false, return_full_text: false });
-    worker.postMessage({ type: 'result', result });
+    worker.postMessage({ type: 'result', kind:event.data.kind==='chat'?'chat':'plan', result });
   } catch (error) { worker.postMessage({ type: 'error', text: error instanceof Error ? error.message : 'Local model unavailable. The calculated planner still works.' }); generator = undefined; }
 };

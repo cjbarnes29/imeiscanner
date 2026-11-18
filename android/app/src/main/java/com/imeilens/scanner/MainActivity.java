@@ -899,6 +899,10 @@ public final class MainActivity extends Activity {
 
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }
 
+        @JavascriptInterface public void setProcessingOptions(boolean autoRetry) {
+            getSharedPreferences("app-state", MODE_PRIVATE).edit().putBoolean("auto-retry-enabled", autoRetry).apply();
+        }
+
         /** Read-only startup health check. No record fields, paths or contact data are returned. */
         @JavascriptInterface public String recoveryInfo() {
             JSONObject out = new JSONObject();

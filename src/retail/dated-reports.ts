@@ -44,8 +44,9 @@ export function compareDatedReport(state: RetailState, records: StockSource[], r
   const expected = datedRows(state, records, date, today), index = catalogIndex(state), actual = new Map<string, { sold: number; stock: number }>();
   const differences: string[] = [];
   for (const item of reportItems(report)) {
+    const direct=expected.filter(row=>row.name.trim().toLowerCase()===item.name.trim().toLowerCase());
     const code = matchModel(state, index, item.name)?.code;
-    const key = code ? `${code}|${unit(splitName(item.name).storage)}` : '';
+    const key = direct.length===1?direct[0].key:code ? `${code}|${unit(splitName(item.name).storage)}` : '';
     if (!key || !expected.some(r => r.key === key)) { if (item.stock || item.sold) differences.push(`${item.name}: no matching IMEI-backed model/variant to verify.`); continue; }
     const sum = actual.get(key) || { sold: 0, stock: 0 }; sum.sold += item.sold; sum.stock += item.stock; actual.set(key, sum);
   }

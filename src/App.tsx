@@ -1,10 +1,21 @@
+import {RoutineLearningEngine} from './RoutineLearning';
+import {resumeAssistantFiles} from './AssistantFiles';
+import {PlanEditor} from './RetailPlan';
+import type {PlanRequest} from './retail/types';
+import {LocalAI} from './RetailPlanAI';
+import {AssistantRequests,ASSISTANT_REUSE} from './AssistantReview';
+import {automaticSuggestion,readWorkflowOptions,setSuggestedPlan} from './retail/auto-workflow';
+import { useWorkflowOptions,AutomaticForecastEngine } from './AutoWorkflow';
+import { useProcessingOptions, useEditingActivity, useManualEdit, useTypingPriority } from './ProcessingSettings';
+import { backgroundDeferred, waitForManualIdle, manualEditRevision, isPhotoBeingEdited, hasManualEditor } from './processing-options';
+import { SwipeNotice,SwipeToast,SwipeUndoBar } from './SwipeNotice';
 import { RecoveryPanel } from './RecoveryPanel';
-import { recordDiagnostic } from './diagnostics';
+import { recordDiagnostic,beginDiagnosticOperation } from './diagnostics';
 import { activeIssue, issueTextFor } from './label-issue';
 import { LiveScanPlan } from './RetailScanPlan';
 import { RetailExports } from './RetailExports';
 import { UploadDisposition } from './RetailUpload';
-import { RetailHub, type RetailRecord, type RetailSub } from './RetailHub';
+import { RetailHub, type RetailRecord, type RetailSub, type RetailCtx } from './RetailHub';
 import { SheetHandle } from './SheetHandle';
 import { QuickPerson } from './QuickPerson';
 import { syncScans } from './retail/reportsync';
@@ -766,7 +777,7 @@ function createPhotoGalleryHtml(rows: RecordItem[], people: PersonGroup[]) {
     const name = photoFilename(record).replace(/^#/, 'photo-');
     return `<article class="card"><div class="preview"><img src="${htmlEscape(recordPhoto(record))}" alt="Photo for record ${record.number}"></div><div class="card-body"><span class="record">RECORD #${record.number} · ${htmlEscape(record.pictureId)}</span><h2>${htmlEscape(record.model)}</h2><div class="details"><span>IMEI</span><strong>${htmlEscape(record.imei || 'Not detected')}</strong><span>S/N</span><strong>${htmlEscape(recordSerial(record) || 'Not detected')}</strong><span>PERSON</span><strong>${htmlEscape(personTitle(record, people))}</strong><span>STATUS</span><strong>${htmlEscape(reviewStatus(record))}</strong></div><div class="actions"><button class="view" type="button" data-imei="${htmlEscape(record.imei)}" onclick="copyImei(this)" ${record.imei ? '' : 'disabled'}>Copy IMEI</button><button class="view" type="button" data-imei="${htmlEscape(recordSerial(record))}" onclick="copyImei(this)" ${recordSerial(record) ? '' : 'disabled'}>Copy S/N</button><button class="view" type="button" onclick="viewPhoto(this)">View photo</button><button class="download" type="button" data-filename="${htmlEscape(name)}" onclick="savePhoto(this)">Download photo</button></div></div></article>`;
   });
-  const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RetailLens — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> RETAILLENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
+  const galleryHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI LENS — Photo library</title><style>*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e7eef7;font-family:system-ui,-apple-system,sans-serif}header{border-bottom:1px solid #27394d;background:#101d2d;padding:22px max(20px,calc((100vw - 1080px)/2))}.brand{font-weight:800;letter-spacing:.14em;font-size:13px}.brand span{color:#62dcb5}main{max-width:1120px;margin:auto;padding:34px 20px 48px}.eyebrow{font-size:10px;letter-spacing:.18em;color:#62dcb5;font-weight:800}h1{font-size:clamp(28px,5vw,42px);margin:10px 0}main>p{color:#a0b1c5;line-height:1.6;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(275px,1fr));gap:16px}.card{background:#111e2e;border:1px solid #2a3b50;border-radius:14px;overflow:hidden}.preview{display:block;height:205px;background:#091321;text-align:center;padding:12px}.preview img{width:100%;height:100%;object-fit:contain}.card-body{padding:17px}.record{font-size:10px;letter-spacing:.12em;color:#60d9b1;font-weight:800}h2{font-size:16px;margin:8px 0 15px}.details{display:grid;grid-template-columns:65px 1fr;gap:8px;font-size:12px;align-items:start}.details span{color:#8498af;font-size:10px;letter-spacing:.08em}.details strong{overflow-wrap:anywhere;font-weight:600}.actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}.actions button{cursor:pointer;border:0;flex:1;text-align:center;padding:11px 12px;border-radius:8px;font-size:12px;font-weight:750;text-decoration:none}.view{color:#d8e7f4;border:1px solid #3b5067;background:#1a2a3e}.download{background:#5bd5ad;color:#08251d}.foot{color:#8092a9;font-size:11px;margin-top:24px;line-height:1.5}@media(max-width:480px){main{padding:25px 15px}.grid{grid-template-columns:1fr}.preview{height:230px}.actions button{cursor:pointer;border:0;min-width:130px}}dialog{max-width:95vw;max-height:95vh;border:1px solid #3b5067;border-radius:12px;background:#101d2d;color:white}dialog::backdrop{background:#000c}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin:12px 0 0;padding:10px 18px;border:0;border-radius:8px;cursor:pointer}.grid{display:flex;flex-direction:column;gap:8px}.card{border-radius:10px}.card .preview{display:none}.card-body{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:4px;align-items:center;padding:12px 16px}.card-body .record,.card-body h2,.card-body .details{grid-column:1}.card-body h2{margin:0;font-size:15px}.card-body .details{grid-template-columns:48px minmax(0,1fr);gap:4px;font-size:12px}.card-body .actions{grid-column:2;grid-row:1 / 4;margin:0;justify-content:flex-end}.card-body .actions button{flex:none;min-width:100px;padding:10px}.card-body .actions button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.card-body{display:block}.card-body h2{margin:4px 0 8px}.card-body .actions{margin-top:12px;justify-content:flex-start}.card-body .actions button{flex:1;min-width:95px;padding:10px 6px}}dialog{position:fixed;inset:0;margin:auto;padding:48px 16px 16px}dialog .dialog-close{position:absolute;right:8px;top:3px;margin:0;width:40px;height:40px;padding:0;background:transparent;color:#fff;font-size:30px;line-height:1}</style></head><body><header><div class="brand"><span>▣</span> AI LENS</div></header><main><div class="eyebrow">OFFLINE PHOTO LIBRARY</div><h1>Device list</h1><p>${rows.length} record(s) · Copy an IMEI, view a picture, or download a photo.</p><section class="grid">${photoItems.join('')}</section><p class="foot">Photos are embedded in this page. Original files are also available separately.</p></main><dialog id="viewer" onclick="closePhotoOnBackdrop(event)"><button type="button" class="dialog-close" aria-label="Close photo" onclick="document.getElementById('viewer').close()">×</button><img alt="Full-size photo"><button type="button" onclick="document.getElementById('viewer').close()">Close</button></dialog><script>async function copyImei(button){var value=button.dataset.imei;if(!value)return;var copied=false;if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(value);copied=true}catch(error){}}if(!copied){var field=document.createElement('textarea');field.value=value;field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.focus();field.select();field.setSelectionRange(0,value.length);try{copied=document.execCommand('copy')}catch(error){}field.remove()}button.textContent=copied?'Copied!':'Copy failed — try again'}function closePhotoOnBackdrop(event){var dialog=event.currentTarget;var rect=dialog.getBoundingClientRect();if(event.target===dialog&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom))dialog.close()}function viewPhoto(button){var dialog=document.getElementById('viewer');dialog.querySelector('img').src=button.closest('article').querySelector('img').src;dialog.showModal()}function savePhoto(button){var link=document.createElement('a');link.href=button.closest('article').querySelector('img').src;link.download=button.dataset.filename;document.body.appendChild(link);link.click();link.remove()}</script></body></html>`;
   return makeStableGalleryHtml(galleryHtml);
 }
 
@@ -1305,6 +1316,7 @@ function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose
   onDeletePhoto?: (id: string) => void;
   onFinished?: (edited: number, unchanged: number) => void;
 }) {
+  const processing=useProcessingOptions();
   const [stage, setStage] = useState<'draw' | 'results'>('draw');
   const [plans, setPlans] = useState<Record<string, Box[]>>(initialPlans || {});
   const [groups, setGroups] = useState<CropGroup[]>([]);
@@ -1315,8 +1327,9 @@ function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose
   // The reader (about 10 MB of engine and language data) is started as soon as the editor opens, while you draw the boxes,
   // so Save all does not start with a long 'Preparing…'. One shared start-up, whoever asks first.
   const workerRef = useRef<Promise<Awaited<ReturnType<typeof createWorker>>> | null>(null);
-  useEffect(() => { workerRef.current ||= newOcrWorker(); workerRef.current.catch(() => { workerRef.current = null; }); return () => { void workerRef.current?.then(w => w.terminate()).catch(() => undefined); workerRef.current = null; }; }, []);
-  const worker = () => (workerRef.current ||= newOcrWorker());
+  useEffect(() => { if(processing.preloadReader){workerRef.current ||= newOcrWorker(); workerRef.current.catch(() => { workerRef.current = null; });} return () => { void workerRef.current?.then(w => w.terminate()).catch(() => undefined); workerRef.current = null; }; }, []);
+  const worker = () => {if(!workerRef.current){const pending=newOcrWorker();workerRef.current=pending;void pending.catch(()=>{if(workerRef.current===pending)workerRef.current=null;});}return workerRef.current;};
+  const cancelDetection=()=>{const pending=workerRef.current;workerRef.current=null;void pending?.then(w=>w.terminate()).catch(()=>undefined);};
   const asDraft = (list: StudioPlan[]) => list.map(plan => ({ recordId: plan.id, boxes: plan.boxes }));
   const discard = () => { clearDraft(localStorage); onClose(); };
 
@@ -1343,8 +1356,8 @@ function CropFlow({ items, initialPlans, startIndex, knownTacs, onApply, onClose
   return <CropStudio items={items} initialPlans={plans} startIndex={startIndex} progress={progress} notice={notice}
     title={steps ? 'Bulk edit photos' : items.length > 1 ? 'Bulk crop' : 'Crop / edit photo'} steps={steps} onFinished={onFinished} onDeletePhoto={onDeletePhoto}
     onEditPhoto={onEditPhoto && (async (id, source, edit) => { const result = await onEditPhoto(id, source, edit); if (result) turned.current[id] = result.source; return result; })}
-    detect={async source => ({ ...(await autoDetectBoxes(await worker(), source)) })}
-    onSaveAll={list => void process(list)} onQueue={onQueue} background={background}
+    onCancelDetect={cancelDetection} detect={async source => ({ ...(await autoDetectBoxes(await worker(), source)) })}
+    onSaveAll={list => void process(list)} onQueue={onQueue} background={background || processing.backgroundSingleCrop}
     onAutosave={(list, index) => { writeDraft(localStorage, asDraft(list), index); }}
     onSaveLater={(list, index) => { writeDraft(localStorage, asDraft(list), index); onLater(list.reduce((sum, plan) => sum + plan.boxes.length, 0), list.filter(plan => plan.boxes.length).length); }}
     onClose={onClose} onDiscard={discard} />;
@@ -1470,7 +1483,7 @@ async function createInventoryWorkbook(
   const Workbook = ExcelJS.Workbook || ExcelJS.default?.Workbook;
   if (!Workbook) throw new Error('The Excel exporter could not load. Please reload the app and retry.');
   const workbook = new Workbook();
-  workbook.creator = 'RetailLens';
+  workbook.creator = 'AI LENS';
   workbook.created = new Date();
 
   const sheets = new Set<string>();
@@ -1663,7 +1676,7 @@ async function createImeiPhotoFiles(rows: RecordItem[], webLinks = true): Promis
   const Workbook = ExcelJS.Workbook || ExcelJS.default?.Workbook;
   if (!Workbook) throw new Error('The Excel exporter could not load. Please reload the app and retry.');
   const workbook = new Workbook();
-  workbook.creator = 'RetailLens';
+  workbook.creator = 'AI LENS';
   const sheet = workbook.addWorksheet('IMEIs');
   sheet.columns = [
     { header: 'IMEI 1', key: 'imei1', width: 20 },
@@ -1796,7 +1809,7 @@ async function createPhotoFolder(token: string) {
   const response = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: `RetailLens photos ${new Date().toISOString().slice(0, 10)}`, mimeType: 'application/vnd.google-apps.folder' })
+    body: JSON.stringify({ name: `AI LENS photos ${new Date().toISOString().slice(0, 10)}`, mimeType: 'application/vnd.google-apps.folder' })
   });
   if (!response.ok) throw new Error(await response.text());
   const folder = await response.json();
@@ -1816,7 +1829,7 @@ async function createWordReport(
   } = await import('docx');
   const children: any[] = [
     new Paragraph({
-      text: `RetailLens inventory — ${new Date().toLocaleDateString()}`,
+      text: `AI LENS inventory — ${new Date().toLocaleDateString()}`,
       heading: HeadingLevel.TITLE
     })
   ];
@@ -1904,6 +1917,11 @@ function safeFileName(s: string) {
 }
 
 export default function App() {
+  const processingOptions=useProcessingOptions();
+  const workflowOptions=useWorkflowOptions();
+  useTypingPriority();
+  const manualEditing=useEditingActivity();
+  useEffect(()=>{(window as Window&{AndroidScanner?:{setProcessingOptions?:(retry:boolean)=>void}}).AndroidScanner?.setProcessingOptions?.(processingOptions.autoRetry);},[processingOptions.autoRetry]);
   const [collapsedPanels, setCollapsedPanels] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-collapsed-panels') || '[]'); } catch { return []; } });
   useEffect(() => { localStorage.setItem('imei-collapsed-panels', JSON.stringify(collapsedPanels)); }, [collapsedPanels]);
   function togglePanel(id: string) { setCollapsedPanels(old => old.includes(id) ? old.filter(key => key !== id) : [...old, id]); }
@@ -2032,7 +2050,7 @@ export default function App() {
   const [deletePersonId, setDeletePersonId] = useState('');
   const [peopleOpen, setPeopleOpen] = useState(true);
   const [peopleQuery, setPeopleQuery] = useState('');
-  // RetailLens data (catalog edits, targets, sales, allocations, reports): kept apart from the scan records, see src/retail/.
+  // AI LENS data (catalog edits, targets, sales, allocations, reports): kept apart from the scan records, see src/retail/.
   const [retail, setRetail] = useState<RetailState>(emptyState);
   const retailRef = useRef(retail);
   const [retailLoaded, setRetailLoaded] = useState(false);
@@ -2050,20 +2068,21 @@ export default function App() {
       setRetailError('');
       if (next !== saved) persistRetail(next);
     }).catch(error => {
-      recordDiagnostic('retail-load-failed',error); console.error('Could not load the RetailLens data', error);
+      recordDiagnostic('retail-load-failed',error); console.error('Could not load the AI LENS data', error);
       if (alive) setRetailError('Retail data could not be opened. Try again before editing targets, stock or reports.');
     });
     return () => { alive = false; };
   }, [retailLoadAttempt]);
   function persistRetail(next: RetailState, before?: RetailState, why = 'change') {
-    retailSaveChain.current = retailSaveChain.current.catch(() => {}).then(() => saveRetail(next, before, why)).then(() => {
+    retailSaveChain.current = retailSaveChain.current.catch(() => {}).then(async () => {const finish=why?beginDiagnosticOperation('retail-write'):undefined;try{await saveRetail(next,before,why);finish?.();}catch(error){finish?.(error);throw error;}}).then(() => {
       setRetailError('');
     }).catch(error => {
-      recordDiagnostic('retail-save-failed',error); console.error('Could not save the RetailLens data', error);
+      recordDiagnostic('retail-save-failed',error); console.error('Could not save the AI LENS data', error);
       setRetailError('Retail changes could not be saved on this device. Try again or download a backup in More > Backup and data before refreshing.');
     });
   }
-  /** Saves RetailLens data. `why` keeps the state before the change as an Undo point; '' = a trivial change (no snapshot). */
+  useEffect(()=>{if(!retailLoaded||workflowOptions.giving==='existing')return;const state=retailRef.current,mode=workflowOptions.giving==='auto'?'auto':undefined;if(state.giveMode!==mode)changeRetail({...state,giveMode:mode},'global giving policy');},[retailLoaded,workflowOptions.giving]);
+  /** Saves AI LENS data. `why` keeps the state before the change as an Undo point; '' = a trivial change (no snapshot). */
   function changeRetail(next: RetailState, why: string) {
     if (!retailLoaded) return;
     const before = retailRef.current;
@@ -2076,11 +2095,12 @@ export default function App() {
   const [recordsTab, setRecordsTab] = useState<'records' | 'models' | 'share' | 'people' | 'retail'>('records');
   /** Detailed mode shows one section at a time, chosen from the bar at the bottom of the screen. */
   const [mainView, setMainView] = useState<'scan' | 'results' | 'export'>('results');
-  /** Which RetailLens section is open (Home = today). Home, Report and Targets are on the bottom bar; the rest are under the ⋯ More menu. */
+  /** Which AI LENS section is open (Home = today). Home, Report and Targets are on the bottom bar; the rest are under the ⋯ More menu. */
   const [retailSub, setRetailSub] = useState<RetailSub>('today');
   const [draftReportDate, setDraftReportDate] = useState<string | undefined>();
   const [reportCategory,setReportCategory]=useState<'phones'|'accessories'>('phones');
   const [reportAvailability, setReportAvailability] = useState(false);
+  const [reportIMEICalendar,setReportIMEICalendar]=useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   useBackLayer(moreOpen, () => setMoreOpen(false), 'more');
   type View = 'scan' | 'records' | 'models' | 'share' | 'people' | 'retail' | 'export' | 'home' | 'report' | 'targets';
@@ -2100,7 +2120,7 @@ export default function App() {
   const viewInfo = (() => {
     const back = recordsTab !== 'records' && !(recordsTab === 'retail' && ['today', 'report', 'targets'].includes(retailSub));
     const retailTitles: Record<RetailSub, string> = { today: 'Home', report: 'Report', targets: 'Targets', gives: 'Give & share', plan: 'Give & share', segments: 'Models & segments', catalog: 'Models & segments', data: 'Backup and data' };
-    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' ? 'Give & share' : retailTitles[retailSub];
+    const title = recordsTab === 'records' ? 'Phones' : recordsTab === 'people' ? 'People' : recordsTab === 'models' || recordsTab === 'share' ? 'Give & share' : retailTitles[retailSub];
     const unassigned = records.filter(r => r.personId === UNASSIGNED).length;
     const sub = recordsTab === 'records' ? (records.length ? `${records.length} scanned${unassigned ? ` · ${unassigned} unassigned` : ''}` : 'Nothing scanned yet')
       : recordsTab === 'retail' && retailSub === 'today' ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : '';
@@ -2138,7 +2158,7 @@ export default function App() {
   /** Unconfirmed amounts: model -> person -> how many. Only models you changed appear here. */
   const [giveDraft, setGiveDraft] = useState<Record<string, Record<string, number>>>({});
   const [personUndo, setPersonUndo] = useState<{ people: PersonGroup[]; records: RecordItem[]; text: string; activePersonId: string } | null>(null);
-  useEffect(() => { if (!personUndo) return; const timer = setTimeout(() => setPersonUndo(null), 12000); return () => clearTimeout(timer); }, [personUndo]);
+  // The person-delete popup (SwipeUndoBar) leaves by itself after 2 seconds, or when swiped away.
   // People whose phones were all moved away (so their empty view can say "All IMEIs moved."); kept across reloads.
   const [emptiedPeople, setEmptiedPeople] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('imei-lens-emptied-people') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('imei-lens-emptied-people', JSON.stringify(emptiedPeople)); } catch { /* storage full: the message just falls back */ } }, [emptiedPeople]);
@@ -2159,6 +2179,12 @@ export default function App() {
     if (catalog.some((item, i) => item !== before.catalog[i])) changeRetail({ ...before, catalog }, 'model names');
   }
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [assistantPlan,setAssistantPlan]=useState<PlanRequest|null>(null);
+  useBackLayer(!!assistantPlan,()=>setAssistantPlan(null),'assistant-plan');
+  const [assistantSettingsMode,setAssistantSettingsMode]=useState(false);
+  const [assistantOpen,setAssistantOpen]=useState(false),[assistantPrompt,setAssistantPrompt]=useState<string>();
+  useBackLayer(assistantOpen,()=>setAssistantOpen(false),'global-assistant');
+  useEffect(()=>{const reuse=(event:Event)=>{const text=(event as CustomEvent).detail;if(typeof text==='string'){setAssistantPrompt(text.slice(0,1000));setAssistantOpen(true);}};window.addEventListener(ASSISTANT_REUSE,reuse);return()=>window.removeEventListener(ASSISTANT_REUSE,reuse);},[]);
   const [modelSourcesOpen, setModelSourcesOpen] = useState(false);
   useBackLayer(settingsOpen, () => setSettingsOpen(false), 'settings');
   useEffect(() => { void loadSamsungCatalog().then(() => setCatalogEntries(readCatalogEntries())).catch(() => {}); }, []);
@@ -2283,7 +2309,7 @@ export default function App() {
     for (const row of records) importedAndroidIds.current.add(row.id);
     let cancelled = false;
     async function refreshAndroid() {
-      if (!androidBridge || importingAndroid.current || cancelled) return;
+      if (!androidBridge || importingAndroid.current || cancelled || hasManualEditor()) return;
       importingAndroid.current = true;
       let more = false;
       try {
@@ -2481,7 +2507,7 @@ export default function App() {
   useEffect(() => {
     if (!toast) return;
 
-    const t = setTimeout(() => setToast(''), 3200);
+    const t = setTimeout(() => setToast(''), 2000);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -3132,18 +3158,22 @@ export default function App() {
     setRecords(old => old.map(row => wanted.has(row.id) ? { ...row, model } : row));
     setToast(`Model set on ${ids.length} phone${ids.length === 1 ? '' : 's'}.`);
   }
-  // What RetailLens sees of the scan records (numbers and names only, never pictures), and the two things it may change: owners and nothing else.
+  // What AI LENS sees of the scan records (numbers and names only, never pictures), and the two things it may change: owners and nothing else.
   const retailRecords: RetailRecord[] = useMemo(() => records.map(r => ({ id: r.id, imei: r.imei, model: r.model, personId: r.personId, raw: r.raw, duplicate: r.duplicate, name: r.name, createdAt: r.createdAt, imei2: r.imei2, serial: recordSerial(r), needsReview: !r.checked && reviewStatus(r).includes('Needs review') })), [records]); // eslint-disable-line react-hooks/exhaustive-deps
   const retailPeople = personGroups.map(p => ({ id: p.id, name: personName(p) }));
   /** The colours read from the labels of scanned phones, by model code: they are offered in each phone's colour list. */
   const colourSeen = useMemo(() => { const out: Record<string, string[]> = {}; for (const r of retailRecords) { const code = modelCode4(r.model); const c = retailCanonColour(retailVariantOf(retail, r).color); if (code && c) (out[code] ||= []).push(c); } return out; }, [retail, retailRecords]);
   /** Report lines that need a look (shown as the badge on the Report button). */
   const reportToCheck = useMemo(() => { if (!retail.report) return 0; const s = reconcileReport(retail, retail.report, retailRecords).summary; return s.differ + s.unknown; }, [retail, retailRecords]);
+  useEffect(()=>{
+    if(!retailLoaded||!inventoryLoaded||!inventoryWritable.current||workflowOptions.afterUpload==='ask'||manualEditing||busy||androidJob?.status==='queued'||androidJob?.status==='processing'||!retail.pendingUploadIds?.length)return;
+    const timer=setTimeout(()=>{if(hasManualEditor())return;const state=retailRef.current,meta={...state.recordMeta},assignAutomatically=workflowOptions.afterUpload==='available'&&workflowOptions.giving==='auto',pending=new Set(state.pendingUploadIds||[]);let available=0,held=0;for(const row of recordsLive.current){if(!pending.has(row.id)||meta[row.id]?.status!=='held')continue;if(workflowOptions.afterUpload==='available'&&(assignAutomatically||!row.personId||personAvailability(state,row.personId,dateKey())==='working')){const{status:_,...rest}=meta[row.id];meta[row.id]=rest;available++;}else held++;}if(assignAutomatically)setRecords(old=>old.map(row=>pending.has(row.id)&&!meta[row.id]?.status?{...row,personId:UNASSIGNED}:row));changeRetail(withAudit({...state,recordMeta:meta,pendingUploadIds:[]},'automatic upload disposition',`${available} made available; ${held} kept Stored. Unavailable owners were not overridden. No sales confirmed.`),'automatic upload action');},300);return()=>clearTimeout(timer);
+  },[retailLoaded,inventoryLoaded,retail.pendingUploadIds,workflowOptions.afterUpload,workflowOptions.giving,manualEditing,busy,androidJob?.status]);
   // Numbers that follow the phones by themselves: a phone marked Sold adds to its owner's Sold (targets) and to the report's Sold; scanned phones and
   // phones leaving the stock change the report's colour counts and stock. Taking a sale back undoes it. See retail/soldsync.ts and retail/reportsync.ts.
   const autoGiveSeen = useRef('');
   useEffect(() => {
-    if (!retailLoaded || !inventoryLoaded || !inventoryWritable.current) return;
+    if (!retailLoaded || !inventoryLoaded || !inventoryWritable.current || (processingOptions.pauseWhileEditing && manualEditing)) return;
     // phones that appear while Store only is on are kept as Held
     if (!seenIds.current) seenIds.current = new Set(retailRecords.map(r => r.id));
     else {
@@ -3180,7 +3210,7 @@ export default function App() {
     if (scan.created) bits.push(`${scan.created} new report line${scan.created === 1 ? '' : 's'}`);
     if (given) bits.push(`${given} phone${given === 1 ? '' : 's'} given automatically (Give and share > History to undo)`);
     if (bits.length) setToast(bits.join(', ') + '.');
-  }, [retail, retailRecords, retailLoaded, inventoryLoaded, androidJob, calendarDay, availabilityTime]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [retail, retailRecords, retailLoaded, inventoryLoaded, androidJob, calendarDay, availabilityTime, manualEditing, processingOptions.pauseWhileEditing]); // eslint-disable-line react-hooks/exhaustive-deps
   const detailedNav = [['home', 'Home', House, 0], ['scan', 'Scan', ScanLine, 0], ['records', 'Phones', Smartphone, 0], ['report', 'Report', ClipboardList, reportToCheck], ['targets', 'Targets', Target, 0], ['export', 'Export', Download, 0]] as const;
   const simpleNav = [['scan', 'Scan', ScanLine], ['records', 'Phones', Smartphone], ['export', 'Send', Share2]] as const;
   function authorizeTransfers(changes: { id: string; personId: string }[], automatic = false) {
@@ -3743,7 +3773,7 @@ export default function App() {
     if (!laptopJobId || !laptopKey.trim() || !inventoryLoaded) return;
     let cancelled = false;
     async function poll() {
-      if (importingLaptop.current || cancelled) return;
+      if (importingLaptop.current || cancelled || hasManualEditor()) return;
       try {
         const response = await laptopRequest(`/api/jobs/${laptopJobId}`);
         const { job } = await response.json();
@@ -3828,6 +3858,7 @@ export default function App() {
       let nextNumber = records.reduce((max, record) => Math.max(max, record.number), 2) + 1;
 
       for (let i = 0; i < scanFiles.length; i++) {
+        await waitForManualIdle();
         if (stopScanRequested.current) break;
         let file = scanFiles[i];
         const beforeCount = newRows.length;
@@ -4029,6 +4060,7 @@ export default function App() {
           await saveOriginalSource(pictureId, await shrinkOriginal(file));
         }
         if ((i + 1) % 20 === 0) {
+          await waitForManualIdle();
           const completed = newRows;
           newRows = [];
           addedCount += completed.length;
@@ -4053,6 +4085,7 @@ export default function App() {
       worker = null;
       if (helper) { await helper.terminate(); helper = null; }
 
+      await waitForManualIdle();
       addedCount += newRows.length;
       needsReviewCount += newRows.filter(row => row.status !== 'Valid' || row.cropNeedsReview).length;
       if (newRows.length) setRecords(old => markDuplicateRecords([...old, ...newRows]));
@@ -4218,8 +4251,8 @@ export default function App() {
     if (cropQueueRef.current.some(item => item.recordId === id)) changeQueue(removeItem(cropQueueRef.current, id));
     if (selected?.id === id) { setCropEditorOpen(false); const next = reviewRecords[reviewIndex + 1] || reviewRecords[reviewIndex - 1]; setSelected(next && next.id !== id ? next : null); }
     setSplitUndo(old => {
-      const ids = old && old.text.includes('deleted from RetailLens') ? [...new Set([...old.ids, id])] : [id];
-      return { ids, text: `${ids.length} photo${ids.length === 1 ? '' : 's'} deleted from RetailLens and kept in the archive. Your phone gallery was not touched.` };
+      const ids = old && old.text.includes('deleted from AI LENS') ? [...new Set([...old.ids, id])] : [id];
+      return { ids, text: `${ids.length} photo${ids.length === 1 ? '' : 's'} deleted from AI LENS and kept in the archive. Your phone gallery was not touched.` };
     });
   }
 
@@ -4238,14 +4271,16 @@ export default function App() {
    * when at least two crops were made and read; every crop that is not certain is flagged for review.
    */
   const autoSplitBusy = useRef(false);
-  async function autoSplitRecords(targets: RecordItem[], announce = true): Promise<number> {
+  async function autoSplitRecords(targets: RecordItem[], announce = true, automatic = false): Promise<number> {
     if (autoSplitBusy.current || !targets.length) return 0;
     autoSplitBusy.current = true;
     let w: Awaited<ReturnType<typeof createWorker>> | null = null;
     const groups: CropGroup[] = [];
+    const revisions=new Map(targets.map(r=>[r.id,manualEditRevision(r.id)]));
     try {
       w = await newOcrWorker();
       for (const [position, record] of targets.entries()) {
+        if(automatic)await waitForManualIdle();
         if (announce) setToast(`Looking closer at photo ${position + 1} of ${targets.length}…`);
         const source = record.originalDataUrl || (androidBridge?.sourceImage ? androidBridge.sourceImage(record.id) : '') || record.dataUrl;
         if (!source) continue;
@@ -4259,9 +4294,10 @@ export default function App() {
       }
       // Only confidently read results are accepted automatically (every crop has a checksum-valid IMEI and nothing flagged);
       // anything else stays as it is and is offered for review. The originals of accepted splits are archived and can be restored.
-      const confident = groups.filter(group => group.crops.every(crop => !crop.review && luhnValid(crop.imei) && !!exportModel(crop.model)));
+      if(automatic)await waitForManualIdle();
+      const confident = groups.filter(group => (!automatic || recordsLive.current.find(r=>r.id===group.id)===targets.find(r=>r.id===group.id) && revisions.get(group.id)===manualEditRevision(group.id) && !isPhotoBeingEdited(group.id)) && group.crops.every(crop => !crop.review && luhnValid(crop.imei) && !!exportModel(crop.model)));
       setSplitSuggestions(old => [...new Set([...old, ...groups.filter(group => !confident.includes(group)).map(group => group.id), ...targets.filter(t => !groups.some(g => g.id === t.id)).map(t => t.id)])]);
-      if (confident.length) applyCropGroups(confident, false, false, 'auto-split');
+      if (confident.length) applyRef.current(confident, false, automatic, 'auto-split');
       else if (announce) setToast('Could not separate the products with confidence. They are listed for review; nothing was changed.');
       return confident.length;
     } finally { autoSplitBusy.current = false; if (w) await w.terminate(); }
@@ -4274,7 +4310,7 @@ export default function App() {
   });
   // Background (phone) scans: photos it flagged as several products in one record get the web pipeline once, automatically.
   useEffect(() => {
-    if (!androidBridge || androidJob?.status !== 'completed' || busy) return;
+    if (!processingOptions.autoSplit || backgroundDeferred() || !androidBridge || androidJob?.status !== 'completed' || busy) return;
     const flagged = records.filter(r => r.cropNeedsReview && (r.deviceCount || 0) > 1 && !autoSplitTried.current.has(r.id));
     // Records that existed before this version are never changed automatically; they are only listed for review.
     const targets = flagged.filter(r => r.createdAt >= protectBefore);
@@ -4282,8 +4318,8 @@ export default function App() {
     if (kept.length) { for (const id of kept) autoSplitTried.current.add(id); setSplitSuggestions(old => [...new Set([...old, ...kept])]); }
     if (!targets.length) return;
     for (const r of targets) autoSplitTried.current.add(r.id);
-    void autoSplitRecords(targets.slice(0, 20));
-  }, [androidJob?.status, records, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+    void autoSplitRecords(targets.slice(0, 20),false,true);
+  }, [androidJob?.status, records, busy, manualEditing, processingOptions]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * Replace the cropped photos' records with one record per crop. The original photo is released
    * (its stored copy goes when nothing refers to it any more) and the crops keep the person of the original.
@@ -4375,22 +4411,29 @@ export default function App() {
   const autoRetried = useRef<Set<string> | null>(null);
   autoRetried.current ||= new Set((() => { try { const v = JSON.parse(localStorage.getItem(AUTO_RETRY_KEY) || '[]'); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []; } catch { return []; } })());
   const scanIdsAtStart = useRef<Set<string> | null>(null);
+  const savedReviewIds = useRef<Set<string>|null>(null);
+  const [autoCheckPending,setAutoCheckPending]=useState(false);
   const scanningAny = busy || androidJob?.status === 'queued' || androidJob?.status === 'processing';
   const scanningAnyRef = useRef(false);
   scanningAnyRef.current = scanningAny;
   // Stage 2 (this page's own reader, after the phone's reader had its one retry on Android): what is still unread. A moment after the scan and the
   // phone's retry have ended (and the last results were imported), so the retry never starts between the two.
   useEffect(() => {
-    if (scanningAny || !inventoryLoaded) return;
+    if ((!processingOptions.autoRetry&&!processingOptions.autoReview) || backgroundDeferred() || scanningAny || !inventoryLoaded || !inventoryWritable.current){setAutoCheckPending(false);return;}
+    savedReviewIds.current ||= new Set(records.map(row=>row.id));
+    const beforeScan=scanIdsAtStart.current;
+    if(!processingOptions.autoReview&&!beforeScan){setAutoCheckPending(false);return;}
+    setAutoCheckPending(true);
     const timer = window.setTimeout(() => {
       const before = scanIdsAtStart.current, tried = autoRetried.current!;
-      if (scanningAnyRef.current || !before) return;
+      if (scanningAnyRef.current){setAutoCheckPending(false);return;}
       const waiting = new Set(cropQueueRef.current.map(item => item.recordId));
       // Not retried: labels cut off by the photo edge (the number is not in the picture; a retake is the answer), phone records that only read IMEI 2
       // (never turned into IMEI 1), crops, confirmed records, photos the auto-split handles, and records from before this scan.
-      const targets = recordsLive.current.filter(row => !before.has(row.id) && !row.sourceRecordId && !row.checked && (!row.imei || row.cropNeedsReview)
+      const targets = recordsLive.current.filter(row => ((processingOptions.autoRetry&&before&&!before.has(row.id))||(processingOptions.autoReview&&savedReviewIds.current?.has(row.id))) && !row.sourceRecordId && !row.checked && (!row.imei || row.cropNeedsReview || isUnknownModel(row))
         && row.labelIssue !== 'cut-edge' && row.failReason !== 'cut-edge' && !imeiIsFallback(row) && !((row.deviceCount || 0) > 1) && !waiting.has(row.id) && !tried.has(row.id));
-      if (!targets.length) return;
+      if (!targets.length){setAutoCheckPending(false);return;}
+      setAutoCheckPending(false);
       for (const row of targets) tried.add(row.id);
       try { localStorage.setItem(AUTO_RETRY_KEY, JSON.stringify([...tried].slice(-3000))); } catch { /* storage full: they may be tried once more */ }
       const items = targets.map(row => newItem(row.id, [], row.name));
@@ -4400,7 +4443,7 @@ export default function App() {
       setToast(`${items.length} photo${items.length === 1 ? ' was' : 's were'} not read; trying again automatically in the background (find, turn, level, cut).`);
     }, 1200);
     return () => window.clearTimeout(timer);
-  }, [scanningAny, records, inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scanningAny, records, inventoryLoaded, manualEditing, processingOptions]); // eslint-disable-line react-hooks/exhaustive-deps
   // A new scan starts a new comparison. Its automatic retry (the same chain) keeps the one made at the start, so the records the first pass made still count as new.
   useEffect(() => { if (scanningAny && !androidJob?.retry) scanIdsAtStart.current = new Set(recordsLive.current.map(row => row.id)); }, [scanningAny, androidJob?.retry]);
   const inQueue = new Set(cropQueue.map(item => item.recordId));
@@ -4415,8 +4458,8 @@ export default function App() {
     if (waiting.length) { setCropQueue(waiting); setQueuePaused(true); setQueueStats({ total: waiting.length, done: 0, failed: waiting.filter(i => i.status === 'failed').length, startedAt: Date.now(), resumed: true }); }
   }, [inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const item = nextPending(cropQueue);
-    if (queuePaused || queueBusy.current || !item || !inventoryLoaded) return;
+    const item = nextPending(cropQueue.filter(item=>!isPhotoBeingEdited(item.recordId)));
+    if (backgroundDeferred() || queuePaused || queueBusy.current || !item || !inventoryLoaded || !inventoryWritable.current) return;
     queueBusy.current = true;
     setProcessingId(item.recordId);
     void (async () => {
@@ -4426,7 +4469,8 @@ export default function App() {
       const guard = createStallGuard(QUEUE_ITEM_LIMIT_MS, `This photo took longer than ${Math.round(QUEUE_ITEM_LIMIT_MS / 60000)} minutes, so it was set aside. Use Retry in the queue to try it again.`);
       try {
         await guard.race((async () => {
-        const record = records.find(row => row.id === item.recordId);
+        const record = recordsLive.current.find(row => row.id === item.recordId);
+        const editRevision=manualEditRevision(record?.id);
         if (!record) throw new Error('The photo is no longer in your records.');
         const settings = settingsRef.current, fast = settings.scanMode === 'fast', expected = settings.expectedProducts;
         const source = record.originalDataUrl || (androidBridge?.sourceImage ? androidBridge.sourceImage(record.id) : '') || record.dataUrl;
@@ -4436,7 +4480,7 @@ export default function App() {
         let whole = false;
         if (!boxes.length) {
           // One product and nothing to cut: that is a finished photo when it already has numbers; otherwise the whole photo is read once more.
-          if (record.imei || recordSerial(record)) {
+          if ((record.imei || recordSerial(record)) && !isUnknownModel(record)) {
             guard.check();
             changeLog(old => addLog(old, { originalId: record.id, name: record.name, recordIds: [record.id], at: new Date().toISOString(), note: 'One product: kept as it is.' }));
             return;
@@ -4449,6 +4493,9 @@ export default function App() {
         // The whole photo read again gave nothing new: keep the original as it is (it stays in Review).
         if (whole && !crops[0]?.imei && !serialReading(crops[0]?.raw || '').serial) throw new Error('No separate label was found in this photo.');
         guard.check(); // too late: the photo was already set aside, so its original must not be replaced now
+        guard.cancel();
+        await waitForManualIdle();
+        if(recordsLive.current.find(r=>r.id===record.id)!==record || (isPhotoBeingEdited(record.id) || manualEditRevision(record.id)!==editRevision))throw new Error('Manual editing took priority. Review this queued photo before retrying.');
         const made = applyRef.current([{ id: record.id, name: record.name, source, crops }], false, true, 'queue');
         replaced = true;
         changeLog(old => addLog(old, { originalId: record.id, name: record.name, recordIds: made?.get(record.id) || [], at: new Date().toISOString(), note: expected > 1 && boxes.length < expected ? `Found ${boxes.length} of ${expected} products.` : undefined }));
@@ -4470,7 +4517,7 @@ export default function App() {
         setCropQueue(old => { const rest = error ? markFailed(old, item.recordId, error) : removeItem(old, item.recordId); if (replaced) queueSaveNeeded.current = true; else writeQueue(localStorage, rest); return rest; });
       }
     })();
-  }, [cropQueue, queuePaused, inventoryLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cropQueue, queuePaused, inventoryLoaded, manualEditing, processingOptions]); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing left to read: release the reader's memory.
   useEffect(() => {
     if (nextPending(cropQueue) || queueBusy.current || !queueWorker.current) return;
@@ -4480,7 +4527,7 @@ export default function App() {
   useEffect(() => { if (!bulkCropOpen && !bulkDraft) bulkRowsRef.current = null; }, [bulkCropOpen, bulkDraft]);
   // While the queue runs, the phone shows a notification and keeps the app awake, so minimizing does not stop it.
   const queueCounts = queueCountsOf(cropQueue);
-  const queueRunning = queueCounts.pending > 0 && !queuePaused;
+  const queueRunning = queueCounts.pending > 0 && !queuePaused && !(processingOptions.pauseWhileEditing && manualEditing);
   useEffect(() => {
     androidBridge?.queueStatus?.(queueStats.done + queueStats.failed, queueStats.total, queueRunning);
   }, [queueRunning, queueStats.done, queueStats.failed, queueStats.total]);
@@ -4519,6 +4566,7 @@ export default function App() {
   const bulkGood = bulkRecords.filter(looksRight);
   const scanningNow = busy || androidJob?.status === 'queued' || androidJob?.status === 'processing';
   const [photoEditIds, setPhotoEditIds] = useState<string[] | null>(null);
+  useManualEdit(!!selected || bulkCropOpen || bulkOpen || bulkEditOpen || photoEditIds!==null,selected?.id||'');
   const photoEditRows = useRef<RecordItem[] | null>(null);
   /** Bulk edit photos: every record that needs a look, one photo at a time in the photo editor. */
   function openPhotoEdit() {
@@ -4901,25 +4949,27 @@ export default function App() {
     requestDelete(selectedRows);
   }
 
+  const assistantCtx:RetailCtx={openDiagnostics:()=>{setAssistantOpen(false);setModelSourcesOpen(false);setSettingsOpen(true);setTimeout(()=>document.querySelector('.settings-recovery')?.scrollIntoView({block:'start'}),200);},openAccessoryReport:()=>{setAssistantOpen(false);setSimpleView(false);setReportCategory('accessories');setReportAvailability(false);setDraftReportDate(undefined);setReportShareId(id=>id+1);openView('report');},openAvailability:()=>{setAssistantOpen(false);setSimpleView(false);setReportIMEICalendar(false);setReportCategory('phones');setDraftReportDate(undefined);setReportAvailability(true);setReportShareId(id=>id+1);openView('report');},readOnly:!inventoryLoaded||!inventoryWritable.current||!retailLoaded||!!retailError,openAssistant:()=>setAssistantOpen(true),addPhones:rows=>{if(!inventoryWritable.current||!rows.length||rows.some(r=>!luhnValid(r.imei)||recordsLive.current.some(old=>old.id===r.id||old.imei===r.imei||old.imei2===r.imei))||new Set(rows.map(r=>r.imei)).size!==rows.length)return false;const placeholder='data:image/svg+xml;charset=utf-8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#122131"/><text x="300" y="190" text-anchor="middle" fill="#a8bacb" font-size="22">Manual stock entry</text><text x="300" y="230" text-anchor="middle" fill="#a8bacb" font-size="16">No label photo attached</text></svg>');setRecords(old=>markDuplicateRecords([...old,...rows.map((r,i)=>({...r,pictureId:`MANUAL-${r.id}`,number:Math.max(0,...old.map(x=>x.number))+i+1,name:'Manual stock entry',dataUrl:placeholder,checked:true,brand:'generic',status:'Valid' as const,duplicate:false,createdAt:new Date().toISOString(),raw:'Manually confirmed stock; no label photo.'}))]));return true;},archivePhones:ids=>{if(!inventoryWritable.current||ids.some(id=>!recordsLive.current.some(r=>r.id===id)))return false;ids.forEach(archivePhoto);return true;},state:retail,latest:()=>retailRef.current,change:changeRetail,records:retailRecords,people:retailPeople,today:todayKey,assign:assignOwners,readImage:readScreenshotText,counts:{scanning:androidJob&&(androidJob.status==='queued'||androidJob.status==='processing')?Math.max(0,androidJob.count-androidJob.completed):0,needsReview:needLookCount},notify:setToast,download:saveDirectFile,share:text=>{void shareOrCopyText(text,'Assistant result');},openRecords:filter=>{setAssistantOpen(false);jumpTo('records',filter);},openPlan:()=>{setAssistantOpen(false);setSimpleView(false);openMore('plan');},openHome:()=>{setAssistantOpen(false);setSimpleView(false);openView('home');},openSettings:()=>{setAssistantOpen(false);setModelSourcesOpen(false);setSettingsOpen(true);},openPeople:()=>{setAssistantOpen(false);setSimpleView(false);openMore('people');},openTargets:()=>{setAssistantOpen(false);setSimpleView(false);openView('targets');},openScan:()=>{setAssistantOpen(false);openView('scan');},openReport:()=>{setAssistantOpen(false);setSimpleView(false);setReportAvailability(false);setReportCategory('phones');openView('report');},openDatedReport:date=>{setAssistantOpen(false);setSimpleView(false);setReportAvailability(false);setReportCategory('phones');setDraftReportDate(date);setReportShareId(id=>id+1);openView('report');}};
+  useEffect(()=>{if(retailLoaded)resumeAssistantFiles(assistantCtx);},[retailLoaded,retail.assistantFiles]);
   return (
-    <div className="app has-bottom-nav">
+    <div className="app has-bottom-nav">{retailLoaded&&inventoryLoaded&&<><AutomaticForecastEngine {...assistantCtx}/><RoutineLearningEngine {...assistantCtx}/></>}
       <header className="topbar">
         <div className="brand">
           <div className="brandmark">
             <ScanLine size={22} />
           </div>
           <div>
-            <strong>RETAILLENS</strong>
+            <strong>AI LENS</strong>
             <span>SCAN. SELL. TRACK. ACHIEVE.</span>
           </div>
         </div>
 
-        <div className="top-actions">
+        <div className="top-actions"><button type="button" className="settings-btn assistant-launch" aria-label="Open assistant" title="Assistant · ask or review" disabled={!retailLoaded||!inventoryLoaded} onClick={()=>{setAssistantSettingsMode(false);setAssistantOpen(true);}}>✦</button>
           <div className="mode-toggle" role="group" aria-label="Interface mode">
             <button aria-pressed={simpleView} onClick={() => setSimpleView(true)}>Simple</button>
             <button aria-pressed={!simpleView} onClick={() => setSimpleView(false)}>Detailed</button>
           </div>
-          <button type="button" className="settings-btn reset-all-btn" aria-label="Reset: delete all scanned IMEIs" title="Reset: delete all scanned IMEIs" onClick={() => setResetOpen(true)}><Trash2 size={18} /></button>
+
           {!simpleView && <button type="button" className="settings-btn" aria-label="More" title="More" onClick={() => setMoreOpen(true)}><Ellipsis size={18} /></button>}
           <button type="button" className="settings-btn" aria-label="Settings" title="Settings" onClick={() => { setModelSourcesOpen(false); setSettingsOpen(true); }}><Settings size={18} /></button>
           <span className="local-pill">
@@ -4928,7 +4978,9 @@ export default function App() {
         </div>
       </header>
 
-      {settingsOpen && <SettingsPanel onOpenLocalAI={() => { setSettingsOpen(false); setSimpleView(false); openMore('plan'); setTimeout(() => window.dispatchEvent(new Event('retaillens-local-ai')), 100); }} modelsOnly={modelSourcesOpen} onOpenModelManager={() => { setSettingsOpen(false); openMore('segments'); }} onOpenBackup={() => { setSettingsOpen(false); openMore('data'); }} onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={applyCustomModelNames} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
+      {assistantPlan&&<PlanEditor ctx={assistantCtx} initial={assistantPlan} close={()=>setAssistantPlan(null)}/>}
+      {assistantOpen&&retailLoaded&&<div className="modal-backdrop assistant-backdrop"><section className="modal assistant-panel" role="dialog" aria-modal="true" aria-label="Assistant"><div className="modal-head"><h2>Assistant</h2><HelpButton topic="AI assistant: request, review and Undo"/><button className="subtle-btn" onClick={()=>setAssistantOpen(false)}>Close assistant</button></div><p className="settings-help">Ask from any tab. Review the proposed output before approval; receipts and Undo remain in Home history.</p><LocalAI summary={!assistantSettingsMode&&workflowOptions.assistantIconMode==='summary'} ctx={assistantCtx} initialPrompt={assistantPrompt} onDraft={draft=>{const personId=draft.personId||retail.settings.myPersonId||retailPeople[0]?.id||'';setAssistantOpen(false);setSimpleView(false);openView('home');setAssistantPlan({...automaticSuggestion(retail,retailRecords,personId,todayKey,readWorkflowOptions()).request,...draft});}}/></section></div>}
+      {settingsOpen && <SettingsPanel onResetScans={()=>{setSettingsOpen(false);setResetOpen(true);}} onOpenLocalAI={() => {setSettingsOpen(false);setAssistantSettingsMode(true);setAssistantOpen(true);}} modelsOnly={modelSourcesOpen} onOpenModelManager={() => { setSettingsOpen(false); openMore('segments'); }} onOpenBackup={() => { setSettingsOpen(false); openMore('data'); }} onChangeCode={changeModelCode} scannedModels={records.map(row => row.model)} catalogEntries={catalogEntries} customModels={customModels} onModelsChange={applyCustomModelNames} onCatalogChange={() => setCatalogEntries(readCatalogEntries())} onDownload={(blob, filename) => saveDirectFile(blob, filename)} onClose={() => setSettingsOpen(false)} />}
       {warning && <div className="modal-backdrop warning-backdrop"><section className="modal warning-popup" role="alertdialog" aria-modal="true" aria-label="Warning">
         <h2>Check this</h2>
         <p>{warning}</p>
@@ -4946,7 +4998,7 @@ export default function App() {
         <SheetHandle onClose={() => setMoreOpen(false)} />
         <div className="modal-head"><h2>More</h2><button className="iconbtn" aria-label="Close" onClick={() => setMoreOpen(false)}><X size={17} /></button></div>
         <ul className="more-list">
-          {([['gives', 'Give & share', `${personGroups.length} people · give phones and send`], ['segments', 'Models & segments', 'Models, segments, colours and Samsung catalog']] as const).map(([key, label, hint]) =>
+          {([['people', 'People', 'People, devices and individual sharing'], ['gives', 'Give & share', `${personGroups.length} people · give phones and send`], ['segments', 'Models & segments', 'Models, segments, colours and Samsung catalog']] as const).map(([key, label, hint]) =>
             <li key={key}><button type="button" onClick={() => openMore(key)}><strong>{label}</strong><small>{hint}</small></button></li>)}
           <li><button type="button" onClick={() => { setMoreOpen(false); setModelSourcesOpen(false); setSettingsOpen(true); }}><strong>Settings & backup</strong><small>Preferences, backup, restore and history</small></button></li>
         </ul>
@@ -4955,10 +5007,10 @@ export default function App() {
       <main data-detail-mode={showAllDetails ? 'all' : 'summary'} className={`${collapsedPanels.length ? 'compact-page' : ''}${' nav-mode'}${mainView === 'scan' ? ' scan-first' : ''}${simpleView ? ' simple-mode' : ''}`}>
         <RecoveryPanel download={saveDirectFile} counts={{records:records.length,pendingUploads:retail.pendingUploadIds?.length||0,plans:retail.releasePlans?.length||0}} />
         <div className="screen-control-row">{!simpleView && <div className="screen-details-toggle"><button type="button" className="subtle-btn" aria-label={showAllDetails ? 'Show fewer details' : 'Show all details'} aria-expanded={showAllDetails} onClick={() => setExpandedViews(old => ({ ...old, [detailViewKey]: !showAllDetails }))}>{showAllDetails ? 'Show less' : 'Show all'}</button></div>}<HelpButton topic={activeView === 'scan' ? 'Uploading and adding phones' : activeView === 'home' ? 'Home: today and upcoming days' : activeView === 'report' ? 'Reports: quantities, stock and dated drafts' : activeView === 'records' ? 'Bulk actions and storing phones' : activeView === 'export' || recordsTab === 'share' ? 'Sharing and exporting' : retailSub === 'plan' || retailSub === 'gives' ? 'Daily plans: Auto and Manual' : 'Adding people, models and segments'} /></div>
-        {!bulkOpen && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button> <button type="button" className="subtle-btn" onClick={openPhotoEdit}>Bulk edit photos</button></div>}
+        {!bulkOpen && !manualEditing && !autoCheckPending && !queueRunning && !processingId && !scanningNow && needLookCount > 0 && <div className="archive-banner" role="status"><span>{needLookCount} record{needLookCount === 1 ? '' : 's'} need a look.</span> <button type="button" className="primary" onClick={() => openBulk(records.filter(needsLook).map(r => r.id))}>Review all ({needLookCount})</button> <button type="button" className="subtle-btn" onClick={openPhotoEdit}>Bulk edit photos</button></div>}
         {(queueActive || queueFinished || queueNeedsReview > 0) && <div className="draft-banner queue-banner" role="status">
           {queueActive
-            ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : queueCounts.pending ? 'Cropping in the background.' : 'Photos set aside for later.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done · {queueCounts.pending} waiting{queueCounts.later ? ` · ${queueCounts.later} for later` : ''}{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}. Each original is archived (and can be restored) after its crops are read.</span>
+            ? <span><strong>{queuePaused ? (queueStats.resumed ? 'Photos waiting from last time.' : 'Cropping paused.') : processingOptions.pauseWhileEditing && manualEditing ? 'Waiting while you edit.' : queueCounts.pending ? 'Cropping in the background.' : 'Photos set aside for later.'}</strong> {queueStats.done + queueStats.failed} of {queueStats.total} done · {queueCounts.pending} waiting{queueCounts.later ? ` · ${queueCounts.later} for later` : ''}{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}. Each original is archived (and can be restored) after its crops are read.</span>
             : queueFinished
               ? <span><strong>Background cropping finished.</strong> {queueStats.done} photo{queueStats.done === 1 ? '' : 's'} done{queueNeedsReview ? ` · ${queueNeedsReview} need review` : ''}.</span>
               : <span><strong>{queueNeedsReview} photo{queueNeedsReview === 1 ? '' : 's'} need review</strong> from the crop queue.</span>}
@@ -4977,7 +5029,7 @@ export default function App() {
         </div>; })()}
         {storageWarning && <div className="storage-warning" role="alert">{storageWarning}</div>}
         {retailError && <div className="storage-warning" role="alert">{retailError} <button type="button" className="subtle-btn" onClick={() => { if (retailLoaded) persistRetail(retailRef.current); else setRetailLoadAttempt(n => n + 1); }}>Try retail storage again</button></div>}
-        {splitSuggestions.some(id => records.some(r => r.id === id)) && <div className="archive-banner" role="status"><span>{splitSuggestions.filter(id => records.some(r => r.id === id)).length} photo(s) may hold several products. Nothing was changed automatically.</span> <button type="button" className="subtle-btn" onClick={() => { setSelectedIds(splitSuggestions.filter(id => records.some(r => r.id === id))); setBulkCropOpen(true); }}>Review and split</button></div>}
+        {activeView === 'home' && splitSuggestions.some(id => records.some(r => r.id === id)) && <SwipeNotice key={splitSuggestions.join('|')} noticeKey={'multi:'+splitSuggestions.slice().sort().join('|')}> <div className="archive-banner" role="status"><span>{splitSuggestions.filter(id => records.some(r => r.id === id)).length} photo(s) may hold several products. Nothing was changed automatically.</span> <button type="button" className="subtle-btn" onClick={() => { setSelectedIds(splitSuggestions.filter(id => records.some(r => r.id === id))); setBulkCropOpen(true); }}>Review and split</button></div></SwipeNotice>}
         {archive.some(item => !item.restoredAt) && <div className="archive-banner" role="status"><span>{archive.filter(item => !item.restoredAt).length} record{archive.filter(item => !item.restoredAt).length === 1 ? ' is' : 's are'} archived (split originals and duplicates; nothing deleted).</span> <button type="button" className="subtle-btn" onClick={() => setArchiveOpen(true)}>View / restore</button></div>}
 
 
@@ -5018,6 +5070,7 @@ export default function App() {
               </select>
             </label>}
             <QuickPerson onAdd={addPersonNamed} label="+ New person" />
+            {workflowOptions.afterUpload==='available'&&workflowOptions.giving==='auto'&&<p className="settings-help">Global Auto give will choose Available owners for these new uploads after scanning. Existing owned stock is kept with its owner.</p>}
             <p className="settings-help">After scanning, choose Use now, Store for now, or Plan release. Nothing is recorded as sold without confirmation.</p>
 
 {!simpleView && (<>
@@ -5396,13 +5449,13 @@ export default function App() {
           </div>}
 
           {!simpleView && (recordsTab === 'people' || recordsTab === 'models' || recordsTab === 'share' || (recordsTab === 'retail' && (retailSub === 'gives' || retailSub === 'plan'))) && <div className="give-tabs people-sharing-tabs" role="tablist" aria-label="People and sharing">
-            {([['gives', 'Give', recordsTab === 'retail' && retailSub === 'gives'], ['plan', 'Plan', recordsTab === 'retail' && retailSub === 'plan'], ['share', 'Share', recordsTab === 'share'], ['people', 'People', recordsTab === 'people'], ['models', 'By model', recordsTab === 'models']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={`${on ? 'on' : ''} ${key === 'people' || key === 'models' ? 'screen-extra' : ''}`} onClick={() => openMore(key)}>{label}</button>)}
+            {([['gives', 'Give', recordsTab === 'retail' && retailSub === 'gives'], ['plan', 'Plan', recordsTab === 'retail' && retailSub === 'plan'], ['share', 'Share', recordsTab === 'share'], ['people', 'People', recordsTab === 'people'], ['models', 'By model', recordsTab === 'models']] as const).map(([key, label, on]) => <button key={key} type="button" role="tab" aria-selected={on} className={`${on ? 'on' : ''} ${key === 'models' ? 'screen-extra' : ''}`} onClick={() => openMore(key)}>{label}</button>)}
           </div>}
           {!simpleView && recordsTab === 'models' && modelsTab}
           {!simpleView && recordsTab === 'records' && filter === 'Unknown' && unknownTab}
           {!simpleView && recordsTab === 'people' && peopleTab}
-          {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub key={reportShareId} latest={() => retailRef.current} openDelivery={packet => { const state=retailRef.current; if(packet.fingerprint && packet.fingerprint!==deliveryFingerprint(state,retailRecords) && !window.confirm('Stock or report data changed after this message was prepared. Review the packet. Open its saved snapshot anyway?'))return; if(packet.destination==='mobile'){const link=`https://wa.me/${packet.phone}?text=${encodeURIComponent(packet.text)}`;if(link.length>8000){void copyText(packet.text);window.open(`https://wa.me/${packet.phone}`,'_blank','noopener');setToast('Message copied; chat opened. Paste and tap Send.');}else{window.open(link,'_blank','noopener');setToast('WhatsApp opened with the prepared message. Tap Send there.');}}else{void shareOrCopyText(packet.text,'Prepared report and IMEIs');}changeRetail(withAudit({...state,deliveryPackets:state.deliveryPackets?.map(p=>p.id===packet.id?{...p,status:'opened'}:p)},'WhatsApp/share opened',`${packet.recordIds.length} IMEIs prepared; external sending is not verified.`),'delivery opened'); }} state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
-            reportCategory={reportCategory} openAccessoryReport={() => { setReportCategory('accessories'); setReportAvailability(false); setDraftReportDate(undefined); setReportShareId(id=>id+1); openView('report'); }} reportAvailability={reportAvailability} openAvailability={() => { setReportCategory('phones'); setDraftReportDate(undefined); setReportAvailability(true); setReportShareId(id => id + 1); openView('report'); }} openUploads={(date, personId) => jumpTo('records', `day:${date}`, personId || UNASSIGNED_FILTER)} shareFile={async (blob, name, title, text = '') => { const file = new File([blob], name, { type: blob.type }); try { if (await androidShareFiles([file], title, text)) return true; if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title, text }); return true; } saveDirectFile(blob, name); setToast('Schedule file downloaded. Share the saved file from your phone.'); return false; } catch (error) { if ((error as DOMException)?.name !== 'AbortError') setToast('Could not open sharing. Export the file and share it from your phone.'); return false; } }} openPeople={() => openMore('people')} openModels={() => openMore('segments')} openTargets={() => openView('targets')} openScan={() => openView('scan')} reportDate={draftReportDate} openDatedReport={date => { setReportAvailability(false); setDraftReportDate(date); openView('report'); }} openReport={() => { setReportCategory('phones'); setReportAvailability(false); setDraftReportDate(undefined); openView('report'); }} openPlan={() => openMore('plan')} sharePhones={openSharing} assign={assignOwners} readImage={readScreenshotText} notify={setToast} download={saveDirectFile} share={text => { void shareOrCopyText(text, 'The report'); }}
+          {!simpleView && recordsTab === 'retail' && retailLoaded && <RetailHub {...assistantCtx} key={reportShareId} latest={() => retailRef.current} openDelivery={packet => { const state=retailRef.current; if(packet.fingerprint && packet.fingerprint!==deliveryFingerprint(state,retailRecords) && !window.confirm('Stock or report data changed after this message was prepared. Review the packet. Open its saved snapshot anyway?'))return; if(packet.destination==='mobile'){const link=`https://wa.me/${packet.phone}?text=${encodeURIComponent(packet.text)}`;if(link.length>8000){void copyText(packet.text);window.open(`https://wa.me/${packet.phone}`,'_blank','noopener');setToast('Message copied; chat opened. Paste and tap Send.');}else{window.open(link,'_blank','noopener');setToast('WhatsApp opened with the prepared message. Tap Send there.');}}else{void shareOrCopyText(packet.text,'Prepared report and IMEIs');}changeRetail(withAudit({...state,deliveryPackets:state.deliveryPackets?.map(p=>p.id===packet.id?{...p,status:'opened'}:p)},'WhatsApp/share opened',`${packet.recordIds.length} IMEIs prepared; external sending is not verified.`),'delivery opened'); }} state={retail} change={changeRetail} records={retailRecords} people={retailPeople} today={todayKey}
+            openSettings={() => {setModelSourcesOpen(false);setSettingsOpen(true);}} reportCategory={reportCategory} openAccessoryReport={() => { setReportCategory('accessories'); setReportAvailability(false); setDraftReportDate(undefined); setReportShareId(id=>id+1); openView('report'); }} reportIMEICalendar={reportIMEICalendar} openIMEICalendar={() => { setReportIMEICalendar(true);setReportCategory('phones');setDraftReportDate(undefined);setReportAvailability(true);setReportShareId(id=>id+1);openView('report'); }} reportAvailability={reportAvailability} openAvailability={() => { setReportIMEICalendar(false); setReportCategory('phones'); setDraftReportDate(undefined); setReportAvailability(true); setReportShareId(id => id + 1); openView('report'); }} openUploads={(date, personId) => jumpTo('records', `day:${date}`, personId || UNASSIGNED_FILTER)} shareFile={async (blob, name, title, text = '') => { const file = new File([blob], name, { type: blob.type }); try { if (await androidShareFiles([file], title, text)) return true; if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title, text }); return true; } saveDirectFile(blob, name); setToast('Schedule file downloaded. Share the saved file from your phone.'); return false; } catch (error) { if ((error as DOMException)?.name !== 'AbortError') setToast('Could not open sharing. Export the file and share it from your phone.'); return false; } }} openPeople={() => openMore('people')} openModels={() => openMore('segments')} openTargets={() => openView('targets')} openScan={() => openView('scan')} reportDate={draftReportDate} openDatedReport={date => { setReportAvailability(false); setDraftReportDate(date); openView('report'); }} openReport={() => { setReportCategory('phones'); setReportAvailability(false); setDraftReportDate(undefined); openView('report'); }} openPlan={() => openMore('plan')} sharePhones={openSharing} assign={assignOwners} readImage={readScreenshotText} notify={setToast} download={saveDirectFile} share={text => { void shareOrCopyText(text, 'The report'); }}
             counts={{ scanning: androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing') ? Math.max(0, androidJob.count - androidJob.completed) : 0, needsReview: needLookCount }}
             sharedText={sharedText} expanded={showAllDetails} modelSources={[...knownModels].map(([code, name]) => ({ code, name: customModels[code] || SAMSUNG_MODELS[code] || name }))} saveModelName={(code, name) => { const next = { ...customModels, [code]: cleanName(name) }; if (!writeCustomModels(next)) { setToast('Could not save the model name. Device storage is full.'); return false; } setCustomModels(next); return true; }} resetModelName={code => { const next = { ...customModels }; delete next[code]; if (!writeCustomModels(next)) { setToast('Could not reset the model name.'); return false; } setCustomModels(next); return true; }} openModelSources={() => { setModelSourcesOpen(true); setSettingsOpen(true); }} openRecords={filter => jumpTo('records', filter)} sub={retailSub} openSub={setRetailSub} />}
           {!simpleView && recordsTab === 'share' && shareTab}
@@ -5555,7 +5608,7 @@ export default function App() {
         </section>
 
         <footer>
-          <span>RetailLens <i>•</i> by Carlou Joseph Barnes <i>•</i> always check the numbers against the label</span>
+          <span>AI LENS <i>•</i> by Carlou Joseph Barnes <i>•</i> always check the numbers against the label</span>
         </footer>
       </main>
 
@@ -5838,7 +5891,7 @@ export default function App() {
           </div>
         </section></div>;
       })()}
-      {splitUndo && !personUndo && <div className="undo-bar" role="status"><span>{splitUndo.text}</span><button className="subtle-btn" onClick={() => restoreOriginals(splitUndo.ids)}>Undo</button><button className="subtle-btn" onClick={() => setSplitUndo(null)}>Dismiss</button></div>}
+      {splitUndo && !personUndo && <SwipeUndoBar key={splitUndo.text} onDismiss={() => setSplitUndo(null)}><span>{splitUndo.text}</span><button className="subtle-btn" onClick={() => restoreOriginals(splitUndo.ids)}>Undo</button><button className="subtle-btn" onClick={() => setSplitUndo(null)}>Dismiss</button></SwipeUndoBar>}
       {archiveOpen && <div className="modal-backdrop"><section className="modal archive-modal" role="dialog" aria-modal="true" aria-label="Archived original photos">
         <div className="modal-head"><h2>Archived original photos</h2><button className="subtle-btn" onClick={() => setArchiveOpen(false)}>Close</button></div>
         <p className="copy-hint">Split originals were replaced by their crops; duplicates were taken out of the list. Restoring brings the record back (and takes a split original's crops out of the list; they stay in the archive). Nothing here is deleted.</p>
@@ -5853,7 +5906,7 @@ export default function App() {
           {!archive.some(item => !item.restoredAt) && <p>Nothing is archived.</p>}
         </div>
       </section></div>}
-      {personUndo && <div className="undo-bar" role="status"><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></div>}
+      {personUndo && <SwipeUndoBar key={personUndo.text} onDismiss={() => setPersonUndo(null)}><span>{personUndo.text}</span><button className="subtle-btn" onClick={undoDeletePerson}>Undo</button></SwipeUndoBar>}
       {bulkEditOpen && <div className="modal-backdrop"><section className="modal bulk-edit" role="dialog" aria-modal="true" aria-label="Bulk edit">
         <div className="modal-head"><h2>Bulk edit</h2></div>
         <p className="copy-hint">Changes {selectedRows.length ? `${selectedRows.length} ticked phone${selectedRows.length === 1 ? '' : 's'}` : `all ${visible.length} phones shown`}. Leave a field empty to keep it as it is.</p>
@@ -5918,13 +5971,10 @@ export default function App() {
             <Icon size={20} /><span>{label}</span>{badge > 0 && <b>{badge > 99 ? '99+' : badge}</b>}
           </button>)}
       </nav>}
-      {retailLoaded && !!retail.pendingUploadIds?.length && !selected && !cropEditorOpen && !bulkCropOpen && !bulkEditOpen && !queuePanelOpen && !overviewOpen && !cameraOpen && !settingsOpen && !busy && !(androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing')) && <UploadDisposition state={retail} records={retailRecords} today={todayKey} change={changeRetail} notify={setToast} openExport={() => { setSimpleView(false); openView('export'); }} openPlan={() => { setSimpleView(false); openMore('plan'); }} />}
+      {retailLoaded && workflowOptions.afterUpload === 'ask' && !assistantOpen && !!retail.pendingUploadIds?.length && !manualEditing && !selected && !cropEditorOpen && !bulkCropOpen && !bulkEditOpen && !queuePanelOpen && !overviewOpen && !cameraOpen && !settingsOpen && !busy && !(androidJob && (androidJob.status === 'queued' || androidJob.status === 'processing')) && <UploadDisposition state={retail} records={retailRecords} today={todayKey} change={changeRetail} notify={setToast} openExport={() => { setSimpleView(false); openView('export'); }} openPlan={() => { setSimpleView(false); openMore('plan'); }} />}
       {soldOffer && (() => { const g = soldOfferGroups(soldOffer.ids); return <SoldOffer count={soldOffer.ids.length} groups={g.groups} noOwner={g.noOwner} done={soldOffer.done} onMark={markOfferSold} onColour={setOfferColour} onUndo={undoOfferSold} onClose={() => setSoldOffer(null)} onNever={() => { localStorage.setItem('imeilens.askSoldAfterSend', 'off'); setSoldOffer(null); setToast('Will not ask again. Mark phones as Sold in Phones whenever you want.'); }} />; })()}
       {toast && (
-        <div className="toast">
-          <AlertTriangle size={16} />
-          {toast}
-        </div>
+        <SwipeToast onDismiss={()=>setToast('')}><AlertTriangle size={16} />{toast}</SwipeToast>
       )}
     </div>
   );

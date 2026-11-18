@@ -1,4 +1,5 @@
-// RetailLens screens, part 2: Gives and Data. Rules are in src/retail/*.ts; see RetailHub.tsx for the first part.
+import {readWorkflowOptions,saveWorkflowOptions} from './retail/auto-workflow';
+// AI LENS screens, part 2: Gives and Data. Rules are in src/retail/*.ts; see RetailHub.tsx for the first part.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { applyAllocation, givenToday, undoAllocation, type Proposal } from './retail/allocation';
 import { allocView, recommendFor } from './retail/autogive';
@@ -35,7 +36,7 @@ export function GivesTab(ctx: RetailCtx) {
     ctx.notify(`${result.restored.length} phone${result.restored.length === 1 ? '' : 's'} returned${result.kept.length ? `; ${result.kept.length} stay where they are now` : ''}.`);
   };
   const mode = state.giveMode === 'auto' ? 'auto' : 'suggest';
-  const setMode = (next: 'auto' | 'suggest') => { if (next === mode) return; ctx.change({ ...state, giveMode: next === 'auto' ? 'auto' : undefined }, ''); ctx.notify(next === 'auto' ? 'Auto give is on. New phones are given by themselves; every give is in History and can be undone.' : 'Suggest only is on. Nothing moves until you approve it.'); };
+  const setMode = (next: 'auto' | 'suggest') => { if (next === mode) return; saveWorkflowOptions({...readWorkflowOptions(),giving:next});ctx.change({ ...state, giveMode: next === 'auto' ? 'auto' : undefined }, ''); ctx.notify(next === 'auto' ? 'Auto give is on. New phones are given by themselves; every give is in History and can be undone.' : 'Suggest only is on. Nothing moves until you approve it.'); };
   const limits = state.giveLimits || {};
   const limitOf = (id: string): GiveLimit => limits[id] || {};
   const today_ = useMemo(() => givenToday(state, today), [state, today]);
@@ -107,7 +108,7 @@ export function DataTab(ctx: RetailCtx) {
   useEffect(() => () => { readId.current++; }, []);
   useEffect(() => { void listSnapshots().then(setSnaps); }, [state]);
   const months = Object.entries(state.history).sort((a, b) => b[0].localeCompare(a[0]));
-  const download = () => { ctx.download(new Blob([JSON.stringify(makeBackup(state, records))], { type: 'application/json' }), `RetailLens-backup-${today}.json`); ctx.change(withAudit(state, 'backup', 'downloaded a backup'), ''); };
+  const download = () => { ctx.download(new Blob([JSON.stringify(makeBackup(state, records))], { type: 'application/json' }), `AI-LENS-backup-${today}.json`); ctx.change(withAudit(state, 'backup', 'downloaded a backup'), ''); };
   /**
    * Reads the file the person chose. A file saved a moment ago can read as empty for a few seconds (the phone's file list has not caught up), so an empty
    * read is tried again a few times before it is called empty. Every message says which file and what is wrong.
@@ -134,7 +135,7 @@ export function DataTab(ctx: RetailCtx) {
     if (!text.trim()) { setCheck({ ok: false, error: `“${file.name}” is empty. A file saved a moment ago can look empty for a few seconds: wait a little and choose it again. If it stays empty, download the backup again.` }); return; }
     const result = readBackup(text.replace(/^\uFEFF/, ''));
     const kb = Math.max(1, Math.round(file.size / 1024));
-    setCheck(result.ok ? result : { ok: false, error: /could not be read/.test(result.error) ? `“${file.name}” (${kb} KB) is not a RetailLens backup. Choose the file named RetailLens-backup-….json that “Download a backup” saved.` : `“${file.name}”: ${result.error}` });
+    setCheck(result.ok ? result : { ok: false, error: /could not be read/.test(result.error) ? `“${file.name}” (${kb} KB) is not a AI LENS backup. Choose the file named AI-LENS-backup-….json that “Download a backup” saved.` : `“${file.name}”: ${result.error}` });
   };
   const restore = () => {
     if (!check || !check.ok) return;

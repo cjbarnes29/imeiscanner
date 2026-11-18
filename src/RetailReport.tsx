@@ -1,4 +1,4 @@
-// RetailLens > Report: paste the store's WhatsApp report, see it checked against the phones that were scanned, tap a line to fix it in a popup (model,
+// AI LENS > Report: paste the store's WhatsApp report, see it checked against the phones that were scanned, tap a line to fix it in a popup (model,
 // segment, sold, stock, colours; Previous / Next move along the report), and copy it back out in the same layout. The rules are in
 // src/retail/stockreport.ts and reconcile.ts (unit-tested); this file only shows them. Nothing changes by itself: a difference is marked and the
 // person decides. Saving a line marks it as checked, so it leaves the "to check" list even when it still differs from the scans.

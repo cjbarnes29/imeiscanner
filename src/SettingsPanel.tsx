@@ -1,3 +1,5 @@
+import { HomeSettings } from './HomeSettings';
+import { ProcessingSettings } from './ProcessingSettings';
 import { RecoveryPanel } from './RecoveryPanel';
 import { useEffect, useRef, useState } from 'react';
 import { cleanName, MAX_CUSTOM_MODELS, normalizeCode, parseModelFile, scannedDevices, writeCustomModels, type CustomModels } from './custom-models';
@@ -25,6 +27,7 @@ type Props = {
   onOpenModelManager?: () => void;
   onOpenBackup?: () => void;
   onOpenLocalAI?: () => void;
+  onResetScans?:()=>void;
 };
 
 type SpeedBridge = { speedInfo?: () => string; setSpeedMode?: (mode: string) => boolean };
@@ -79,7 +82,7 @@ function readSaveInfo(): SaveInfo | null {
 }
 
 /** Settings: your own Samsung model names (add, edit, delete, import, export) and the downloaded catalog files. */
-export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose, modelsOnly = false, onOpenModelManager, onOpenBackup, onOpenLocalAI }: Props) {
+export function SettingsPanel({ scannedModels, catalogEntries, customModels, onModelsChange, onCatalogChange, onChangeCode, onDownload, onClose, modelsOnly = false, onOpenModelManager, onOpenBackup, onOpenLocalAI,onResetScans }: Props) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [editing, setEditing] = useState('');
@@ -221,13 +224,15 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
   return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="modal-head"><h2>{modelsOnly ? 'Model sources' : 'Settings & backup'}</h2><button className="subtle-btn" onClick={onClose}>Close</button></div>
     {message && <p className="settings-message" role="status">{message}</p>}
-    <p className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
+    <p hidden={!modelsOnly} className="settings-help settings-intro"><b>Model code</b> is the SM-… code printed on the phone. <b>Name</b> is what you want to see in the app instead of the code. Edit changes both. Changing the code of a scanned device also fixes it on every phone that has it.</p>
 
     <div hidden={modelsOnly}>
-    <RecoveryPanel always download={onDownload}/>
-    {onOpenLocalAI && <LocalAISettings open={onOpenLocalAI} />}
+    <nav className="settings-shortcuts" aria-label="Settings sections">{[['Home layout','.home-layout-settings'],['Automation','.workflow-settings'],['Pictures & editing','.processing-settings'],['Recovery & diagnostics','.settings-recovery'],['Local AI','.settings-local-ai']].map(([label,selector])=><button type="button" className="subtle-btn" key={label} onClick={e=>{const target=e.currentTarget.closest('.settings-modal')?.querySelector(selector) as HTMLElement|null;if(target?.tagName==='DETAILS')(target as HTMLDetailsElement).open=true;target?.scrollIntoView({block:'start',behavior:'smooth'});}}>{label}</button>)}</nav>
+    <HomeSettings/><ProcessingSettings/>
+    <div className="settings-recovery"><RecoveryPanel always download={onDownload}/></div>
+    {onOpenLocalAI && <div className="settings-local-ai"><LocalAISettings open={onOpenLocalAI} /></div>}
     <div className="settings-actions">{onOpenModelManager && <button type="button" className="primary" onClick={onOpenModelManager}>Models & segments</button>}{onOpenBackup && <button type="button" className="subtle-btn" onClick={onOpenBackup}>Backup, restore & history</button>}</div>
-    <h3>Help</h3>
+    <details className="settings-danger"><summary>Delete scanned records</summary><p className="settings-help">Use only after exporting what you need. The next confirmation explains what is removed.</p>{onResetScans&&<button className="subtle-btn danger" onClick={onResetScans}>Reset: delete all scanned IMEIs</button>}</details><h3>Help</h3>
     <div className="settings-learn"><button type="button" className="primary" onClick={() => setGuide('tutorials')}>Tutorials: how to do everything</button><button type="button" className="subtle-btn" onClick={() => setGuide('new')}>What’s new</button></div>
     <h3>Colour</h3>
     <div className="theme-choice" role="radiogroup" aria-label="Colour theme">{THEMES.map(item => <button key={item.id} type="button" role="radio" aria-checked={theme === item.id} aria-label={item.label} title={item.label} className={theme === item.id ? 'on' : ''} style={{ background: item.swatch }} onClick={() => { setTheme(item.id); saveTheme(item.id); }}><span>{item.label}</span></button>)}</div>
@@ -359,6 +364,6 @@ export function SettingsPanel({ scannedModels, catalogEntries, customModels, onM
     {guide === 'new' && <WhatsNewDialog onClose={() => setGuide('')} onTutorials={() => setGuide('tutorials')} />}
     {guide === 'tutorials' && <TutorialsDialog onClose={() => setGuide('')} />}
     <AuthorCredit />
-    <p className="settings-about">RetailLens · scanning engine: IMEI Lens · by Carlou Joseph Barnes<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
+    <p className="settings-about">AI LENS · scanning engine: IMEI Lens · by Carlou Joseph Barnes<br />Version {APP_VERSION} ({APP_COMMIT}) · {(window as Window & { AndroidScanner?: unknown }).AndroidScanner ? 'Android app' : 'Web'}</p>
   </section></div>;
 }

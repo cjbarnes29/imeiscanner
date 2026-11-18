@@ -74,9 +74,9 @@ try{
   await waitFor(`document.readyState==='complete'`,'reload');
   await sleep(1500);
   await run(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent));if(b)b.click();return true;})()`);
-  // the scanning screen comes first and the brand is RetailLens
+  // the scanning screen comes first and the brand is AI LENS
   await waitFor(`!!document.querySelector('.bottom-nav')`,'bottom nav');
-  ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
+  ok('the app is branded AI LENS with the tagline "Scan. Sell. Track. Achieve."');
 
   const MEASURE=`(()=>{const w=document.documentElement.clientWidth;const skip='.table-wrap,.retail-tabs,.who-chips,.chips,.filter-chips,.person-filters,.bottom-nav,.top-actions';
     const bad=[...document.querySelectorAll('body *')].filter(e=>{const b=e.getBoundingClientRect();return b.width>0&&b.height>0&&b.right>w+2&&getComputedStyle(e).position!=='fixed'&&!e.closest(skip)&&e.offsetParent!==null}).slice(0,6).map(e=>e.tagName.toLowerCase()+'.'+String(e.className).split(' ')[0]+' left='+Math.round(e.getBoundingClientRect().left)+' right='+Math.round(e.getBoundingClientRect().right)+' w='+Math.round(e.getBoundingClientRect().width));

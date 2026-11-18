@@ -1,3 +1,34 @@
+# LIVE WORKING CHECKPOINT — AI LENS 1.27.1 / code 44
+
+2026-11-18: User renamed RetailLens to **AI LENS**. Preserve package/signature/storage/schema compatibility. Latest steering: AI icon is a SUMMARY CHAT for questions/checks; detailed outputs, action approvals, warnings, results, Undo and file interpretation belong on HOME. AI integration settings allow optional detailed workspace, automatic check summaries and follow-up suggestions. Optional Qwen inference is not a continuous background task.
+
+Work is UNCOMMITTED; source/branch remain c095684 on ux/photo-editor until release. User explicitly authorized audit/fixes, commit, push and downloadable update APK. No production device may be uninstalled or reset. Continue finishing and testing; do not claim release complete yet.
+
+New assistant code: AssistantReview.tsx / AssistantFiles.tsx / AutomaticAttention.tsx; pure retail/assistant-actions.ts / retail/attention.ts / assistant-settings.ts. Supported reviewed commands: give quantities to named people, dated report quantity changes, global preferences, Store/Available/remove-from-stock, manual phone additions with real valid IMEIs, accessory balances, equal store target split, unavailable ranges, report-file proposals. Canonical existing domain engines are reused. Saved questions / requests / receipts are in RetailState and cleaned by data.ts. Undo refuses newer conflicting edits or moved/sold IMEIs; external sent messages and permanent app reset are not reversible assistant actions.
+
+Files: local photos/text/CSV/TSV/JSON/XLSX; original Blob in private roster-file store, metadata/text in assistantFiles; serial restartable reader. File content is data, not instructions. Explicit report interpretation creates pending reviewed draft/snapshot; roster interpretation embeds existing calendar reviewer. Pending: finish browser testing, attachment-truncation UX, current docs/audit, final release. No PDF support yet. Original blobs are not included in retail JSON backup.
+
+Global forecasts now run in AutomaticForecastEngine mounted in App, even when Home is hidden. Shared generator budgets Stored IMEIs sequentially across people to prevent duplicate forecast reservations. Home/assistant attention share pure checks. Device logs capture action and before/after storage stages; unfinished write marker is checked at restart.
+
+Testing so far: 58 planning/assistant pure groups passed before the latest attention/summary changes; first assistant browser suite passed global request/give4+10/receipt/Undo/report/settings/Home history, but it must be rewritten for SUMMARY CHAT → HOME REVIEW (latest UI requirement). Browser photos have been shown to user; earlier settings screenshot captured during a transition and must be replaced. Existing manual/automation/photo/workforce/report/layout suites need final sweep. New scripts e2e-assistant.mjs (4204/9364), e2e-automation.mjs (4203/9363), e2e-processing.mjs (4202/9362). Retail/layout/simple share4196 and MUST run sequentially. Build before browser tests; wait until complete. Source version remains1.27.1, Android44. APKs still old1.27.0 until rebuilt after a source commit.
+
+---
+
+# Current checkpoint: 1.27.1 / Android 44
+
+This supersedes the historical 1.27.0 checkpoint below. Read [RELEASE-1.27.1-AUDIT.md](RELEASE-1.27.1-AUDIT.md) for current validation and artifact state.
+
+- Automatic photo processing is the global default. Manual / Custom presets and individual global switches remain available. Never overwrite a crop, rotation, typed field or active photo with a late background result. Finished bulk crops queue checks and close immediately.
+- Global Settings > processing / after-upload automation applies to every person and future batch: Store/Ask/Available, giving Suggest/Auto, goal, horizon, reserve, report percentage, live preview and optional report preparation after release approval. Ownership changes never imply a sale. Only new uploads are unassigned for automatic allocation; existing owned stock stays owned.
+- Home owns Automation · Today & coming days, Needs attention, the local assistant, schedule reminders and links to the IMEI calendar. The calendar shows person/model/quantity/date and proposed vs approved vs completed. Forecasts use known stock only; approved reservations replace fresh proposals for the same person. Future giving is a projection, not an executed assignment or assumed future upload.
+- Availability/target policy is GLOBAL for all people. Default Manual only. Linked requires explicit balanced review. Changing this preference never applies or reverses prior adjustments. Removed the Specific unavailable date form: From=To records a single day; old offDates remain preserved and displayed. Exact range saves upsert rather than duplicate.
+- Device automation/processing preferences live in localStorage; in-place updates preserve them. Retail business backup preserves schedules/plans/targets, but does not copy these device preferences to another device.
+- Optional local-model free-text answers plus a deterministic saved-data fallback. No model can approve a release, change targets or claim to have sent WhatsApp. Model inference and physical-phone endurance require separate verification.
+- Detailed People tab, filters and Home people chips stay visible in summary mode. Multi-product notice is Home-only, swipe/close dismissible; dismissal never deletes records.
+- Shift calendars remain separate from IMEI giving/release calendars. True phone stock, report quantities and tablet/accessory balances remain separate ledgers.
+
+---
+
 # Claude continuation checkpoint — 2026-11-18
 
 Read this before CLAUDE.md. Branch `ux/photo-editor`, source commit `11432a7` (started from74fa186). Delivered version1.27.0 / Android code43; previous local test APK is code42. [Published prerelease](https://github.com/cjbarnes29/imeiscanner/releases/tag/retaillens-test-11432a7), [final release audit](RELEASE-1.27.0-AUDIT.md). Later docs/tool commits do not change APK application source. User explicitly authorized implementation, commit, push, APK and GitHub download in this conversation. Do not merge main or rewrite history.

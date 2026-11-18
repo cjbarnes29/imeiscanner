@@ -1,4 +1,4 @@
-// RetailLens plan v2 end to end in headless Edge/Chrome (not part of `npm test`; run `npm run build` first):  node scripts/e2e-retail.mjs
+// AI LENS plan v2 end to end in headless Edge/Chrome (not part of `npm test`; run `npm run build` first):  node scripts/e2e-retail.mjs
 // SYNTHETIC data only. Seeds 9 coloured phones and 2 people, then drives the real screens: a pasted report is checked against the scanned phones, a line is
 // fixed and an unknown name is taught, the person's own segment is made and filled, targets show levels 70-120 (typed pieces win), Gives only suggests until
 // approved (and Undo), a phone marked sold leaves the stock, reload persistence, and the scan records themselves were never changed.
@@ -70,11 +70,11 @@ try{
   await waitFor(`document.readyState==='complete'`,'reload');
   await sleep(1500);
   await run(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent));if(b)b.click();return true;})()`);
-  // the scanning screen comes first and the brand is RetailLens
+  // the scanning screen comes first and the brand is AI LENS
   await waitFor(`!!document.querySelector('.bottom-nav')`,'bottom nav');
-  assert.match(await run(`document.querySelector('.brand')?.textContent||''`),/RETAILLENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./i);
-  assert.match(await run(`document.title`),/RetailLens/);
-  ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
+  assert.match(await run(`document.querySelector('.brand')?.textContent||''`),/AI LENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./i);
+  assert.match(await run(`document.title`),/AI LENS/);
+  ok('the app is branded AI LENS with the tagline "Scan. Sell. Track. Achieve."');
 
   // ---------- Report: paste a synthetic report, see it checked against the scanned phones ----------
   await nav('Home');
@@ -84,7 +84,7 @@ try{
   assert.ok(!/Scanned records/.test(await run(`document.querySelector('.results').innerText`)),'no "Scanned records" header on Home');
   await run(`document.querySelector('button[aria-label="More"]').click()`);
   await waitFor(`!!document.querySelector('.more-list')`,'More menu');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['Give & share','Models & segments','Settings & backup'],'the consolidated More menu');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.more-list strong')].map(s=>s.textContent)`),['People','Give & share','Models & segments','Settings & backup'],'the consolidated More menu');
   await shotRegion('10-more',`document.querySelector('.more-sheet')`);
   await run(`document.querySelector('.more-sheet [aria-label="Close"]').click()`);
 
@@ -476,14 +476,14 @@ try{
   const fsx = await import('node:fs');
   const emptyPath = join(tmpdir(), 'e2e-empty-backup.json'), junkPath = join(tmpdir(), 'e2e-junk.json'), goodPath = join(tmpdir(), 'e2e-good-backup.json');
   fsx.writeFileSync(emptyPath, ''); fsx.writeFileSync(junkPath, '<html>not a backup</html>');
-  fsx.writeFileSync(goodPath, JSON.stringify({ app: 'RetailLens', version: 1, createdAt: '2026-11-17T10:00:00.000Z', state: {}, ledger: [] }));
+  fsx.writeFileSync(goodPath, JSON.stringify({ app: 'RetailLens', /* the old marker is kept on purpose so older backups still restore */ version: 1, createdAt: '2026-11-17T10:00:00.000Z', state: {}, ledger: [] }));
   const chooseBackup = async path => { const d = (await send('DOM.getDocument')).result; const n = (await send('DOM.querySelector', { nodeId: d.root.nodeId, selector: '.retail-data input[type=file]' })).result; await send('DOM.setFileInputFiles', { files: [path], nodeId: n.nodeId }); };
   const alertText = () => run(`(document.querySelector('.retail-data [role=alert]')||{}).innerText||''`);
   await chooseBackup(emptyPath);
   await waitFor(`/is empty/.test(document.querySelector('.retail-data').innerText)`, 'an empty file is called empty', 30000);
   assert.match(await alertText(), /e2e-empty-backup\.json.*wait a little and choose it again/s, 'it names the file and says what to do');
   await chooseBackup(junkPath);
-  await waitFor(`/is not a RetailLens backup/.test(document.querySelector('.retail-data').innerText)`, 'a file that is not a backup is named');
+  await waitFor(`/is not a AI LENS backup/.test(document.querySelector('.retail-data').innerText)`, 'a file that is not a backup is named');
   assert.match(await alertText(), /e2e-junk\.json/);
   await chooseBackup(goodPath);
   await waitFor(`!!document.querySelector('[aria-label="Restore this backup"]')`, 'a good backup is accepted');

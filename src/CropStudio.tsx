@@ -1,3 +1,5 @@
+import { ProcessingSettings, useProcessingOptions, useManualEdit } from './ProcessingSettings';
+import { ResultGuard } from './processing-options';
 // Crop Studio: one compact editor for fixing and cutting photos.
 // - Drag on the photo to draw a box; the number of labels is simply the number of boxes (no count to type).
 // - Drag a box to move it, drag a corner to resize it, Delete (or the red button) removes it.
@@ -27,6 +29,7 @@ type Props = {
   progress: string;
   title?: string;
   detect: (source: string) => Promise<{ boxes: Box[]; devices: number }>;
+  onCancelDetect?: () => void;
   /** An error or note from the app, shown under the photo. */
   notice?: string;
   onSaveAll: (plans: StudioPlan[]) => void;
@@ -58,7 +61,12 @@ type Drag =
 
 const ZOOMS = [1, 1.5, 2, 3, 4];
 
-export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress, title = 'Crop photos', detect, notice = '', onSaveAll, onSaveLater, onClose, onDiscard, onAutosave, onQueue, background = false, steps = false, onEditPhoto, onDeletePhoto, onFinished }: Props) {
+export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress, title = 'Crop photos', detect, onCancelDetect, notice = '', onSaveAll, onSaveLater, onClose, onDiscard, onAutosave, onQueue, background = false, steps = false, onEditPhoto, onDeletePhoto, onFinished }: Props) {
+  const processing=useProcessingOptions();
+  const [showProcessing,setShowProcessing]=useState(false);
+  useBackLayer(showProcessing,()=>setShowProcessing(false),'crop-global-processing');
+  const resultGuard=useRef(new ResultGuard());
+  const invalidateDetection=()=>{resultGuard.current.invalidate();if(detecting)onCancelDetect?.();setDetecting(false);};
   const [plans, setPlans] = useState<Record<string, Box[]>>(() => Object.fromEntries(items.map(item => [item.id, initialPlans[item.id] || []])));
   const startPlans = useRef(JSON.stringify(plans));
   const [index, setIndex] = useState(Math.max(0, Math.min(items.length - 1, startIndex)));
@@ -90,9 +98,10 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   const at = Math.max(0, Math.min(live.length - 1, index));
   const item: StudioItem | undefined = live[at];
   const itemId = item?.id || '';
+  useManualEdit(true,itemId);
   const source = item ? sources[item.id] || item.source : '';
   const boxes = (item && plans[item.id]) || [];
-  const busy = !!progress || detecting || editing;
+  const busy = !!progress || editing;
   const zoom = ZOOMS[zoomStep];
   const open = live;
   const total = useMemo(() => open.reduce((sum, entry) => sum + (plans[entry.id]?.length || 0), 0), [open, plans]);
@@ -114,15 +123,19 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   }, []);
 
   // A fresh photo starts fitted, with nothing selected.
-  useEffect(() => { setSelected([]); setZoomStep(0); setPan(false); setMessage(''); setDraw(null); }, [itemId]);
+  useEffect(() => { invalidateDetection();setSelected([]); setZoomStep(0); setPan(false); setMessage(''); setDraw(null); }, [itemId]);
 
-  // A photo that opens with no boxes is searched once for labels, so you start with boxes to check instead of an empty photo.
+  // Optional automatic search yields to any manual change; changing photos invalidates late results.
   useEffect(() => {
-    if (!item) return;
-    if (autoTried.current.has(item.id) || (plans[item.id] || []).length || progress) { if (!(item.id in baseline.current)) baseline.current[item.id] = JSON.stringify(plans[item.id] || []); return; }
-    autoTried.current.add(item.id);
-    void auto(true);
-  }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!item || showProcessing) return;
+    baseline.current[item.id] ??= JSON.stringify(plans[item.id] || []);
+    if (!processing.autoFindBoxes || autoTried.current.has(item.id) || (plans[item.id] || []).length || progress) return;
+    const token=resultGuard.current.start();
+    const timer=window.setTimeout(()=>{if(!resultGuard.current.accept(token))return;autoTried.current.add(item.id);void auto(true);},150);
+    return()=>{window.clearTimeout(timer);resultGuard.current.invalidate();};
+  }, [itemId,processing.autoFindBoxes,showProcessing]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{if(!processing.autoFindBoxes)invalidateDetection();},[processing.autoFindBoxes]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>()=>resultGuard.current.invalidate(),[]);
 
   // Every photo deleted: nothing left to edit.
   useEffect(() => { if (items.length && !live.length) onClose(); }, [live.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -141,8 +154,9 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     if (next.join() !== edited.join()) setEdited(next);
   }, [plans, sources, live, detecting]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const change = useCallback((next: Box[]) => {
+  const change = useCallback((next: Box[], automatic = false) => {
     if (!itemId) return;
+    if(!automatic)invalidateDetection();
     const stack = history.current[itemId] ||= [];
     stack.push(plans[itemId] || []);
     if (stack.length > 40) stack.shift();
@@ -150,6 +164,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     setPlans(old => ({ ...old, [itemId]: next }));
   }, [itemId, plans]);
   const undo = () => {
+    invalidateDetection();
     const stack = history.current[itemId];
     if (!stack?.length || busy) return;
     const previous = stack.pop()!;
@@ -157,6 +172,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     setPlans(old => ({ ...old, [itemId]: previous })); setSelected([]);
   };
   const redo = () => {
+    invalidateDetection();
     const ahead = future.current[itemId];
     if (!ahead?.length || busy) return;
     const next = ahead.pop()!;
@@ -180,6 +196,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const hit = hitTest(boxes, { x, y }, { x: 26 / rect.width * 100, y: 26 / rect.height * 100 });
+    invalidateDetection();
     setMessage('');
     if (hit && hit.part !== 'body') { drag.current = { kind: 'resize', index: hit.index, part: hit.part, start: boxes[hit.index] }; setSelected([hit.index]); return; }
     if (hit) {
@@ -231,25 +248,29 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   }
 
   async function auto(initial = false) {
-    if (busy || !item) return;
+    if (busy || detecting || !item) return;
     const id = item.id;
+    const token=resultGuard.current.start();
     setDetecting(true); setMessage('Looking for labels…');
     try {
       const found = await detect(source);
+      if(!resultGuard.current.accept(token))return;
+      setDetecting(false);
       let next = boxes, added = 0;
       for (const box of found.boxes) { const r = addBox(next, clampBox(box)); if ('boxes' in r) { next = r.boxes; added++; } }
-      if (initial) baseline.current[id] = JSON.stringify(next);
-      if (added) { change(next); setMessage(`Found ${added} label${added === 1 ? '' : 's'}. Check the boxes, fix any that are off${steps ? '' : ', then Save all'}.`); }
+      if (initial && !processing.autoReview) baseline.current[id] = JSON.stringify(next);
+      if (added) { change(next,true); setMessage(`Found ${added} label${added === 1 ? '' : 's'}. Check the boxes, fix any that are off${steps ? '' : ', then Save all'}.`); }
       else if (found.devices >= 2) setMessage(`Saw about ${found.devices} labels but could not place the boxes. Draw them yourself.`);
       else setMessage(found.boxes.length ? 'Those labels already have boxes.' : 'Found only one label. Draw a box if you see more.');
-    } catch (error) { console.error(error); setMessage('Auto-detect did not work on this photo. Draw the boxes yourself.'); }
-    finally { if (initial && !(id in baseline.current)) baseline.current[id] = JSON.stringify(boxes); setDetecting(false); }
+    } catch (error) { if(resultGuard.current.accept(token)){console.error(error);setMessage('Auto-detect did not work on this photo. Draw the boxes yourself.');} }
+    finally { if(resultGuard.current.accept(token)){if(initial&&!(id in baseline.current))baseline.current[id]=JSON.stringify(boxes);setDetecting(false);} }
   }
 
   /** Rotate or straighten the photo. The app keeps the new picture; the boxes turn with a quarter turn, and stay put when levelling. */
   async function editPhoto(edit: PhotoEdit) {
     if (busy || !item || !onEditPhoto) return;
     const id = item.id;
+    invalidateDetection();
     setEditing(true); setMessage(edit === 'straighten' ? 'Straightening…' : 'Turning the photo…');
     try {
       const result = await onEditPhoto(id, source, edit);
@@ -268,7 +289,8 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   /** Bulk edit Finish: queue only the edited photos for rescanning; the others are left as they are (still in Review). */
   function finishSteps() {
     if (busy || !onQueue) return;
-    const changed = live.filter(entry => edited.includes(entry.id));
+    invalidateDetection();
+    const changed = live.filter(entry => sources[entry.id] || (entry.id in baseline.current && JSON.stringify(plans[entry.id] || []) !== baseline.current[entry.id]));
     const bad = changed.find(entry => !boxesAreSound(plans[entry.id] || []));
     if (bad) { setIndex(live.indexOf(bad)); setMessage('Two boxes cover the same label, or one is too small. Fix it first.'); return; }
     if (changed.length) onQueue(changed.map(entry => ({ id: entry.id, boxes: plans[entry.id] || [] })));
@@ -285,7 +307,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
     const remaining = items.filter(entry => !goneNow.includes(entry.id));
     if (!remaining.length) return; // the effect above closes the editor
     setIndex(Math.min(at, remaining.length - 1));
-    setMessage('Photo deleted from RetailLens (kept in the archive; your phone gallery is not touched).');
+    setMessage('Photo deleted from AI LENS (kept in the archive; your phone gallery is not touched).');
   }
 
   function saveAll() {
@@ -309,6 +331,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
   // Leaving never throws work away: boxes are kept as a draft (nothing to keep = the draft is cleared).
   const requestClose = () => {
     if (busy) return;
+    invalidateDetection();
     if (!dirty) onClose(); else if (total) saveLater(); else onDiscard();
   };
 
@@ -316,6 +339,7 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if(showProcessing){if(event.key==='Escape'){event.preventDefault();setShowProcessing(false);}return;}
       const tag = (event.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length) { event.preventDefault(); deleteSelected(); }
@@ -354,7 +378,9 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
       </>}
       <button className="subtle-btn" aria-label="Undo" disabled={busy || !history.current[itemId]?.length} onClick={undo}><Undo2 size={16} /> Undo</button>
       <button className="subtle-btn danger" disabled={busy || !selected.length} onClick={deleteSelected}><Trash2 size={16} /> Delete{selected.length > 1 ? ` ${selected.length}` : ''}</button>
-      <button className="subtle-btn" disabled={busy} onClick={() => void auto()}>{detecting ? <Loader2 size={16} className="spin" /> : <Wand2 size={16} />} Auto-detect</button>
+      <button className="subtle-btn" disabled={busy || detecting} onClick={() => void auto()}>{detecting ? <Loader2 size={16} className="spin" /> : <Wand2 size={16} />} Auto-detect</button>
+      {detecting&&<button className="subtle-btn" onClick={()=>{invalidateDetection();setMessage('Detection cancelled. Draw your boxes manually.');}}>Cancel detection</button>}
+      <button className="subtle-btn" onClick={()=>{invalidateDetection();setShowProcessing(true);}}>Auto settings · all photos</button>
       <details className="studio-more"><summary>More</summary>
         <button className="subtle-btn" aria-label="Redo" disabled={busy || !future.current[itemId]?.length} onClick={redo}>Redo</button>
         <button className={`subtle-btn${several ? ' on' : ''}`} aria-pressed={several} disabled={busy} onClick={() => setSeveral(s => !s)}>Select several</button>
@@ -395,10 +421,11 @@ export function CropStudio({ items, initialPlans = {}, startIndex = 0, progress,
       <button className="subtle-btn" disabled={busy || at === 0} onClick={() => setIndex(at - 1)}><ChevronLeft size={16} /> Previous</button>
       <button className="subtle-btn danger" disabled={busy || !onDeletePhoto} onClick={deletePhoto}><Trash2 size={16} /> Delete</button>
       {last
-        ? <button className="primary studio-next" disabled={busy} onClick={finishSteps}>Finish{edited.length ? ` (rescan ${edited.length})` : ''}</button>
+        ? <button className="primary studio-next" disabled={busy} onClick={finishSteps}>Finish · background{edited.length ? ` (${edited.length})` : ''}</button>
         : <button className="primary studio-next" disabled={busy} onClick={() => setIndex(at + 1)}>Next <ChevronRight size={16} /></button>}
     </footer> : <footer className="studio-actions">
       <button className="primary" disabled={busy || (inBackground ? !open.length : !total)} onClick={save}>{progress ? 'Working…' : `Save all${total ? ` (${total} crop${total === 1 ? '' : 's'}${photosWithBoxes > 1 ? `, ${photosWithBoxes} photos` : ''})` : inBackground ? ` (cut ${open.length} photo${open.length === 1 ? '' : 's'} automatically)` : ''}`}</button>
     </footer>}
+    {showProcessing&&<div className="modal-backdrop processing-overlay"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Global automatic work settings"><div className="modal-head"><h2>Global settings · all photos</h2><button className="subtle-btn" onClick={()=>setShowProcessing(false)}>Close settings</button></div><ProcessingSettings/></section></div>}
   </section></div>;
 }

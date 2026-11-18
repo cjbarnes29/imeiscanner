@@ -1,4 +1,4 @@
-// RetailLens > Targets and Segments. Targets: pick a level (70 to 120) and every segment line says how many pieces are still needed and per day;
+// AI LENS > Targets and Segments. Targets: pick a level (70 to 120) and every segment line says how many pieces are still needed and per day;
 // tap a segment to see each person (target, own sold count, pieces needed at each level). Segments: the person's own list (Fold 1, Fold 2…) and the
 // models in each. The arithmetic is in src/retail/targets.ts and segments.ts (unit-tested); this file only shows it.
 import { StoreTargetsPanel } from './RetailStoreTargets';

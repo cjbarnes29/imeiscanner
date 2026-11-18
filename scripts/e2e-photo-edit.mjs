@@ -67,7 +67,7 @@ const readStore=()=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2'
 const results=[];const ok=n=>{results.push(n);console.log('PASS:',n);};
 try{
   await send('Page.enable');
-  await send('Page.addScriptToEvaluateOnNewDocument',{source:"localStorage.setItem('imei-lens-simple-view','false');"});
+  await send('Page.addScriptToEvaluateOnNewDocument',{source:"localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('retaillens-processing-v1',JSON.stringify({autoFindBoxes:true,backgroundSingleCrop:false,autoReview:false}));"});
   await send('Page.navigate',{url:'http://localhost:4195/'});
   await waitFor(`document.readyState==='complete'`,'load');
   await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');for(const r of ${JSON.stringify(seed)})tx.objectStore('inventory').put(r,'record:'+r.id);tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
@@ -128,8 +128,8 @@ try{
   await click('.studio-steps button','Next');
   await waitFor(`/^4 of 4 photos/.test(document.querySelector('.studio-title span').textContent)`,'last photo');
   assert.equal(await currentName(),'unknown.jpg');
-  assert.deepEqual(await run(`[...document.querySelectorAll('.studio-steps button')].map(b=>b.textContent.trim())`),['Previous','Delete','Finish (rescan 2)'],'Finish on the last photo');
-  ok('on the last photo Next becomes "Finish (rescan 2)"');
+  assert.deepEqual(await run(`[...document.querySelectorAll('.studio-steps button')].map(b=>b.textContent.trim())`),['Previous','Delete','Finish · background (2)'],'Finish on the last photo');
+  ok('on the last photo Next becomes "Finish · background (2)"');
   await autoDone();
   await click('.studio-steps button','Finish');
   await waitFor(`!document.querySelector('.studio')`,'Finish closes the editor');
@@ -194,9 +194,10 @@ try{
   ok(`Rotate right turns the photo (${dims.join('x')} -> ${dims[1]}x${dims[0]}) and its ${n} box${n===1?'':'es'}`);
   await run(`document.querySelector('.studio-more summary').click()`);
   assert.ok(await run(`[...document.querySelectorAll('.studio-more button')].some(b=>b.textContent.trim()==='Straighten')`),'Straighten under More');
+  await run(`localStorage.setItem('imei-lens-undo-ms','30000')`); // the Undo popup normally leaves after 2 seconds; this test reads the store before pressing Undo (scripts/e2e-undo-bar.mjs tests the 2 seconds)
   await click('.studio-more button','Delete photo');
   await waitFor(`!document.querySelector('.studio')`,'editor closes after Delete photo');
-  await waitFor(`/deleted from RetailLens/.test(document.querySelector('.undo-bar')?.textContent||'')`,'undo bar');
+  await waitFor(`/deleted from AI LENS/.test(document.querySelector('.undo-bar')?.textContent||'')`,'undo bar');
   await sleep(1200);
   store=await readStore();
   assert.ok(!store.records.some(r=>r.id==='p2')&&store.archive.some(a=>a.id==='p2'),'photo 2 moved to the archive');
@@ -206,6 +207,7 @@ try{
   store=await readStore();
   assert.ok(store.records.some(r=>r.id==='p2'),'Undo brings photo 2 back');
   ok('Undo brings the deleted photo back');
+  await run(`localStorage.removeItem('imei-lens-undo-ms')`);
   for(let i=0;i<3&&await run(`!!document.querySelector('.modal-backdrop')`);i++){await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'});await sleep(400);await run(`document.querySelector('[aria-label="Close photo review"],[aria-label="Close review"]')?.click()`);await sleep(400);}
 
   // ---------- 4. interrupted session ----------

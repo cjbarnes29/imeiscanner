@@ -61,5 +61,5 @@ export function runAutoGive(state: RetailState, month: Month, today: DateKey, pe
 /** A short fingerprint of what automatic mode looks at: the same fingerprint means the same answer, so it is not run twice. */
 export function autoGiveSignature(state: RetailState, month: Month, today: DateKey, records: GiveRecord[]): string {
   const waiting = records.filter(r => r.personId === UNASSIGNED).map(r => r.id).sort();
-  return [state.giveMode || 'suggest', today, localTime(), JSON.stringify(state.workSchedules || {}), JSON.stringify(state.shiftCodes || []), JSON.stringify(state.leaveTransfers || []), JSON.stringify(state.giveLimits || {}), JSON.stringify(state.targets[month] || {}), state.settings.myPersonId, state.settings.myThreshold, waiting.length, waiting[0] || '', waiting[waiting.length - 1] || ''].join('|');
+  return [state.giveMode || 'suggest', today, localTime(), JSON.stringify(state.workSchedules || {}), JSON.stringify(state.shiftCodes || []), JSON.stringify(state.leaveTransfers || []), JSON.stringify(state.giveLimits || {}), JSON.stringify(state.targets[month] || {}), state.settings.myPersonId, state.settings.myThreshold, JSON.stringify(state.pendingUploadIds||[]),JSON.stringify(records.map(r=>[r.id,r.personId,r.model,r.imei,r.duplicate,r.needsReview,state.recordMeta[r.id]?.status])),waiting.length].join('|');
 }

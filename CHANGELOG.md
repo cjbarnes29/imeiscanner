@@ -1,3 +1,11 @@
+## 1.27.1 — Global automation and edit priority
+
+- Shared Automatic / Manual / Custom processing, background crop finishing and protection for manual edits.
+- Home attention, text assistant fallback and Today/coming-days giving, release and report suggestions; global after-upload defaults.
+- Global target-link policy, single-day/date-range availability; Detailed People visibility and swipe-dismissible Home notice.
+- IMEI calendar planned days with person/model quantities and proposed/approved/completed states; shift schedules remain separate.
+- Android code 44, unchanged package IDs and signing for matching in-place upgrades.
+
 # Changelog
 
 What changed in each Android app / web release since 1.7. The web and the Android app are the same build; every version below was published together. Older notes: [1.6](RELEASE-1.6.md), [1.5](RELEASE-1.5.md), [1.4](RELEASE-1.4.md).
@@ -26,6 +34,9 @@ What changed in each Android app / web release since 1.7. The web and the Androi
 - Fixed concurrent laptop-scanner uploads overwriting the job manifest; invalid JSON now returns a clear client error.
 - Shared report text opens Report on an empty app and replaces the previous shared text when the app is already open.
 - Enlarged small controls in target editing, sharing, giving, person filtering and exports. Android asset copying removes stale web bundles before packaging.
+
+## Unreleased — Undo popups leave by themselves
+- The Undo popups ("Asha deleted. Undo", "3 duplicates archived…", "photo deleted…") now leave after **2 seconds** (the person-delete one used to stay 12 seconds, the others until Dismiss) and can be **swiped sideways** away sooner. While a finger is on a popup the clock waits, so Undo can still be pressed. Browser test: `scripts/e2e-undo-bar.mjs`.
 
 ## Unreleased — fixes: Edit all on a phone, restoring a backup
 - **Edit all** is now a card per person with a labeled row per segment (name, Target, Sold, Levels) and an "Everyone together" card. On a phone the wide table lost the segment names.

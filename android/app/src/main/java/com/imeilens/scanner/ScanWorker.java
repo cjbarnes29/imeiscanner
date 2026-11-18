@@ -81,7 +81,7 @@ public final class ScanWorker extends Worker {
             new Intent(context, StopReceiver.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("RetailLens is scanning")
+            .setContentTitle("AI LENS is scanning")
             .setContentText(completed + " of " + total + " photos · " + detail)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -227,7 +227,7 @@ public final class ScanWorker extends Worker {
             ScanStore.finish(context, "completed", "");
             // Photos shared during this scan go first; otherwise the photos that ended without an IMEI 1 get their one automatic retry (never after a retry).
             boolean nextJob = ScanStore.promotePending(context);
-            if (!nextJob && !retryJob) nextJob = ScanStore.startAutoRetry(context, personId);
+            if (!nextJob && !retryJob && context.getSharedPreferences("app-state", Context.MODE_PRIVATE).getBoolean("auto-retry-enabled", true)) nextJob = ScanStore.startAutoRetry(context, personId);
             if (nextJob) {
                 androidx.work.WorkManager.getInstance(context).enqueueUniqueWork("imei-lens-background-scan",
                     androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE, new androidx.work.OneTimeWorkRequest.Builder(ScanWorker.class).build());

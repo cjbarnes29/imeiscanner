@@ -144,6 +144,10 @@ export type LeaveTransfer = { id: string; personId: string; start: DateKey; end:
 
 export type RetailState = {
   version: 1;
+  assistantRoutines?:{id:string;text:string;enabled:boolean;lastPrepared?:string}[];
+  assistantFiles?:{id:string;name:string;type:string;bytes:number;at:string;status:'queued'|'reading'|'ready'|'failed';text:string;note:string;truncated?:boolean}[];
+  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>}[];
+  savedQuestions?: string[];
   /** Additive v2 workflow fields; absent on older backups. Scanner records and photos stay untouched. */
   planningVersion?: 1;
   releasePlans?: ReleasePlan[];

@@ -7,6 +7,7 @@ import { monthOf, type DateKey, type DayLog, type RetailState, type DeliveryPack
 export type RetailRecord = StockSource & { name: string; createdAt?: string; imei2?: string; serial?: string; needsReview?: boolean };
 export type RetailCtx = {
   state: RetailState;
+  readOnly?: boolean;
   latest?: () => RetailState;
   /** Saves the new state. `why` is kept with the snapshot before it (Undo); '' = a trivial change, no snapshot. */
   change: (next: RetailState, why: string) => void;
@@ -23,7 +24,13 @@ export type RetailCtx = {
   sharedText?: string;
   /** The screen's Show all toggle (summary is the default). */
   expanded?: boolean;
+  addPhones?: (rows:{id:string;imei:string;model:string;personId:string}[])=>boolean;
+  archivePhones?: (ids:string[])=>boolean;
   openPlan?: () => void;
+  openHome?: () => void;
+  openAssistant?: () => void;
+  openDiagnostics?: () => void;
+  openSettings?: () => void;
   openPeople?: () => void;
   openModels?: () => void;
   openTargets?: () => void;
@@ -34,6 +41,8 @@ export type RetailCtx = {
   openDatedReport?: (date: string) => void;
   reportDate?: string;
   reportAvailability?: boolean;
+  reportIMEICalendar?: boolean;
+  openIMEICalendar?: () => void;
   openAvailability?: () => void;
   openUploads?: (date: string, personId: string) => void;
   shareFile?: (blob: Blob, name: string, title: string, text?: string) => Promise<boolean>;
