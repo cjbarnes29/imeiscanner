@@ -52,14 +52,25 @@ const makeCtx = (pending, extra = {}) => {
 }
 // 5. queueAssistant tells the truth: a request that needs review is NOT "saved" when the list is full
 {
+  // a real change waits for review, and a 21st one is refused (nothing saved) while 20 are waiting
   const full = makeCtx(20);
-  const refused = queueAssistant(full.ctx, 'give 4 Fold6 to Nobody Known');
+  const refused = queueAssistant(full.ctx, 'add person Zed');
   assert.ok(refused, 'the request was understood as an action: ' + JSON.stringify(refused));
   assert.equal(refused.pending, true, 'it needs review'); assert.equal(refused.saved, false, 'but it was not saved because 20 are waiting');
   assert.equal(full.calls.change.length, 0);
   const room = makeCtx(0);
-  const accepted = queueAssistant(room.ctx, 'give 4 Fold6 to Nobody Known');
-  assert.equal(accepted.pending, true); assert.equal(accepted.saved, true); assert.equal(room.state.assistantRequests.length, 1);
+  const accepted = queueAssistant(room.ctx, 'add person Zed');
+  assert.equal(accepted.pending, true); assert.equal(accepted.blocked, false); assert.equal(accepted.saved, true); assert.equal(room.state.assistantRequests.length, 1); assert.equal(room.state.assistantRequests[0].status, 'pending');
   assert.equal(queueAssistant(makeCtx(0).ctx, 'zzzz qqqq unrelated words'), null, 'something that is not a supported request is not queued');
+}
+// 4. understood but cannot be done (nobody called that): it is NOT "waiting for review" (no ready tick, no dead request on Home); it is an answer that says nothing was changed
+{
+  const t = makeCtx(0);
+  const result = queueAssistant(t.ctx, 'give 4 Fold6 to Nobody Known');
+  assert.equal(result.pending, false, 'nothing to approve'); assert.equal(result.blocked, true); assert.equal(result.saved, true);
+  assert.match(result.output, /Needs clarification: Choose one saved person/);
+  assert.equal(t.state.assistantRequests.length, 1); assert.equal(t.state.assistantRequests[0].status, 'answered', 'kept in history as an answer, not as a pending request');
+  const full = makeCtx(20), again = queueAssistant(full.ctx, 'give 4 Fold6 to Nobody Known');
+  assert.equal(again.saved, true, 'answers do not use up the 20 waiting places'); assert.equal(full.state.assistantRequests.filter(r => r.status === 'pending').length, 20);
 }
 console.log('assistant queue ok');

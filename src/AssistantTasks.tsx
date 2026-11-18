@@ -22,8 +22,8 @@ const stopped = new Set<string>(), active = new Set<string>();
 const latestTask = (ctx: RetailCtx, id: string) => (ctx.latest?.() || ctx.state).assistantTasks?.find(t => t.id === id);
 const nowIso = () => new Date().toISOString();
 /** Same context, but with the records as they are at this moment. Every step must see what the step before it did. */
-const fresh = (ctx: RetailCtx): RetailCtx => ({ ...ctx, records: ctx.latestRecords?.() || ctx.records });
-const actionable = (p: ReturnType<typeof previewAssistant>) => !!(p.giving.length || p.report || p.settings || p.business || p.additions?.length);
+const fresh = (ctx: RetailCtx): RetailCtx => ({ ...ctx, records: ctx.latestRecords?.() || ctx.records, people: ctx.latestPeople?.() || ctx.people });
+const actionable = (p: ReturnType<typeof previewAssistant>) => !!(p.giving.length || p.report || p.settings || p.business || p.people || p.additions?.length);
 
 function saveTask(ctx: RetailCtx, task: AssistantTask, audit?: [string, string]) {
   const state = upsertTask(ctx.latest?.() || ctx.state, task);

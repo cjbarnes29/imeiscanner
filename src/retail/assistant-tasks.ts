@@ -25,6 +25,7 @@ export function actionClasses(preview: AssistantPreview, text: string): string[]
   if (preview.additions?.length) out.add('add-stock');
   if (preview.report) out.add('report');
   if (preview.settings) out.add('settings');
+  if (preview.people) { out.add('people'); if (preview.people.ops.some(op => op.kind === 'delete')) out.add('remove'); }
   const after = preview.business?.after || {};
   if ('recordMeta' in after) out.add(/\b(?:remove|delete)\b/i.test(text) ? 'remove' : 'stock');
   if ('targets' in after || 'storeTargets' in after) out.add('targets');
@@ -48,7 +49,7 @@ export function decideStep(mode: AssistantMode, preview: AssistantPreview, class
   if (mode === 'assistant') return { action: 'hold', reason: 'Assistant mode: waiting for your approval.' };
   if (mode === 'copilot') return { action: 'hold', reason: 'Copilot mode: approve the whole task once.' };
   if (preview.warnings.length) return { action: 'hold', reason: 'Has warnings, so it needs your review.' };
-  if (classes.includes('remove')) return { action: 'hold', reason: 'Removing phones always needs your approval.' };
+  if (classes.includes('remove')) return { action: 'hold', reason: 'Removing phones or people always needs your approval.' };
   const notAllowed = classes.filter(c => !autopilot.allow.includes(c));
   if (notAllowed.length) return { action: 'hold', reason: `Autopilot is not allowed to change: ${notAllowed.join(', ')}.` };
   if (autopilot.usedToday >= autopilot.dailyCap) return { action: 'hold', reason: `Autopilot daily limit of ${autopilot.dailyCap} actions reached.` };

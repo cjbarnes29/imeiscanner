@@ -165,6 +165,7 @@ jobs:
           ### What is new
           - **Assistant:** a round button on every screen opens a small chat with suggestions from your history; replies are a headline and bullets; "What next?" buttons work; "change flagship 3 target to 12 and divide it to promoters" is understood (preview first). **Search bar** in the header to jump to any screen or setting.
           - **Reports from the assistant:** ask for an Excel, PowerPoint or simple-notes report (Home → Make a report), then download it or send it on WhatsApp; built from the app's own numbers, no IMEI numbers, nothing changed.
+          - **People by chat:** add, rename, delete and list people ("add 3 people Asha, Bilal and Chen"); reviewed first, undoable; phones of a deleted person move to Unassigned. A command that cannot be done is no longer shown as waiting for review.
           - **Reject all waiting requests** button on Home > Assistant review.
           - **One person's target by chat:** "set Maya's Flagship 1 target to 12" (also "my" and "everyone's"); previewed, approved, Undo; sold numbers are never edited.
           - **Voice for the assistant:** Speak button in the chat; offline speech to text (Whisper tiny, English, one-time 43 MB download), transcript shown and editable before it runs; names matched to your people.

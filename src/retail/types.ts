@@ -146,12 +146,14 @@ export type AssistantTask = { id: string; text: string; mode: AssistantMode; sta
 export type WorkSchedule = { requireSchedule?: boolean; windows?: AvailabilityWindow[]; targetMode?: 'manual' | 'linked'; calculationDays?: Record<Month, number>; offDivisor?: Record<Month, number>; leaveDivisor?: Record<Month, number>; offWeekdays: number[]; offDates: DateKey[]; annualLeave: { id: string; start: DateKey; end: DateKey }[] };
 export type LeaveTransfer = { id: string; personId: string; start: DateKey; end: DateKey; createdAt: string; status: 'active' | 'cancelled' | 'draft'; adjustmentsApplied?: boolean; targetSnapshots?: Record<string, Record<Segment, { target: number; levels?: TargetLine['levels']; appliedLevels?: TargetLine['levels'] }>>; monthDays?: number; leaveDays?: number; divisor?: number; segments: { segment: Segment; total: number; shares: { personId: string; units: number }[] }[] };
 
+/** One change to the list of people made by the assistant. `moved` = phones that go to Unassigned when the person is deleted (kept, never deleted). */
+export type PeopleOp = { kind: 'add'; id: string; name: string } | { kind: 'rename'; id: string; from: string; to: string } | { kind: 'delete'; id: string; name: string; moved: string[] };
 export type RetailState = {
   version: 1;
   assistantRoutines?:TimedRoutine[];
   assistantFiles?:{id:string;name:string;type:string;bytes:number;at:string;status:'queued'|'reading'|'ready'|'failed';text:string;note:string;truncated?:boolean}[];
   assistantTasks?: AssistantTask[];
-  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>}[];
+  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>;peopleOps?:PeopleOp[]}[];
   savedQuestions?: string[];
   /** Additive v2 workflow fields; absent on older backups. Scanner records and photos stay untouched. */
   planningVersion?: 1;
