@@ -1,8 +1,7 @@
 name: Deploy GitHub Pages
 
+# Manual only (Actions > Deploy GitHub Pages > Run workflow). The project ships APKs, so a push to main must not publish the website.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

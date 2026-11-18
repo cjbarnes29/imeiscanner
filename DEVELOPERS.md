@@ -115,7 +115,7 @@ Download `AI-LENS-<version>.apk` from the release and open it: it updates the in
 Never commit the keystore, the passwords or the secret text. This workflow only reads them from GitHub Secrets, writes the key to the runner's temporary folder, and deletes it when the step ends, even if the build fails.
 
 ## Releases and GitHub
-- **Pages (the website)** deploys on every push to `main`. **Android releases** build from a tag named `android-vX.Y.Z` pushed on a `main` commit: the workflow builds the APK and attaches it to a GitHub release. **Beta releases** use `beta-vX.Y.Z-bN` (main app, update-safe) and `betatest-vX.Y.Z-bN` (isolated test app); see the section above.
+- **Pages (the website)** deploys only when started by hand (**Actions > Deploy GitHub Pages > Run workflow**); a push to `main` does not publish the website. **Android releases** build from a tag named `android-vX.Y.Z` pushed on a `main` commit: the workflow builds the APK and attaches it to a GitHub release. **Beta releases** use `beta-vX.Y.Z-bN` (main app, update-safe) and `betatest-vX.Y.Z-bN` (isolated test app); see the section above.
 - Both run `npm run build`, so one commit gives one web bundle: the website and the APK contain the **same** files. Compare the version line in Settings.
 - **CI** (`Build`) runs the unit tests and the production build on every push and pull request.
 - **Backups:** before each merge to `main`, the previous `main` is saved as tag `backup-main-before-X.Y.Z` and branch `backup/main-before-X.Y.Z`, and the feature branch as `backup/feature-X.Y.Z`. To undo a merge: `git revert -m 1 <merge commit>`, or reset `main` to the backup tag.
