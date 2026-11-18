@@ -1,3 +1,4 @@
+import type { TimedRoutine } from './routine-schedule';
 /**
  * RetailLens data model. IMEI Lens stays the scanning engine (records, photos, people); everything here is kept apart from the scan records, under its
  * own "retail:" keys, and refers to records only by id / IMEI. Nothing in this folder touches a picture or changes a scan record.
@@ -25,7 +26,11 @@ export const dateKey = (date: Date = new Date()): DateKey => `${date.getFullYear
 export const monthOf = (key: DateKey | Date): Month => (typeof key === 'string' ? key : dateKey(key)).slice(0, 7);
 /** The phone's local day of a stored time (records keep UTC times; an upload at 23:50 belongs to that day, not the next UTC day). '' when it is not a time. */
 export const localDay = (iso?: string): DateKey => { const d = new Date(iso || ''); return Number.isNaN(d.getTime()) ? '' : dateKey(d); };
-export const isDateKey = (value: unknown): value is DateKey => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+export const isDateKey = (value: unknown): value is DateKey => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T12:00:00`), [year, month, day] = value.split('-').map(Number);
+  return !Number.isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() + 1 === month && d.getDate() === day;
+};
 export const isMonth = (value: unknown): value is Month => typeof value === 'string' && /^\d{4}-\d{2}$/.test(value);
 /** Days in a month and days left in it counting today (never below 1 while the month is running, 0 after it ended). */
 export function daysInMonth(month: Month): number { const [y, m] = month.split('-').map(Number); return new Date(y, m, 0).getDate(); }
@@ -64,13 +69,15 @@ export type Sale = {
 };
 
 /** `achieved` is the person's own sold count; `levels` = the pieces needed IN TOTAL at each level, typed from the Promoter screen (blank = target x level, rounded up). */
-export type TargetLine = { segment: Segment; target: number; achieved: number; levels?: Partial<Record<Level, number>> };
+export type TargetLine = { segment: Segment; target: number; achieved: number; levels?: Partial<Record<Level, number>>; /** The highest level this line counts (some segments stop at 100 %): asking for more shows this level instead. Missing = no limit. */ cap?: Level };
 export type PersonTarget = { personId: string; month: Month; lines: TargetLine[]; source: 'screenshot' | 'manual'; importedAt: string; note?: string };
 
 export type IncentiveRates = { perUnit: Record<Segment, number>; multiplier: { 70: number; 100: number; 120: number }; currency: string };
 
 export type AllocationItem = { recordId: string; imei: string; segment: Segment; from: string; to: string };
-export type AllocationEvent = { id: string; at: string; month: Month; source: 'recommended' | 'manual'; items: AllocationItem[]; status: 'applied' | 'undone'; undoneAt?: string; note?: string };
+/** What one person may be given a day: at least `min` (when there are phones), at most `max` (blank = no limit); `off` = leave this person out of suggestions and automatic gives. */
+export type GiveLimit = { min?: number; max?: number; off?: boolean };
+export type AllocationEvent = { id: string; at: string; month: Month; source: 'recommended' | 'manual' | 'auto'; items: AllocationItem[]; status: 'applied' | 'undone'; undoneAt?: string; note?: string };
 
 export type DayLog = {
   activations: number; scPlus: number;
@@ -106,6 +113,8 @@ export type ReportItem = {
 /** Anything else in the report (header, ---- lines, totals, other brands, shifts) is kept as typed. */
 export type ReportText = { t: 'text'; text: string };
 export type StockReport = {
+  /** Identifies this report period so undo never subtracts from a newer day's report. */
+  releaseRevision?: string;
   entries: (ReportItem | ReportText)[];
   /** The "Total Sellout" the report states, and whether the person said it includes phones that are not in the list (extra = the difference). */
   totalSellout?: { typed: number; acknowledged: boolean; extra: number };
@@ -121,8 +130,50 @@ export type ModelColours = { names: string[]; aliases: Record<string, string> };
 /** A phone that was marked Sold and already counted in the targets and the report (see soldsync.ts). */
 export type SoldEntry = { personId: string; segment: Segment; month: Month; code: string; storage: string; /** the day it was counted (missing = counted before days were kept) */ date?: string };
 
+export type PlanMethod = 'goal' | 'points' | 'spread' | 'milestones' | 'stored' | 'quantity';
+export type PlanRequest = { personId: string; segments: Segment[]; method: PlanMethod; value: number; date: DateKey; until: DateKey; reserve: number; dailyLimit?: number; skipDays: number[]; priority: 'lowest' | 'nearest'; milestones: { date: DateKey; percent: number }[]; quantityMode?: 'calculated' | 'manual'; manualDaily?: Record<DateKey, Record<Segment, number>>; skipDates?: DateKey[]; goalUnits?: Record<Segment, number>; coverageBase?: Record<Segment, number>; goalBaseTargets?: Record<Segment, number> };
+export type ReleasePlan = { id: string; createdAt: string; calculatedFor?: DateKey; request: PlanRequest; fingerprint: string; entries: { id: string; date: DateKey; segment: Segment; recordIds: string[]; required: number; before: number; target: number; goal: number; status: 'scheduled' | 'released' | 'cancelled'; releaseId?: string }[] };
+export type ReleaseEvent = { id: string; at: string; date: DateKey; personId: string; segment: Segment; recordIds: string[]; reportedIds: string[]; reportLinks?: Record<string, string>; details: Record<string, SoldEntry>; status: 'released' | 'undone'; undoneAt?: string };
+export type AvailabilityWindow = { id: string; start: DateKey; end: DateKey; available: boolean; startTime?: string; endTime?: string; source?: string; code?: string };
+export type ShiftCode = { code: string; name: string; available: boolean; periods: { start: string; end: string }[]; needsReview?: boolean };
+export type RosterEntry = { id: string; personId: string; personText: string; start: string; end: string; available: boolean | null; startTime: string; endTime: string; code: string; source: string };
+export type RosterDraft = { id: string; sourceId?: string; sourceName: string; month: string; order: 'DMY' | 'MDY'; entries: RosterEntry[]; codes: ShiftCode[]; warnings: string[]; targetMode: 'manual' | 'linked'; requireSchedule: boolean; status: 'pending' | 'applied' | 'rejected'; at: string };
+export type DeliverySetting = { enabled: boolean; destination: 'mobile' | 'group'; phone: string; includeReport: boolean; includeImeis: boolean; reportMode: 'all' | 'quantity'; quantities: Record<Segment,number> };
+export type DeliveryPacket = { id: string; at: string; personId: string; phone: string; destination: 'mobile' | 'group'; releaseIds: string[]; recordIds: string[]; reportIds: string[]; text: string; fingerprint?: string; kind?: 'report'; status: 'prepared' | 'opened' | 'sent-by-user' | 'not-sent' };
+export type AssistantMode = 'assistant' | 'copilot' | 'autopilot';
+export type AssistantTaskStep = { id: string; text: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'undone'; requestId?: string; attempts: number; error?: string; classes: string[]; doneAt?: string };
+export type AssistantTask = { id: string; text: string; mode: AssistantMode; status: 'running' | 'review' | 'done' | 'failed' | 'undone' | 'rejected'; at: string; updatedAt: string; steps: AssistantTaskStep[] };
+export type WorkSchedule = { requireSchedule?: boolean; windows?: AvailabilityWindow[]; targetMode?: 'manual' | 'linked'; calculationDays?: Record<Month, number>; offDivisor?: Record<Month, number>; leaveDivisor?: Record<Month, number>; offWeekdays: number[]; offDates: DateKey[]; annualLeave: { id: string; start: DateKey; end: DateKey }[] };
+export type LeaveTransfer = { id: string; personId: string; start: DateKey; end: DateKey; createdAt: string; status: 'active' | 'cancelled' | 'draft'; adjustmentsApplied?: boolean; targetSnapshots?: Record<string, Record<Segment, { target: number; levels?: TargetLine['levels']; appliedLevels?: TargetLine['levels'] }>>; monthDays?: number; leaveDays?: number; divisor?: number; segments: { segment: Segment; total: number; shares: { personId: string; units: number }[] }[] };
+
 export type RetailState = {
   version: 1;
+  assistantRoutines?:TimedRoutine[];
+  assistantFiles?:{id:string;name:string;type:string;bytes:number;at:string;status:'queued'|'reading'|'ready'|'failed';text:string;note:string;truncated?:boolean}[];
+  assistantTasks?: AssistantTask[];
+  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>}[];
+  savedQuestions?: string[];
+  /** Additive v2 workflow fields; absent on older backups. Scanner records and photos stay untouched. */
+  planningVersion?: 1;
+  releasePlans?: ReleasePlan[];
+  releases?: ReleaseEvent[];
+  pendingUploadIds?: string[];
+  localAI?: { enabled: boolean };
+  reportDrafts?: Record<DateKey, { report: StockReport; updatedAt: string; mode: 'auto' | 'manual' }>;
+  storeTargets?: Record<Month, Record<Segment, number>>;
+  workSchedules?: Record<string, WorkSchedule>;
+  shiftCodes?: ShiftCode[];
+  scheduleReview?: { from?: DateKey; through: DateKey; at: string; fingerprint: string };
+  rosterSources?: { id: string; name: string; type: string; bytes: number; at: string }[];
+  rosterDrafts?: RosterDraft[];
+  finalReportDraft?: { text: string; baseText: string; at: string };
+  /** Accessories/tablets/wearables OSR is manual and isolated from phone IMEI stock. */
+  accessoryReport?: StockReport;
+  accessoryStock?: Record<string, { name: string; quantity: number; updatedAt: string; reportDate?: string }>;
+  accessoryFinalDraft?: { text: string; baseText: string; at: string };
+  deliverySettings?: Record<string,DeliverySetting>;
+  deliveryPackets?: DeliveryPacket[];
+  leaveTransfers?: LeaveTransfer[];
   catalog: CatalogItem[];
   /** The sales already counted (record id -> who, which segment, which month, which model): a phone is never counted twice, and taking it back undoes it. */
   soldLedger?: Record<string, SoldEntry>;
@@ -132,6 +183,8 @@ export type RetailState = {
   colours?: Record<string, ModelColours>;
   /** The person's own segments (Fold 1, Fold 2…). Missing = the starting list. */
   segments?: SegmentDef[];
+  /** Who a Promoter screenshot or pasted text is for: the name or ID printed on it (lower case) -> person id. Learned when a person confirms an import. */
+  targetAliases?: Record<string, string>;
   /** What the report calls a model: normalised report name -> catalog model code. Learned when a line is saved ("remember"). */
   aliases: Record<string, string>;
   /** The last saved pasted report (stock and sold of the store). The one before it is in the Undo snapshots. */
@@ -143,6 +196,10 @@ export type RetailState = {
   targets: Record<Month, Record<string, PersonTarget>>;
   rates: IncentiveRates;
   allocations: AllocationEvent[];
+  /** 'auto' = phones that need an owner are given by themselves (each give is in the history and can be undone). Missing = suggestions only. */
+  giveMode?: 'suggest' | 'auto';
+  /** Per person: minimum and maximum phones a day, and whether the person is left out. */
+  giveLimits?: Record<string, GiveLimit>;
   days: Record<DateKey, DayLog>;
   stockAdjust: StockAdjust[];
   template?: ReportTemplate;

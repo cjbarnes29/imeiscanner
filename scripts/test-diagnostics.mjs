@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+import {readFile,writeFile,mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const folder=await mkdtemp(join(tmpdir(),'retail-diagnostics-'));
+const src=(await readFile('src/diagnostics.ts','utf8')).replace("import { APP_COMMIT, APP_VERSION } from './version';","const APP_COMMIT='demo', APP_VERSION='test';");
+await writeFile(join(folder,'diagnostics.mjs'),ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
+const data=new Map(),events=new Map();globalThis.localStorage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};globalThis.window={addEventListener:(k,v)=>events.set(k,v),dispatchEvent:()=>{}};
+const D=await import(pathToFileURL(join(folder,'diagnostics.mjs')).href);
+data.set('retaillens-session-v1',JSON.stringify({active:true}));D.installDiagnostics();assert.equal(D.interruptedSession,true);assert.equal(D.readDiagnostics()[0].code,'previous-session-unclosed');
+const error=new Error('Private report and photo names must never be saved');error.stack='sensitive-file.jpg';D.recordDiagnostic('uncaught-web-error',error,12);const text=JSON.stringify(D.readDiagnostics());assert.ok(!text.includes('Private'));assert.ok(!text.includes('sensitive'));assert.equal(D.readDiagnostics().at(-1).line,12);
+for(let n=0;n<100;n++)D.recordDiagnostic('demo-error',error);assert.equal(D.readDiagnostics().length,80);
+const report=JSON.stringify(D.diagnosticReport({remaining:3,phone:'Private number',raw:'private report',status:'processing',lastCrash:{at:1,type:'Error',frames:['com.demo.Worker.run:12','sensitive-file.jpg']}},{usage:100,records:'secret'},{records:12,imei:'private'}));assert.ok(!report.includes('private'));assert.ok(!report.includes('sensitive'));assert.match(report,/com.demo.Worker.run:12/);assert.match(report,/processing/);
+const finish=D.beginDiagnosticOperation('retail-write');assert.ok(data.has('retaillens-diagnostic-operation-v1'));finish();finish();assert.equal(data.has('retaillens-diagnostic-operation-v1'),false);assert.deepEqual(D.readDiagnostics().slice(-2).map(e=>e.code),['retail-write-start','retail-write-saved']);const failed=D.beginDiagnosticOperation('retail-write');failed(error);assert.equal(D.readDiagnostics().at(-1).code,'retail-write-failed');
+events.get('pagehide')();assert.equal(JSON.parse(data.get('retaillens-session-v1')).active,false);events.get('pageshow')();assert.equal(JSON.parse(data.get('retaillens-session-v1')).active,true);
+console.log('PASS: local diagnostics capture, restart detection, clean-close handling, capped logs and private-data exclusion.');

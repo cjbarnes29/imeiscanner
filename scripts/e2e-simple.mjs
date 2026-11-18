@@ -63,11 +63,11 @@ try{
   await waitFor(`document.readyState==='complete'`,'reload');
   await sleep(1500);
   await run(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent));if(b)b.click();return true;})()`);
-  // the scanning screen comes first and the brand is RetailLens
+  // the scanning screen comes first and the brand is AI LENS
   await waitFor(`!!document.querySelector('.bottom-nav')`,'bottom nav');
-  assert.match(await run(`document.querySelector('.brand')?.innerText||''`),/RETAILLENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./);
-  assert.match(await run(`document.title`),/RetailLens/);
-  ok('the app is branded RetailLens with the tagline "Scan. Sell. Track. Achieve."');
+  assert.match(await run(`document.querySelector('.brand')?.innerText||''`),/AI LENS[\s\S]*SCAN\. SELL\. TRACK\. ACHIEVE\./);
+  assert.match(await run(`document.title`),/AI LENS/);
+  ok('the app is branded AI LENS with the tagline "Scan. Sell. Track. Achieve."');
 
   // ---------- Simple mode: three screens, Scan, Phones, Send ----------
   assert.deepEqual(await run(`[...document.querySelectorAll('.bottom-nav button span')].map(s=>s.textContent)`),['Scan','Phones','Send'],'the bottom bar of Simple mode');

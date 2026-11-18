@@ -37,10 +37,23 @@ import java.util.UUID;
 public final class MainActivity extends Activity {
     private static final String WORK_NAME = "imei-lens-background-scan";
     private WebView webView;
+    /** The live page, so the routine alarm can wake it (RoutineAlarmReceiver). Cleared when the screen is destroyed. */
+    private static volatile MainActivity current;
+
+    /** Tells the page to check its timed routines now. False when the page is not alive (the app was closed). */
+    static boolean wakePage() {
+        final MainActivity live = current;
+        if (live == null || live.webView == null) return false;
+        live.webView.post(() -> live.webView.evaluateJavascript("window.dispatchEvent(new Event('retaillens-routine-wake'))", null));
+        return true;
+    }
+
     private android.webkit.PermissionRequest cameraRequest;
 
     // Phone camera: the permission request that is waiting for the user's answer (person, mode), if any.
     private String[] cameraAfterPermission;
+    // Voice input: the page's microphone request that is waiting for the user's answer, if any.
+    private android.webkit.PermissionRequest micRequest;
 
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
@@ -50,6 +63,14 @@ public final class MainActivity extends Activity {
             if (wanted == null) return;
             if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) launchCamera(wanted[0], wanted[1]);
             else notifyCamera("denied", CameraInbox.waiting(ScanStore.root(this)).size());
+            return;
+        }
+        if (code == 1012) {
+            if (micRequest != null) {
+                if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) micRequest.grant(new String[]{android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                else micRequest.deny();
+                micRequest = null;
+            }
             return;
         }
         if (code == 1010 && cameraRequest != null) {
@@ -74,11 +95,17 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        RecoveryDiagnostics.install(this);
+        current = this;
         cleanStaleCache();
         if (state == null) handleShare(getIntent());
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         webView = new WebView(this);
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::navigateBack);
+        }
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.getSettings().setAllowFileAccess(false);
@@ -109,7 +136,13 @@ public final class MainActivity extends Activity {
             @Override public void onPermissionRequest(android.webkit.PermissionRequest request) {
                 runOnUiThread(() -> {
                     if (!"https".equals(request.getOrigin().getScheme()) || !"appassets.androidplatform.net".equals(request.getOrigin().getHost())) { request.deny(); return; }
-                    if (!java.util.Arrays.asList(request.getResources()).contains(android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE)) { request.deny(); return; }
+                    java.util.List<String> wanted = java.util.Arrays.asList(request.getResources());
+                    if (wanted.contains(android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE) && !wanted.contains(android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE)) { // voice input: the microphone, only for this app's own page
+                        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) request.grant(new String[]{android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                        else { if (micRequest != null) micRequest.deny(); micRequest = request; requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1012); }
+                        return;
+                    }
+                    if (!wanted.contains(android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE)) { request.deny(); return; }
                     if (checkSelfPermission(Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED)
                         request.grant(new String[]{android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE});
                     else { if (cameraRequest != null) cameraRequest.deny(); cameraRequest = request; requestPermissions(new String[]{Manifest.permission.CAMERA}, 1010); }
@@ -117,6 +150,7 @@ public final class MainActivity extends Activity {
             }
             @Override public void onPermissionRequestCanceled(android.webkit.PermissionRequest request) {
                 if (cameraRequest == request) cameraRequest = null;
+                if (micRequest == request) micRequest = null;
             }
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (webFileCallback != null) webFileCallback.onReceiveValue(null);
@@ -333,6 +367,11 @@ public final class MainActivity extends Activity {
             catch (Exception ignored) { }
         }
         return queue;
+    }
+
+    @Override protected void onDestroy() {
+        if (current == this) current = null;
+        super.onDestroy();
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -653,10 +692,19 @@ public final class MainActivity extends Activity {
         });
     }
 
-    @Override public void onBackPressed() {
-        if (webView.canGoBack()) webView.goBack();
+    private void navigateBack() {
+        if (webView == null) { leaveScreen(); return; }
+        // All tabs share one URL. Ask the page's history rather than relying on WebView's URL history list.
+        webView.evaluateJavascript("(function(){if(Number(history.state && history.state.imeiDepth)>0){history.back();return true;}return false;})()",
+            handled -> { if (!"true".equals(handled)) leaveScreen(); });
+    }
+
+    private void leaveScreen() {
+        if (Build.VERSION.SDK_INT >= 31) moveTaskToBack(true);
         else super.onBackPressed();
     }
+
+    @Override public void onBackPressed() { navigateBack(); }
 
     private final class Bridge {
         @JavascriptInterface public void choosePhotos(String personId) {
@@ -703,6 +751,23 @@ public final class MainActivity extends Activity {
         /** The crop queue's progress. While active, an ongoing notification and a wake lock keep the app working when minimized. */
         @JavascriptInterface public void queueStatus(int done, int total, boolean active) {
             if (active) QueueService.show(MainActivity.this, done, total); else QueueService.hide(MainActivity.this);
+        }
+
+        /** The page reports when the next timed routine is due (epoch milliseconds, 0 = none): Android keeps the app alive and wakes it then. */
+        @JavascriptInterface public void routineKeeper(boolean on, String label, double atMillis) {
+            if (on && atMillis > 0) RoutineKeeperService.on(MainActivity.this, label, (long) atMillis); else RoutineKeeperService.off(MainActivity.this);
+        }
+
+        /** True once if the notification's Turn off button was tapped. */
+        @JavascriptInterface public boolean routineKeeperStopRequested() {
+            boolean value = RoutineKeeperService.stopRequested;
+            RoutineKeeperService.stopRequested = false;
+            return value;
+        }
+
+        /** "Your WhatsApp report is ready": a notification whose tap opens WhatsApp with the text filled in. Nothing is ever sent by the app. */
+        @JavascriptInterface public void whatsappReady(String destination, String phone, String text) {
+            WhatsAppReady.show(MainActivity.this, destination, phone, text);
         }
 
         /** True once if the notification's Pause button was tapped. */
@@ -884,6 +949,51 @@ public final class MainActivity extends Activity {
         }
 
         @JavascriptInterface public String speedInfo() { return DeviceProfile.describe(MainActivity.this); }
+
+        @JavascriptInterface public void setProcessingOptions(boolean autoRetry) {
+            getSharedPreferences("app-state", MODE_PRIVATE).edit().putBoolean("auto-retry-enabled", autoRetry).apply();
+        }
+
+        /** Read-only startup health check. No record fields, paths or contact data are returned. */
+        @JavascriptInterface public String recoveryInfo() {
+            JSONObject out = new JSONObject();
+            try {
+                JSONObject job = ScanStore.read(MainActivity.this);
+                boolean active = false;
+                for (androidx.work.WorkInfo work : WorkManager.getInstance(MainActivity.this).getWorkInfosForUniqueWork(WORK_NAME).get(2, java.util.concurrent.TimeUnit.SECONDS))
+                    if (!work.getState().isFinished()) active = true;
+                int count = job.optInt("count"), done = job.optInt("completed");
+                out.put("status", job.optString("status")); out.put("count", count); out.put("completed", done);
+                out.put("remaining", ScanRecovery.remaining(count, done)); out.put("active", active);
+                out.put("canResume", ScanRecovery.canResume(job.optString("id"),job.optString("status"),count,done,active));
+                out.put("notifications", androidx.core.app.NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled());
+                android.os.PowerManager power = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                out.put("batterySaver", power != null && power.isPowerSaveMode());
+                out.put("batteryUnrestricted", power != null && power.isIgnoringBatteryOptimizations(getPackageName()));
+                out.put("freeBytes", getFilesDir().getUsableSpace());
+                String crash = getSharedPreferences("recovery-diagnostics", MODE_PRIVATE).getString("last-crash", "");
+                if (!crash.isEmpty()) out.put("lastCrash", new JSONObject(crash));
+            } catch (Exception error) { try { out.put("checkError", error.getClass().getSimpleName()); } catch (Exception ignored) {} }
+            return out.toString();
+        }
+
+        @JavascriptInterface public boolean resumeInterruptedScan() {
+            try {
+                // KEEP is a second guard against replacing a worker which starts during this check.
+                for (androidx.work.WorkInfo work : WorkManager.getInstance(MainActivity.this).getWorkInfosForUniqueWork(WORK_NAME).get(2, java.util.concurrent.TimeUnit.SECONDS))
+                    if (!work.getState().isFinished()) return true;
+                if (!ScanStore.resume(MainActivity.this)) return false;
+                WorkManager.getInstance(MainActivity.this).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP,new OneTimeWorkRequest.Builder(ScanWorker.class).build());
+                notifyWeb(); return true;
+            } catch (Exception error) { return false; }
+        }
+
+        @JavascriptInterface public void openPerformanceSettings() {
+            runOnUiThread(() -> {
+                try { startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:"+getPackageName()))); }
+                catch (Exception ignored) { }
+            });
+        }
 
         @JavascriptInterface public boolean setSpeedMode(String mode) { return DeviceProfile.setMode(MainActivity.this, mode); }
 

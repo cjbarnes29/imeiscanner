@@ -1,6 +1,16 @@
-# RetailLens: how to work in this project
+# AI LENS: how to work in this project
+
+## Current continuation checkpoint
+
+Start with [docs/CLAUDE-START-HERE.md](docs/CLAUDE-START-HERE.md), then [the AI assistant handoff, the newest](docs/HANDOFF-AI-ASSISTANT.md), then [the detailed handoff](docs/HANDOFF-AI-LENS.md) and [the audit](docs/RELEASE-1.27.1-AUDIT.md). The start document distinguishes current committed source from older APKs and supersedes stale “uncommitted / not built” notes. The latest user request in this session is documentation-only handoff; do not treat that as a new instruction to change code or publish.
+
+Keep Home as the full review surface, assistant responses concise, and all release/stock/report/calendar invariants intact. Preserve package/signing/data compatibility. APK-only deliverables and isolated emulator verification remain required.
 
 Offline retail app (React + TypeScript + Vite in an Android WebView, with a native Android scanner). Package id `com.imeilens.scanner` must never change. Signing config stays untouched.
+
+## Quality standards (read and follow)
+
+The full standard is [docs/APP-QUALITY-STANDARDS.md](docs/APP-QUALITY-STANDARDS.md): functionality, performance, UI/UX, data integrity and security, testing, maintainability, a release quality gate, and classifying findings as Critical / High / Medium / Low. In short: quality, reliability, simplicity and data integrity come before new features; never claim something works unless it was verified with real test output; say what could not be tested (emulator, real phone); fix approved issues without unrelated changes. For Android, emulator testing comes first, on the isolated test app only.
 
 ## Every time code is written
 1. Look first: check what already exists (search the repo) and reuse it. Smallest change that solves the problem; no unrelated rewrites.
@@ -8,6 +18,10 @@ Offline retail app (React + TypeScript + Vite in an Android WebView, with a nati
 3. Add a test for each fix or feature (unit in `scripts/test-retail-v2.mjs` or an e2e step) and see it pass.
 4. Add a line to `CHANGELOG.md` and to the release notes in `.github/workflows/beta-release.yml`.
 5. Report honestly: what passed, what failed, what was not tested on a real phone.
+
+## Deliverables: APK only (user decision, 2026-11-18)
+
+Deliver Android APKs only: no standalone web build, web deploy or web release. The web app is built only as part of making the APK (it is bundled inside). Test the APK: install the isolated test app (`com.imeilens.scanner.phonetest`) on an emulator and run the emulator suite; do not present browser-only runs as release evidence. Never install or reset the real app.
 
 ## Standing rules
 - Commit, push, merge and release only when the user asks in that conversation. Earlier approval does not carry over.

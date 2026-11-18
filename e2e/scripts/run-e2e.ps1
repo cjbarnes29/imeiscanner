@@ -172,7 +172,7 @@ if ($safe) {
 }
 
 # ---- report ---------------------------------------------------------------------------------------------------------------------
-$mv = (& cmd /c 'maestro --version 2>&1') | Select-Object -Last 1
+$mv = if ($env:MAESTRO_HOME) { Split-Path -Leaf (Split-Path -Parent $env:MAESTRO_HOME) } else { "installed (version not queried)" }
 $md = @("# Emulator test report $stamp", "", "Device: $Device. App: $App (isolated test app). Maestro $mv.", "",
   "| Test | Result | Seconds | Crashes | Notes |", "|---|---|---|---|---|")
 foreach ($r in $rows) { $md += "| $($r.Flow) | $($r.Result) | $($r.Seconds) | $($r.Crashes) | $($r.Notes) |" }

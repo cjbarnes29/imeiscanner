@@ -9,8 +9,26 @@ import { evaluate, webState } from '../scripts/cdp-state.mjs';
 
 export { check, finish, webState, adb };
 const here = dirname(fileURLToPath(import.meta.url));
-/** Opens a section from the ⋯ More menu (People, Gives, Segments, Catalog, Share, Backup). */
+/** Opens a section from the ⋯ More menu (People, Give and share, Segments, Catalog, Backup). The old names Gives, Assign by model and Share still work: they open that tab. */
 export async function openMore(c, label) {
+  const expand = async () => { await js(c, `document.querySelector('button[aria-label="Show all details"]')?.click();true`); };
+  if (['People', 'Give and share', 'Segments', 'Catalog', 'Backup', 'Backup and data'].includes(label)) {
+    const group = ['People','Give and share'].includes(label) ? 'People & sharing' : ['Segments','Catalog'].includes(label) ? 'Models & segments' : 'Settings & backup';
+    const opened = await openMore(c, group);
+    if (label === 'Give and share') await clickText(c, '^Suggested$', { within: "document.querySelector('.people-sharing-tabs')" });
+    if (label === 'Segments' || label === 'Catalog') await clickText(c, label === 'Catalog' ? '^All models$' : '^By segment$', { within: "document.querySelector('.model-manager .give-tabs')" });
+    if (label.startsWith('Backup')) await clickText(c, '^Backup, restore & history$');
+    await sleep(500); await expand(); return opened;
+  }
+  // Gives, Assign by model and Share are one section now: Give and share, with the tabs Suggested, By model and Send.
+  const tabOf = { Gives: 'Suggested', 'Assign by model': 'By model', Share: 'Send' }[label];
+  if (tabOf) {
+    const opened = await openMore(c, 'Give and share');
+    await sleep(500);
+    const clicked = await js(c, `(()=>{const b=[...document.querySelectorAll('.give-tabs button')].find(x=>x.textContent.trim()===${JSON.stringify(tabOf)});if(!b)return false;b.click();return true;})()`);
+    await sleep(700);
+    return opened && clicked;
+  }
   await js(c, `document.querySelector('button[aria-label="More"]').click();true`);
   await sleep(700);
   const ok = await js(c, `(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(label)}));if(!b)return false;b.click();return true;})()`);

@@ -35,3 +35,4 @@ e2e/fixtures/out/
 
 # local Claude Code settings and hooks
 .claude/
+.omc/

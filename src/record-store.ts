@@ -64,13 +64,15 @@ export async function saveInventory<T extends { id: string; sourcePictureId?: st
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(TABLE, 'readwrite');
       const store = transaction.objectStore(TABLE);
-      for (const row of changed) store.put(row, `${RECORD_PREFIX}${row.id}`);
-      for (const id of removed) store.delete(`${RECORD_PREFIX}${id}`);
-      for (const sourceId of unusedSources) if (!isProtectedSource(sourceId)) store.delete(`source:${sourceId}`);
-      store.delete('records');
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
+      try {
+        for (const row of changed) store.put(row, `${RECORD_PREFIX}${row.id}`);
+        for (const id of removed) store.delete(`${RECORD_PREFIX}${id}`);
+        for (const sourceId of unusedSources) if (!isProtectedSource(sourceId)) store.delete(`source:${sourceId}`);
+        store.delete('records');
+      } catch (error) { transaction.abort(); reject(error); }
     });
     lastSaved = current;
   } finally {

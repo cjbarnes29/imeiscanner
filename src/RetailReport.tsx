@@ -1,8 +1,14 @@
-// RetailLens > Report: paste the store's WhatsApp report, see it checked against the phones that were scanned, tap a line to fix it in a popup (model,
+// AI LENS > Report: paste the store's WhatsApp report, see it checked against the phones that were scanned, tap a line to fix it in a popup (model,
 // segment, sold, stock, colours; Previous / Next move along the report), and copy it back out in the same layout. The rules are in
 // src/retail/stockreport.ts and reconcile.ts (unit-tested); this file only shows them. Nothing changes by itself: a difference is marked and the
 // person decides. Saving a line marks it as checked, so it leaves the "to check" list even when it still differs from the scans.
 import { useMemo, useState } from 'react';
+import { ReleaseReportPicker } from './RetailPlan';
+import { pendingReleases } from './retail/planning';
+import { DatedReports } from './RetailDatedReports';
+import { DeliveryPackets } from './RetailDelivery';
+import { AvailabilityTab } from './RetailAvailability';
+import { AccessoryReport } from './RetailAccessoryReport';
 import { createPortal } from 'react-dom';
 import { itemFor, saveItem, segmentOf, setModelSegment } from './retail/catalog';
 import { reconcile, searchModels, teachAlias, type LineResult } from './retail/reconcile';
@@ -37,8 +43,18 @@ const HELP: Partial<Record<string, string>> = {
 };
 
 export function ReportTab(ctx: RetailCtx) {
+  const [category,setCategory]=useState<'phones'|'accessories'>(ctx.reportAvailability||ctx.reportDate?'phones':ctx.reportCategory||'phones');
+  return <><div className="give-tabs" aria-label="Report category"><button className={category==='phones'?'on':''} aria-pressed={category==='phones'} onClick={()=>setCategory('phones')}>Phones</button><button className={category==='accessories'?'on':''} aria-pressed={category==='accessories'} onClick={()=>setCategory('accessories')}>Tablets & accessories</button></div>{category==='phones'?<PhoneReportTab {...ctx}/>:<AccessoryReport {...ctx}/>}</>;
+}
+
+function PhoneReportTab(ctx: RetailCtx) {
   const { state, records, today } = ctx;
   const report = state.report;
+  const [finalText, setFinalText] = useState<string | null>(state.finalReportDraft?.text || null);
+  const [finalBase, setFinalBase] = useState(state.finalReportDraft?.baseText || '');
+  const [recipient, setRecipient] = useState('');
+  const [view, setView] = useState<'live' | 'drafts' | 'availability'>(ctx.reportAvailability ? 'availability' : ctx.reportDate ? 'drafts' : 'live');
+  const [preparing, setPreparing] = useState<'copy' | 'send' | 'number' | 'preview' | null>(null);
   const [text, setText] = useState(ctx.sharedText || '');
   const [pasting, setPasting] = useState(!report || !!ctx.sharedText);
   const [open, setOpen] = useState<{ id: string; draft: Draft } | null>(null);
@@ -119,8 +135,29 @@ export function ReportTab(ctx: RetailCtx) {
     ctx.change(teachColourEverywhere(state, label, name), '');
     ctx.notify(`${label} is ${name} on every line.`);
   };
-  const copy = () => { if (report) clipboard(buildReport(report, { date: new Date() }), ctx); };
-  const send = () => { if (report) ctx.share(buildReport(report, { date: new Date() })); };
+  const output = (mode: 'copy' | 'send' | 'number', from: RetailState = state) => {
+    if (!from.report) return false;
+    const automatic = buildReport(from.report, { date: new Date() });
+    const text = finalText ?? automatic;
+    if (finalText !== null && finalBase && finalBase !== automatic && !window.confirm('The automatic report changed after this text was edited. Review stock and release quantities. Continue with your manual text anyway?')) return false;
+    const checkedReport = finalText === null ? from.report : parseReport(text);
+    if (!reportItems(checkedReport).length) { ctx.notify('No model lines found in the final report. Review the text before sharing.'); return false; }
+    const unreviewed = reconcile(from, checkedReport, records).lines.filter(line => line.status !== 'checked' && line.issues.some(issue => ['stock-differs', 'colour-differs', 'not-scanned', 'unknown-model', 'unreadable'].includes(issue.kind)));
+    if (unreviewed.length && !window.confirm(`${unreviewed.length} report line(s) do not match or cannot be verified against real stock. Continue with your edited report? Actual stock will not change.`)) return false;
+    if (mode === 'copy') clipboard(text, ctx);
+    else if (mode === 'number') {
+      const phone = recipient.replace(/[+()\s-]/g, '');
+      if (!/^[1-9]\d{7,14}$/.test(phone)) { ctx.notify('Enter a full international mobile number, including country code.'); return false; }
+      const link = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+      if (link.length > 8000) { clipboard(text, ctx); window.open(`https://wa.me/${phone}`, '_blank', 'noopener'); ctx.notify('Report copied. Chat opened; paste and tap Send.'); }
+      else { window.open(link, '_blank', 'noopener'); ctx.notify('WhatsApp chat opened with the report. Tap Send there.'); }
+    } else ctx.share(text);
+    return true;
+  };
+  const needsReleaseReview = pendingReleases(state).length || records.some(r => state.recordMeta[r.id]?.status === 'held');
+  const copy = () => { if (needsReleaseReview) setPreparing('copy'); else output('copy'); };
+  const send = () => { if (needsReleaseReview) setPreparing('send'); else output('send'); };
+  const sendNumber = () => { if (needsReleaseReview) setPreparing('number'); else output('number'); };
   const newDay = () => { if (report) { ctx.change({ ...state, report: startNewDay(report) }, 'new day'); ctx.notify('New day: sold is back to 00 and stock stays.'); } };
 
   const shown = items.filter(i => only === 'all' || ['differ', 'unknown'].includes(byId.get(i.id)?.status || ''));
@@ -149,7 +186,15 @@ export function ReportTab(ctx: RetailCtx) {
   const noColour = openResult?.scanned.colours.find(c => c.name === 'No colour')?.count || 0;
   const canMatch = !!openResult && openResult.scanned.total > 0 && !!openItem && openItem.kind !== 'storage';
 
+  const reportTabs = <div className="give-tabs" aria-label="Report type"><button className={view === 'live' ? 'on' : ''} aria-pressed={view === 'live'} onClick={() => setView('live')}>Today’s report</button><button className={view === 'drafts' ? 'on' : ''} aria-pressed={view === 'drafts'} onClick={() => setView('drafts')}>Dated drafts</button><button className={view === 'availability' ? 'on' : ''} aria-pressed={view === 'availability'} onClick={() => setView('availability')}>Schedules</button></div>;
+  if (view === 'availability') return <div className="retail-report">{reportTabs}<AvailabilityTab {...ctx}/></div>;
+  if (view === 'drafts') return <div className="retail-report">{reportTabs}<DatedReports ctx={ctx} useToday={() => { setView('live'); setPasting(false); }} /></div>;
   return <div className="retail-report">
+    {reportTabs}
+    {(state.deliveryPackets?.length || 0) > 0 && <DeliveryPackets {...ctx}/>}
+    {report && <details className="retail-card final-report-preview"><summary><strong>Final report · view & edit</strong></summary><button className="subtle-btn" onClick={()=>setPreparing('preview')}>Choose released IMEIs for this report ({pendingReleases(state).length} pending)</button><p className="settings-help">Read the full message before sharing. Text edits never change true stock, achievement or linked IMEIs. Use the quantity selector to change which released IMEIs are included.</p><textarea aria-label="Final report text" rows={12} value={finalText ?? buildReport(report,{date:new Date()})} onChange={e=>{ if(finalText===null)setFinalBase(buildReport(report,{date:new Date()}));setFinalText(e.target.value);}}/>{finalText!==null&&<p className="amber">Manual text draft. Stock differences and a changed automatic report will be warned about before sharing.</p>}<div className="share-toolbar"><button className="subtle-btn" onClick={()=>{const base=finalText===null?buildReport(report,{date:new Date()}):finalBase;ctx.change({...state,finalReportDraft:{text:finalText??buildReport(report,{date:new Date()}),baseText:base,at:new Date().toISOString()}},'save final report draft');ctx.notify('Final text draft saved. Inventory and IMEI reporting links are unchanged.');}}>Save edited draft</button><button className="plan-link" onClick={()=>{setFinalText(null);setFinalBase('');ctx.change({...state,finalReportDraft:undefined},'reset final report text');}}>Use automatic report</button></div><label className="plan-swap">Mobile number (optional, international)<input aria-label="Final report mobile number" type="tel" value={recipient} placeholder="Country code + mobile" onChange={e=>setRecipient(e.target.value)}/></label><div className="share-toolbar"><button className="primary" onClick={send}>Share to WhatsApp / group</button><button className="subtle-btn" onClick={sendNumber}>Open mobile chat</button><button className="subtle-btn" onClick={()=>output('copy')}>Copy final text</button></div><p className="settings-help">WhatsApp opens a prepared chat or share chooser. Choose the group if needed and tap Send. Opening a chat is not proof of delivery.</p></details>}
+    {preparing && <ReleaseReportPicker ctx={ctx} finish={next => preparing === 'preview' ? true : output(preparing, next)} close={() => setPreparing(null)} />}
+    {(state.releases?.length || 0) > 0 && <section className="retail-card"><h3>Release reporting</h3><p>{pendingReleases(state).length} released IMEIs awaiting reporting.</p><p className="settings-help">Copy or Send lets you choose quantities by segment. Real stock includes Available + Stored unsold phones.</p></section>}
     {(pasting || !report) && <section className="retail-card"><h3>Paste your report</h3>
       <p className="settings-help">Paste the WhatsApp report. Each model is two lines, like <em>A07 64GB : 04/15</em> (sold / stock) and <em>(02,00,13) Vlt,Grn,Blk</em> (stock per colour). Everything is read on this phone.</p>
       <textarea aria-label="The report" rows={8} value={text} onChange={e => setText(e.target.value)} placeholder="Paste the report here" />
@@ -162,13 +207,13 @@ export function ReportTab(ctx: RetailCtx) {
         <p className="settings-help">Scanned in the app (in stock): {sum.scannedPhones} · report stock: {sum.reportStock}</p>
         <p className="rep-chips"><span className="rep-chip ok">{sum.agree} agree</span><span className="rep-chip w">{sum.differ} differ</span><span className="rep-chip q">{sum.unknown} unknown</span>{sum.checked > 0 && <span className="rep-chip ok">{sum.checked} checked by you</span>}{sum.empty > 0 && <span className="rep-chip">{sum.empty} no stock</span>}{sum.notScanned > 0 && <span className="rep-chip">{sum.notScanned} not scanned yet</span>}</p>
         <div className="share-toolbar"><button type="button" className="primary" onClick={copy}>Copy report</button><button type="button" className="subtle-btn" onClick={send}>Send</button>
-          <button type="button" className="subtle-btn" onClick={() => setPasting(true)}>Paste new</button><button type="button" className="subtle-btn" onClick={newDay}>New day</button></div>
+          <button type="button" className="subtle-btn screen-extra" onClick={() => setPasting(true)}>Paste new</button><button type="button" className="subtle-btn screen-extra" onClick={newDay}>New day</button></div>
         {report.totalSellout && <p className="settings-help">Sellout in the list: {listedSold(report)} · the report says {report.totalSellout.typed}
           {report.totalSellout.acknowledged ? <> · includes {report.totalSellout.extra} phone{report.totalSellout.extra === 1 ? '' : 's'} not in the list</> : sum.totalDiff !== 0 && <> <span className="rep-chip w">{sum.totalDiff! > 0 ? `${sum.totalDiff} more than the list` : `${-sum.totalDiff!} fewer than the list`}</span> <button type="button" className="subtle-btn" onClick={() => ctx.change({ ...state, report: acknowledgeTotal(report) }, '')}>Includes phones not listed</button></>}</p>}
         <div className="filter-chips" role="group" aria-label="Show"><button type="button" className={only === 'all' ? 'active' : ''} onClick={() => setOnly('all')}>All lines <b>{items.length}</b></button><button type="button" className={only === 'problems' ? 'active' : ''} onClick={() => setOnly('problems')}>Only problems <b>{sum.differ + sum.unknown}</b></button></div>
       </section>
 
-      {labels.length > 0 && <details className="retail-card rep-colours-card" open={labels.some(l => !l.resolved)}>
+      {labels.length > 0 && <details className="retail-card rep-colours-card screen-extra" open={labels.some(l => !l.resolved)}>
         <summary><strong>Colour names</strong> {labels.some(l => !l.resolved) ? <span className="rep-chip w">{labels.filter(l => !l.resolved).length} to name</span> : <span className="rep-chip ok">all named</span>}</summary>
         <p className="settings-help">One row for each short form in the report (CRM, GRPH…). Name it once and every line that uses it is filled in, for every model. Tap a name or type one.</p>
         <datalist id="rep-all-colours">{COLOUR_DICTIONARY.map(c => <option key={c.name} value={c.name} />)}</datalist>

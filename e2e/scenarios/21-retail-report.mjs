@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ctx, sleep, check, finish, adb, js } from './helpers.mjs';
+import { ctx, sleep, check, finish, adb, js, openMore } from './helpers.mjs';
 
 const c = ctx(), results = [];
 const adbExe = join(process.env.ANDROID_HOME || join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk'), 'platform-tools', 'adb.exe');
@@ -27,7 +27,7 @@ const bar = await eval_(`[...document.querySelectorAll('.bottom-nav button span'
 check(results, 'the bottom bar is Home, Scan, Phones, Report, Targets, Export', JSON.stringify(bar) === JSON.stringify(['Home', 'Scan', 'Phones', 'Report', 'Targets', 'Export']), JSON.stringify(bar));
 check(results, 'every screen has its own title (no repeated Scanned records)', await eval_(`document.querySelector('.results .view-head h2').innerText==='Home'`));
 
-const tab = async name => { if (name === 'Report' || name === 'Targets') return eval_(`(()=>{const b=[...document.querySelectorAll('.bottom-nav button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(name)}));if(!b)return false;b.click();return true;})()`); await eval_(`document.querySelector('button[aria-label="More"]').click();true`); await sleep(700); return eval_(`(()=>{const b=[...document.querySelectorAll('.more-list button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(name)}));if(!b)return false;b.click();return true;})()`); };
+const tab = async name => { if (name === 'Report' || name === 'Targets') { await eval_(`(()=>{const b=[...document.querySelectorAll('.bottom-nav button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(name)}));if(!b)return false;b.click();return true;})()`); await eval_(`document.querySelector('button[aria-label="Show all details"]')?.click();true`); return true; } return openMore(c,name); };
 await tab('Report');
 await waitJs(`!!document.querySelector('textarea[aria-label="The report"]')`, 'the paste box');
 const REPORT = ['Date: Nov 11, 2026', '', 'A07 64GB : 04/15', '(02,00,13) Vlt,Grn,Blk', '', 'A57 5G 8/256GB : 00/01', '(00,00,01,0p) GRY,NVY,LiLc,I.BLU', '', 'Total Sellout : 4'].join(String.fromCharCode(10));

@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail-'));
-const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/allocation', 'retail/report', 'retail/segments', 'retail/dashboard'];
+const files = ['people', 'phone-names', 'samsung-models', 'retail/types', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/allocation', 'retail/report', 'retail/segments', 'retail/dashboard', 'retail/autogive'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -16,7 +16,7 @@ for (const name of files) {
 }
 const load = name => import(pathToFileURL(join(dir, `${name}.mjs`)).href);
 const T = await load('retail/types'), C = await load('retail/catalog'), D = await load('retail/data'), S = await load('retail/sales'), I = await load('retail/inventory'),
-  G = await load('retail/targets'), A = await load('retail/allocation'), R = await load('retail/report'), B = await load('retail/dashboard');
+  G = await load('retail/targets'), A = await load('retail/allocation'), R = await load('retail/report'), B = await load('retail/dashboard'), AG = await load('retail/autogive');
 
 // synthetic numbers: made at run time with a valid checksum
 const luhn = body => { let sum = 0; for (let i = 0; i < body.length; i++) { let n = +body[body.length - 1 - i]; if (i % 2 === 0) { n *= 2; if (n > 9) n -= 9; } sum += n; } return String((10 - sum % 10) % 10); };
@@ -329,7 +329,7 @@ ds = G.putTarget(ds, { personId: 'p-me', month: '2026-11', source: 'manual', imp
 const mine = [rec('SM-A176B', 'p-me'), rec('SM-A176B', 'p-me'), rec('SM-S948B', 'p-me')];
 let dash = B.todayDashboard(ds, mine, '2026-11-15', { scanning: 2, needsReview: 1 });
 assert.equal(dash.priorities[0].segment, 'low', 'the segment that needs the most per day comes first');
-assert.match(dash.priorities[0].message, /Sell 0.4\/day of Low: 6 more for 100%/); assert.match(dash.priorities[0].message, /you hold 2, 4 short/);
+assert.match(dash.priorities[0].message, /Sell 1 every 2 days of Low: 6 more for 100%/); assert.match(dash.priorities[0].message, /you hold 2, 4 short/);
 assert.equal(dash.priorities[1].segment, 'flagship1');
 assert.equal(dash.pending.count, 0);
 assert.ok(dash.checklist.find(i => i.id === 'review').text.includes('Review 1 record'));
@@ -354,6 +354,11 @@ assert.equal(clean.catalog.length, 1); assert.equal(C.segmentOf(clean, 'A999', '
 assert.deepEqual(clean.targets['2026-11'].me.lines, [{ segment: 'low', target: 0, achieved: 0 }, { segment: 'bogus', target: 1, achieved: 1 }], 'bad numbers are cleaned; a line for a segment that is not in the list is kept (it just does not show)');
 assert.equal(clean.targets['nope'], undefined); assert.equal(clean.rates.perUnit.low, 0); assert.equal(clean.settings.myThreshold, 100);
 for (const bad of [null, undefined, 5, 'x', [], {}]) assert.equal(D.cleanState(bad).version, 1, 'any junk gives a valid empty state');
+assert.equal(D.cleanState({ settings: { lowStock: 0 } }).settings.lowStock, 0, 'zero low-stock threshold survives loading');
+assert.equal(D.cleanState({ template: { title: 123, sections: [] } }).template, undefined);
+assert.equal(D.cleanState({ template: { title: 'Broken', sections: null } }).template, undefined);
+const cleanedTemplate = D.cleanState({ template: { title: 'Safe {date}', dateFormat: [], sections: [null, { key: 'total', heading: 12 }, { key: 'other', verbatim: [null, 'Note'] }] } });
+assert.doesNotThrow(() => R.buildReport(cleanedTemplate, [], cleanedTemplate.template, { date: '2026-11-17' }), 'damaged template fields cannot crash the report builder');
 // month history: closing a month summarises it and never deletes it
 let hist = D.emptyState();
 hist = S.confirmSale(hist, { id: 'h1', imei: imei(), model: 'SM-A176B', personId: 'me' }, { modelName: 'A17', segment: 'low' }, '2026-10-20', '2026-10-20T10:00:00Z').state;
@@ -368,8 +373,77 @@ assert.equal(backup.ledger.length, 2); assert.ok(!('dataUrl' in backup.ledger[0]
 const text = JSON.stringify(backup);
 const checked = D.readBackup(text); assert.ok(checked.ok); assert.equal(checked.backup.state.sales.length, 1);
 assert.equal(D.readBackup('not json').ok, false); assert.equal(D.readBackup('{"app":"Other","version":1}').ok, false); assert.equal(D.readBackup(JSON.stringify({ ...backup, version: 2 })).ok, false);
+for (const state of [undefined, null, [], 'damaged']) assert.equal(D.readBackup(JSON.stringify({ app: 'RetailLens', version: 1, state })).ok, false, 'missing retail data must not restore an empty state');
 const worse = D.emptyState();
 const restored = D.restoreBackup(worse, checked.backup, NOW);
 assert.equal(restored.state.sales.length, 1); assert.equal(restored.undo, worse, 'the state before the restore is handed back for Undo');
 assert.ok(restored.state.audit.some(a => a.what === 'restore'));
+
+// ---- Give and share: limits per person and the automatic mode ----------------------------------------------------------------------------------
+{
+  const lows = n => Array.from({ length: n }, () => mk('low'));
+  const run = (records, extra = {}) => A.recommend({ state: ast, month: '2026-11', people, records, pending: {}, ...extra });
+  const count = (r, who) => r.proposals.filter(p => p.personId === who).reduce((n, p) => n + p.recordIds.length, 0);
+  // a maximum a day: I need 6 low units but my maximum is 2
+  let r = run(lows(10), { limits: { me: { max: 2 } } });
+  assert.equal(count(r, 'me'), 2, 'the maximum holds even though 6 are needed'); assert.ok(r.notes.some(n => /Me has reached the maximum for today \(2\)/.test(n)), 'it says so');
+  assert.equal(count(run(lows(10), { limits: { me: { max: 2 } }, givenToday: { me: 2 } }), 'me'), 0, 'what was already given today counts toward the maximum');
+  assert.equal(count(run(lows(10), { limits: { me: { max: 2 } }, givenToday: { me: 1 } }), 'me'), 1, 'one more is still allowed');
+  assert.equal(count(run(lows(10), { limits: { me: { max: 0 } } }), 'me'), 0, 'a maximum of 0 means none today');
+  // leave a person out
+  r = run(lows(10), { limits: { me: { off: true } } });
+  assert.equal(count(r, 'me'), 0, 'a person who is left out gets nothing'); assert.ok(count(r, 'low1') > 0, 'the others are served');
+  // a minimum a day: Dev has no need, but wants 2 a day. Me and Asha are limited, so the phones go to Dev as the minimum
+  r = run(lows(3), { limits: { me: { max: 1 }, low1: { off: true }, mid1: { min: 2 } } });
+  assert.equal(count(r, 'me'), 1); assert.equal(count(r, 'mid1'), 2, 'the minimum is filled'); assert.ok(r.proposals.some(p => p.personId === 'mid1' && p.step === 'minimum' && /Minimum a day \(2\)/.test(p.reason)));
+  assert.equal(count(run(lows(3), { limits: { me: { max: 1 }, low1: { off: true }, mid1: { min: 3, max: 1 } } }), 'mid1'), 1, 'the maximum wins over the minimum');
+  const topUp = run(lows(3), { limits: { me: { max: 1 }, low1: { off: true }, mid1: { min: 2 } }, givenToday: { mid1: 1 } });
+  assert.equal(topUp.proposals.filter(p => p.personId === 'mid1' && p.step === 'minimum').reduce((n, p) => n + p.recordIds.length, 0), 1, 'the minimum step gives only what is missing to the minimum (2 - 1 already given today)');
+  // a late upload: everyone is at the maximum today, the rest waits and is given the next day
+  const caps = { me: { max: 1 }, low1: { max: 1 }, mid1: { max: 1 } };
+  const first = run(lows(4), { limits: caps });
+  assert.equal(first.proposals.reduce((n, p) => n + p.recordIds.length, 0), 3, 'one each, the fourth phone is left over');
+  const todayAfter = { me: 1, low1: 1, mid1: 1 };
+  assert.equal(run(lows(4), { limits: caps, givenToday: todayAfter }).proposals.length, 0, 'later the same day: everybody is at the maximum');
+  assert.equal(run(lows(4), { limits: caps, givenToday: {} }).proposals.reduce((n, p) => n + p.recordIds.length, 0), 3, 'the next day they are served again');
+
+  // givenToday: applied gives of today only (undone ones and other days do not count)
+  const ev = (at, to, status = 'applied') => ({ id: 'e' + at + to, at, month: '2026-11', source: 'auto', status, items: [{ recordId: 'a', imei: '1', segment: 'low', from: '', to }, { recordId: 'b', imei: '2', segment: 'low', from: '', to }] });
+  const gstate = { allocations: [ev('2026-11-15T09:00:00', 'me'), ev('2026-11-15T09:30:00', 'me', 'undone'), ev('2026-11-14T09:00:00', 'me'), ev('2026-11-15T10:00:00', 'low1')] };
+  assert.deepEqual(A.givenToday(gstate, '2026-11-15'), { me: 2, low1: 2 }, 'only applied gives of that day');
+
+  // automatic mode
+  const AUTO = { ...ast, giveMode: 'auto', giveLimits: { me: { max: 2 } } };
+  const stock = [...Array.from({ length: 4 }, () => rec('SM-A176B', '')), rec('SM-A176B', 'low1')];
+  const off = AG.runAutoGive({ ...ast, giveMode: undefined }, '2026-11', '2026-11-15', people, stock, NOW);
+  assert.equal(off, undefined, 'suggest only: automatic mode does nothing');
+  const on = AG.runAutoGive(AUTO, '2026-11', '2026-11-15', people, stock, NOW);
+  assert.ok(on, 'auto mode gives'); assert.equal(on.state.allocations.length, 1); assert.equal(on.state.allocations[0].source, 'auto'); assert.equal(on.state.allocations[0].status, 'applied');
+  assert.equal(on.changes.filter(c => c.personId === 'me').length, 2, 'my maximum of 2 holds in auto mode too');
+  assert.ok(on.changes.every(c => stock.find(x => x.id === c.id).personId === ''), 'only phones without an owner are moved');
+  const owned = new Map(stock.map(x => [x.id, x.personId])); for (const c of on.changes) owned.set(c.id, c.personId);
+  const again = AG.runAutoGive(on.state, '2026-11', '2026-11-15', people, stock.map(x => ({ ...x, personId: owned.get(x.id) })), NOW);
+  assert.equal(again, undefined, 'run again with nothing waiting: nothing happens (no loop)');
+  // never given automatically: needs review, held (Store only), repeated or bad numbers
+  const risky = [{ ...rec('SM-A176B', ''), needsReview: true }, rec('SM-A176B', ''), { ...rec('SM-A176B', ''), duplicate: true }, { ...rec('SM-A176B', ''), imei: '123' }];
+  const heldState = { ...AUTO, recordMeta: { [risky[1].id]: { status: 'held' } } };
+  assert.equal(AG.runAutoGive(heldState, '2026-11', '2026-11-15', people, risky, NOW), undefined, 'needs review, held, repeated and bad-number phones wait');
+  assert.equal(AG.runAutoGive({ ...AUTO, giveLimits: { me: { off: true }, low1: { off: true }, mid1: { off: true } } }, '2026-11', '2026-11-15', people, stock, NOW), undefined, 'everybody left out: nothing to give');
+  // an automatic give can be undone like any other
+  const undone = A.undoAllocation(stock.map(x => ({ id: x.id, personId: owned.get(x.id) })), on.state.allocations[0]);
+  assert.equal(undone.restored.length, on.changes.length); assert.ok(undone.records.filter(x => on.changes.some(c => c.id === x.id)).every(x => x.personId === ''), 'undo hands them back');
+  const afterUndo = { ...AUTO, allocations: [undone.event] };
+  const backAsBefore = AG.runAutoGive(afterUndo, '2026-11', '2026-11-15', people, stock, NOW);
+  assert.ok(!backAsBefore || backAsBefore.changes.every(c => !on.changes.some(o => o.id === c.id)), 'a phone whose automatic give was undone is not given again by itself');
+  assert.ok(A.recommend({ state: afterUndo, month: '2026-11', people, records: stock.map(x => ({ id: x.id, imei: x.imei, personId: '', segment: 'low' })), pending: {} }).proposals.length > 0, 'but it can still be suggested');
+  // the same answer is not computed twice
+  const sig = AG.autoGiveSignature(AUTO, '2026-11', '2026-11-15', stock);
+  assert.equal(sig, AG.autoGiveSignature(AUTO, '2026-11', '2026-11-15', stock)); assert.notEqual(sig, AG.autoGiveSignature(AUTO, '2026-11', '2026-11-16', stock), 'a new day is a new answer');
+  assert.notEqual(sig, AG.autoGiveSignature({ ...AUTO, giveLimits: { me: { max: 3 } } }, '2026-11', '2026-11-15', stock), 'new limits are a new answer');
+  // saved limits survive cleaning
+  const clean = D.cleanState({ ...D.emptyState(), giveMode: 'auto', giveLimits: { a: { min: 2, max: 5 }, b: { max: 0 }, c: { off: true }, d: { min: 0 }, e: { max: -3, min: 'x' } }, allocations: [{ id: 'x', at: NOW, month: '2026-11', source: 'auto', status: 'applied', items: [] }] });
+  assert.equal(clean.giveMode, 'auto'); assert.deepEqual(clean.giveLimits, { a: { min: 2, max: 5 }, b: { max: 0 }, c: { off: true } }, 'empty and bad limits are dropped, a maximum of 0 is kept');
+  assert.equal(clean.allocations[0].source, 'auto'); assert.equal(D.cleanState({ ...D.emptyState(), giveMode: 'nonsense' }).giveMode, undefined);
+  console.log('give limits and auto mode ok');
+}
 console.log('PASS: RetailLens logic (segments, catalog, sales rules, stock, targets, smart allocation, WhatsApp report learning, dashboard, history, backup / restore / undo, damaged data).');

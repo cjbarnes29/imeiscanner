@@ -21,14 +21,18 @@ function bumpTarget(state: RetailState, e: SoldEntry, delta: number): RetailStat
   return putTarget(state, { ...base, lines });
 }
 
-function bumpReport(state: RetailState, e: SoldEntry, delta: number): RetailState {
+export function bumpReport(state: RetailState, e: SoldEntry, delta: number, create = false): RetailState {
   const report = state.report;
   if (!report || !e.code) return state;
   const index = catalogIndex(state);
   const match = (name: string) => { const model = matchModel(state, index, name); return model?.code === e.code ? unit(splitName(name).storage) : null; };
   const items = report.entries.filter((x): x is Extract<typeof report.entries[number], { t: 'item' }> => x.t === 'item');
   const target = items.find(i => match(i.name) === e.storage) || items.find(i => match(i.name) === '');
-  if (!target) return state;
+  if (!target) {
+    if (delta < 0 || !create) return state;
+    const name = [itemFor(state, e.code)?.abbreviation || e.code, e.storage].filter(Boolean).join(' ');
+    return { ...state, report: { ...report, entries: [...report.entries, { t: 'item', id: `release-${e.code}-${e.storage}-${Date.now()}`, name, sold: delta, stock: 0, soldWidth: 2, stockWidth: 2, kind: 'none', parts: [], sep: ' ', line1: `${name} : 00/00`, line2: '', auto: true }] } };
+  }
   return { ...state, report: { ...report, entries: report.entries.map(x => (x.t === 'item' && x.id === target.id ? { ...x, sold: Math.max(0, x.sold + delta) } : x)) } };
 }
 
@@ -48,11 +52,12 @@ export function syncSold(state: RetailState, records: StockSource[], today: Date
   const gone = Object.entries(ledger).filter(([id]) => !now.has(id));
   if (!newOnes.length && !gone.length) return { state, added: 0, undone: 0 };
   let next = state, added = 0, undone = 0;
+  const releases = new Set((state.releases || []).flatMap(e => e.recordIds));
   const kept: Record<string, SoldEntry> = { ...ledger };
-  for (const [id, e] of newOnes) { next = bumpReport(bumpTarget(next, e, 1), e, 1); kept[id] = e; added++; }
+  for (const [id, e] of newOnes) { next = bumpTarget(next, e, 1); if (!releases.has(id)) next = bumpReport(next, e, 1); kept[id] = e; added++; }
   for (const [id, e] of gone) {
     // taken back into stock: the sale is undone. A phone that was deleted keeps its sale (it happened); it only leaves the ledger.
-    if (present.has(id)) { next = bumpReport(bumpTarget(next, e, -1), e, -1); undone++; }
+    if (present.has(id)) { next = bumpTarget(next, e, -1); if (!releases.has(id)) next = bumpReport(next, e, -1); undone++; }
     delete kept[id];
   }
   return { state: { ...next, soldLedger: kept }, added, undone };

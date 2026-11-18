@@ -234,6 +234,18 @@ final class ScanStore {
         } catch (Exception error) { throw new IllegalStateException(error); }
     }
 
+    /** Keep the same queue, job ID, ledger and committed records; worker starts at completed. */
+    static synchronized boolean resume(Context context) {
+        JSONObject job = load(context);
+        JSONArray queue = job.optJSONArray("queue");
+        if (queue == null || !ScanRecovery.canResume(job.optString("id"), job.optString("status"), queue.length(), job.optInt("completed"), false)) return false;
+        try {
+            job.put("status", "queued"); job.put("error", "");
+            save(context, true);
+            return true;
+        } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
     /** A scan is already running: keep these photos and scan them as soon as it finishes. */
     static synchronized void addPending(Context context, JSONArray queue, String personId) {
         JSONObject job = load(context);
