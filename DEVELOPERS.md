@@ -87,8 +87,35 @@ Without a permanent key, each release APK gets a new debug key and cannot update
 
 Never commit the keystore or put its passwords in the repository. The first release signed this way will not install over an older debug-signed app: users export their records, uninstall once, then install it. Later updates install over it. Test the first release build on a phone before sharing it, because the shrunk release build has so far only been tested through the debug `-PminifyDebug` option.
 
+## Publishing the main app (beta-v tags) without losing anyone's data
+There are two separate GitHub release paths in `.github/workflows/beta-release.yml`. They never mix:
+
+| Tag | What it publishes | Signed with |
+|---|---|---|
+| `beta-vX.Y.Z-bN` (for example `beta-v1.27.3-b1`) | the **main app** `com.imeilens.scanner`, as a pre-release (never "Latest"). It installs over the current app as an update. | the permanent key from GitHub secrets |
+| `betatest-vX.Y.Z-bN` | the **isolated test app** `com.imeilens.scanner.phonetest` (own data, installs next to the main app, never replaces it), as a pre-release | a throwaway key (fine for a test app) |
+
+**Why a key must be supplied.** Android only installs an update over an app signed with the *same* key. A key that GitHub invents on each run can never update the installed app, so the person would have to uninstall it and **lose the records**. Every local build since 1.22.0 is signed with one key (this computer's `debug.keystore`, certificate SHA-256 `f2a58bb2e0ba7296dba017d3a89070deb7f959b80b0af17bce7d6a4dfa387a27`). To publish an APK that updates those installs, GitHub must sign with that same key. Early builds (1.14 to 1.21) were signed with a different throwaway key each time, which is why they could not update each other.
+
+**The release gate.** Before anything is published, `node scripts/verify-apk.mjs` checks the APK: package id, version (must match `android/app/build.gradle` and the tag), app label (a "Test" label is refused for the main app), exactly one signer, and that the signer is the **expected** certificate. If any check fails, or the key or the expected fingerprint is not set, nothing is published. Run the same check by hand: `node scripts/verify-apk.mjs --apk AI-LENS.apk --kind main --cert <fingerprint>` (needs `ANDROID_HOME` and Java).
+
+### One-time setup (you do this; the key is never in the repo and never printed)
+1. Back up the key file first, somewhere safe and private (a password manager vault or an encrypted drive): `C:\Users\<you>\.android\debug.keystore`. If that file is lost, nobody can update the installed app without uninstalling it.
+2. In PowerShell, turn the key file into text and copy it (nothing is shown on screen):
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.android\debug.keystore")) | Set-Clipboard
+   ```
+3. In GitHub: **Settings > Secrets and variables > Actions > Secrets**, add four secrets. `IMEI_KEYSTORE_B64`: paste the clipboard text. `IMEI_KEYSTORE_PASSWORD`: `android`. `IMEI_KEY_ALIAS`: `androiddebugkey`. `IMEI_KEY_PASSWORD`: `android` (these are the standard values of Android's debug key; use your own if you made a custom key).
+4. Same page, **Variables** tab, add one variable (it is public, not a secret): `EXPECTED_APK_CERT_SHA256` = `f2a58bb2e0ba7296dba017d3a89070deb7f959b80b0af17bce7d6a4dfa387a27`.
+5. **Confirm this is the key your phone's installed app uses** before the first release. You do not need to touch the phone: the APK you installed from is in the project folder. Run `node scripts/verify-apk.mjs --apk <that apk> --kind main --cert x` and read the `signer SHA-256` line; it must equal the variable above. (From a connected phone, read-only: `adb shell pm path com.imeilens.scanner`, `adb pull <that path> installed.apk`, then run the same command on `installed.apk`.) If the two differ, set the variable and the secrets to the key that matches the phone instead, or the release will, correctly, refuse to publish.
+6. Push a tag on a `main` commit: `git tag beta-v1.27.3-b1 && git push origin beta-v1.27.3-b1`. The tag version must match `versionName` in `android/app/build.gradle`.
+
+### What the person does with the release
+Download `AI-LENS-<version>.apk` from the release and open it: it updates the installed app and keeps the records. If Android refuses with a signature message, **do not uninstall**: export or back up first and report the exact message.
+Never commit the keystore, the passwords or the secret text. This workflow only reads them from GitHub Secrets, writes the key to the runner's temporary folder, and deletes it when the step ends, even if the build fails.
+
 ## Releases and GitHub
-- **Pages (the website)** deploys on every push to `main`. **Android releases** build from a tag named `android-vX.Y.Z` pushed on a `main` commit: the workflow builds the APK and attaches it to a GitHub release.
+- **Pages (the website)** deploys on every push to `main`. **Android releases** build from a tag named `android-vX.Y.Z` pushed on a `main` commit: the workflow builds the APK and attaches it to a GitHub release. **Beta releases** use `beta-vX.Y.Z-bN` (main app, update-safe) and `betatest-vX.Y.Z-bN` (isolated test app); see the section above.
 - Both run `npm run build`, so one commit gives one web bundle: the website and the APK contain the **same** files. Compare the version line in Settings.
 - **CI** (`Build`) runs the unit tests and the production build on every push and pull request.
 - **Backups:** before each merge to `main`, the previous `main` is saved as tag `backup-main-before-X.Y.Z` and branch `backup/main-before-X.Y.Z`, and the feature branch as `backup/feature-X.Y.Z`. To undo a merge: `git revert -m 1 <merge commit>`, or reset `main` to the backup tag.

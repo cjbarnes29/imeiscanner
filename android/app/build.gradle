@@ -24,6 +24,19 @@ android {
     }
 
     signingConfigs {
+        // CI only, and only when asked for with -PsignDebugWithEnv: sign the normal (debug type) build with the SAME permanent key as the
+        // earlier local builds, taken from the IMEI_KEYSTORE* variables (decoded from GitHub secrets, never stored in the repo). Without the
+        // property nothing changes: local builds keep using this computer's own debug key.
+        if (project.hasProperty('signDebugWithEnv')) {
+            def envKeystore = System.getenv('IMEI_KEYSTORE')
+            if (!envKeystore) throw new org.gradle.api.GradleException('-PsignDebugWithEnv needs IMEI_KEYSTORE (and its password, alias and key password) in the environment')
+            debug {
+                storeFile file(envKeystore)
+                storePassword System.getenv('IMEI_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('IMEI_KEY_ALIAS')
+                keyPassword System.getenv('IMEI_KEY_PASSWORD')
+            }
+        }
         release {
             // Set IMEI_KEYSTORE, IMEI_KEYSTORE_PASSWORD, IMEI_KEY_ALIAS, IMEI_KEY_PASSWORD to sign a release build.
             def keystore = System.getenv('IMEI_KEYSTORE')

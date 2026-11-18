@@ -1,16 +1,127 @@
 name: Beta APK pre-release
 
-# Publishes a BETA pre-release (never "Latest") with the isolated-id test APK, built from the tagged commit.
-# Trigger: push a tag named beta-v* (for example beta-v1.26.0-b1). The android-v* tags (production flow) are not touched.
+# Two separate publish paths. They never mix, and a test APK can never be published as the main app.
+#
+#   beta-vX.Y.Z-bN      the MAIN app (com.imeilens.scanner): the same build as the local one, signed with the project's permanent key, which
+#                       comes from GitHub secrets. It is only published if the release gate passes (package id, version, app label and
+#                       signing certificate), because an APK signed with any other key cannot update the installed app without
+#                       uninstalling it, which loses its records. Published as a PRE-release, never "Latest".
+#   betatest-vX.Y.Z-bN  the ISOLATED TEST app (com.imeilens.scanner.phonetest): its own app id and data, installs next to the main app
+#                       and never replaces it. Debug-signed with a throwaway key, which is fine for a test app. Pre-release, never "Latest".
+#
+# Setup for the main app (once, in the repository settings, see DEVELOPERS.md "Publishing the main app"):
+#   secrets   IMEI_KEYSTORE_B64, IMEI_KEYSTORE_PASSWORD, IMEI_KEY_ALIAS, IMEI_KEY_PASSWORD   (the signing key; never printed, never in the repo)
+#   variable  EXPECTED_APK_CERT_SHA256   (the PUBLIC fingerprint of the key the installed app was signed with)
+# The android-v* tags (production flow in android.yml) are not touched.
 on:
   push:
-    tags: ['beta-v*']
+    tags: ['beta-v*', 'betatest-v*']
 
 permissions:
   contents: write
 
 jobs:
-  beta:
+  main:
+    if: startsWith(github.ref_name, 'beta-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Check the signing setup before building anything
+        env:
+          IMEI_KEYSTORE_B64: ${{ secrets.IMEI_KEYSTORE_B64 }}
+          IMEI_KEYSTORE_PASSWORD: ${{ secrets.IMEI_KEYSTORE_PASSWORD }}
+          IMEI_KEY_ALIAS: ${{ secrets.IMEI_KEY_ALIAS }}
+          IMEI_KEY_PASSWORD: ${{ secrets.IMEI_KEY_PASSWORD }}
+          EXPECTED_APK_CERT_SHA256: ${{ vars.EXPECTED_APK_CERT_SHA256 }}
+        run: |
+          missing=""
+          for name in IMEI_KEYSTORE_B64 IMEI_KEYSTORE_PASSWORD IMEI_KEY_ALIAS IMEI_KEY_PASSWORD EXPECTED_APK_CERT_SHA256; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Main APK not published::Missing setup:$missing. An APK signed with a key GitHub invents cannot update the installed app (the person would have to uninstall it and lose the records), so nothing is published. See DEVELOPERS.md, Publishing the main app."
+            exit 1
+          fi
+          echo "Signing secrets and the expected certificate are set (values are not shown)."
+      - name: The tag must match the app version in android/app/build.gradle
+        run: |
+          version="${GITHUB_REF_NAME#beta-v}"
+          app=$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" android/app/build.gradle | head -1)
+          code=$(sed -n "s/.*versionCode \([0-9]*\).*/\1/p" android/app/build.gradle | head -1)
+          echo "tag version: $version, app version: $app (code $code)"
+          if [ -z "$app" ]; then echo "::error::Could not read versionName from android/app/build.gradle"; exit 1; fi
+          case "$version" in
+            "$app"|"$app"-*) ;;
+            *) echo "::error title=Tag does not match the app version::The tag says $version but the app is $app. Fix the tag or the version."; exit 1 ;;
+          esac
+      - run: npm ci && npm run build
+      - run: node scripts/copy-android-assets.mjs
+      - name: Build the main APK (the normal build, signed with the permanent key)
+        env:
+          IMEI_KEYSTORE_B64: ${{ secrets.IMEI_KEYSTORE_B64 }}
+          IMEI_KEYSTORE_PASSWORD: ${{ secrets.IMEI_KEYSTORE_PASSWORD }}
+          IMEI_KEY_ALIAS: ${{ secrets.IMEI_KEY_ALIAS }}
+          IMEI_KEY_PASSWORD: ${{ secrets.IMEI_KEY_PASSWORD }}
+        run: |
+          key="$RUNNER_TEMP/signing-key.jks"
+          trap 'rm -f "$key"' EXIT   # the key file is removed even if the build fails
+          printf '%s' "$IMEI_KEYSTORE_B64" | base64 -d > "$key"
+          chmod 600 "$key"
+          export IMEI_KEYSTORE="$key"
+          gradle --project-dir android :app:assembleDebug -PsignDebugWithEnv --stacktrace
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/AI-LENS-${GITHUB_REF_NAME#beta-v}.apk"
+      - name: Release gate (package id, version, app label, signing certificate)
+        env:
+          EXPECTED_APK_CERT_SHA256: ${{ vars.EXPECTED_APK_CERT_SHA256 }}
+        run: node scripts/verify-apk.mjs --apk "out/AI-LENS-${GITHUB_REF_NAME#beta-v}.apk" --kind main
+      - name: Checksum
+        run: cd out && sha256sum "AI-LENS-${GITHUB_REF_NAME#beta-v}.apk" > "AI-LENS-${GITHUB_REF_NAME#beta-v}.apk.sha256"
+      - name: Publish the pre-release (main app)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_APK_CERT_SHA256: ${{ vars.EXPECTED_APK_CERT_SHA256 }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#beta-v}"
+          {
+            echo "## AI LENS ${VERSION} (beta): the main app"
+            echo "**A beta pre-release of the main app (\`com.imeilens.scanner\`). It is not marked as the latest production release.**"
+            echo
+            echo "### Install or update"
+            echo "1. On the phone, download **AI-LENS-${VERSION}.apk** from the assets below and open it (allow installing from this source when asked)."
+            echo "2. It installs **over your current AI LENS app** as an update and keeps your records and photos, when the installed app was signed with the same key (see Signing)."
+            echo "3. If Android says the app was not installed or mentions a conflicting signature, **do not uninstall it** (that deletes the records). Back up first, or send the exact message to the developer."
+            echo
+            echo "### Signing and checks"
+            echo "- Signed with the project's permanent key. Certificate SHA-256: \`${EXPECTED_APK_CERT_SHA256}\`."
+            echo "- Before publishing, an automatic gate checked the package id (\`com.imeilens.scanner\`), the version (${VERSION}), the app label and that the signing certificate is the expected one. The APK's own SHA-256 is in the \`.sha256\` file."
+            echo "- The isolated test app is a separate download (tags \`betatest-v...\`). It installs next to this app and never replaces it."
+            echo
+            echo "### What changed"
+            awk '/^## /{n++} n==1' CHANGELOG.md | head -80
+          } > notes.md
+          gh release create "${GITHUB_REF_NAME}" "out/AI-LENS-${VERSION}.apk" "out/AI-LENS-${VERSION}.apk.sha256" \
+            --title "AI LENS ${VERSION} (beta, main app)" \
+            --prerelease --latest=false \
+            --notes-file notes.md
+
+  test:
+    if: startsWith(github.ref_name, 'betatest-v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +148,9 @@ jobs:
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk "out/AI-LENS-Test-${GITHUB_REF_NAME}.apk"
           (cd out && sha256sum "AI-LENS-Test-${GITHUB_REF_NAME}.apk" > "AI-LENS-Test-${GITHUB_REF_NAME}.apk.sha256")
-      - name: Publish the pre-release
+      - name: Release gate (must be the isolated TEST app, labelled as a test, never the main app)
+        run: node scripts/verify-apk.mjs --apk "out/AI-LENS-Test-${GITHUB_REF_NAME}.apk" --kind test
+      - name: Publish the pre-release (isolated TEST app)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -94,6 +207,6 @@ jobs:
           - The WhatsApp media-folder watcher is not built (shared photos work). Glare and blur retake guidance is not included yet.
           NOTES
           gh release create "${GITHUB_REF_NAME}" out/*.apk out/*.sha256 \
-            --title "AI LENS Test BETA ${GITHUB_REF_NAME#beta-v}" \
+            --title "AI LENS Test BETA ${GITHUB_REF_NAME#betatest-v} (isolated test app, not the main app)" \
             --prerelease --latest=false \
             --notes-file notes.md
