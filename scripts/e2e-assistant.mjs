@@ -191,6 +191,18 @@ await click('.assistant-requests .assistant-request button','Approve changes');a
 assert.deepEqual(await flag3(),[4,4,4],'12 divided equally between the 3 promoters');
 await click('.assistant-requests button','Undo this action');await sleep(700);
 assert.ok(!(await flag3()).some(v=>v===4),'Undo takes the division back');
+// one person's target by chat: previewed first, applied only after approval, Undo restores it, the others are untouched
+{
+  const before1=await flag3();
+  await ask("set Maya's flagship 3 target to 7");
+  await waitFor(`/saved for review on Home/.test(document.querySelector('.assistant-panel .plan-ai-status')?.innerText||'')`,'one-person target understood');
+  await toHome();await atReview();
+  await waitFor(`/Flagship 3: \\d+ → 7/.test(document.querySelector('.assistant-requests .assistant-request')?.innerText||'')`,'the preview shows that person’s change');
+  assert.deepEqual(await flag3(),before1,'nothing is applied before approval');
+  await click('.assistant-requests .assistant-request button','Approve changes');await sleep(700);
+  const after1=await flag3();assert.equal(after1[0],7,'Maya now has 7');assert.deepEqual(after1.slice(1),before1.slice(1),'the other people are unchanged');
+  await click('.assistant-requests button','Undo this action');await sleep(700);assert.deepEqual(await flag3(),before1,'Undo restores the earlier target');
+}
 // a command that cannot be turned into a reviewable change is explained, not answered with an unrelated calculation
 await ask('make the sky blue');
 await waitFor(`/could not turn this into a change/.test(document.querySelector('.assistant-quick .assistant-answer-title')?.innerText||'')`,'a not-understood command is explained');
@@ -273,7 +285,15 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
   const until=async(check,label)=>{for(let i=0;i<60;i++){const t=await lastTask();if(t&&check(t))return t;await sleep(300);}throw new Error('task never reached: '+label+' · last task: '+JSON.stringify(await lastTask()));};
   const showTasks=async()=>run(`document.querySelector('.assistant-tasks').open=true;document.querySelector('.assistant-tasks').scrollIntoView({block:'start'})`);
   // the earlier questions leave requests waiting on Home (limit 20); reject them so the task steps below are not stopped by that limit
-  await tap('Home');await sleep(500);for(let i=0;i<30;i++){const clicked=await run(`(()=>{const b=[...document.querySelectorAll('.assistant-requests .assistant-request button')].find(b=>/^Reject/.test(b.textContent.trim())&&!b.disabled);if(!b)return false;b.click();return true;})()`);if(!clicked)break;await sleep(150);}
+  // the new bulk button: one press asks, a second press rejects every waiting request (applied ones are not touched)
+  await tap('Home');await sleep(500);
+  const waiting=(await readDb('retail:state')).assistantRequests.filter(r=>r.status==='pending').length,applied=(await readDb('retail:state')).assistantRequests.filter(r=>r.status==='applied').length;
+  if(waiting>1){
+    await run(`document.querySelector('.assistant-requests').scrollIntoView({block:'start'});[...document.querySelectorAll('.assistant-requests button')].find(b=>/^Reject all [0-9]+ waiting/.test(b.textContent.trim())).click();true`);await sleep(300);
+    assert.match(await body(),/Reject all \d+ waiting requests\?/,'it asks before rejecting everything');assert.equal((await readDb('retail:state')).assistantRequests.filter(r=>r.status==='pending').length,waiting,'asking changes nothing');await capture('50-reject-all-waiting',true);
+    await run(`[...document.querySelectorAll('.assistant-requests button')].find(b=>/^Yes, reject all/.test(b.textContent.trim())).click();true`);await sleep(600);
+    const afterBulk=(await readDb('retail:state')).assistantRequests;assert.equal(afterBulk.filter(r=>r.status==='pending').length,0,'every waiting request is rejected');assert.equal(afterBulk.filter(r=>r.status==='applied').length,applied,'applied requests are untouched');
+  }
   const g0=await assigned();
   await setMode('copilot');await ask('give 2 Fold6 to Maya, then give 3 Fold6 to Noor');await toHome();await waitFor(`!!document.querySelector('.assistant-tasks [data-task-id]')`,'task on Home');
   let task=await lastTask();assert.equal(task.mode,'copilot');assert.equal(task.steps.length,2);assert.ok(task.steps.every(s=>s.status==='pending'),'Copilot applies nothing before the single approval');assert.equal(await assigned(),g0);

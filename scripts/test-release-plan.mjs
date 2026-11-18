@@ -249,5 +249,20 @@ check('WhatsApp report: the assistant only PREPARES the daily message (never sen
   assert.equal(WR.notifyWhatsAppReady({...pk,status:'sent-by-user'},bridge),false,'nothing to notify once it was sent');assert.equal(WR.notifyWhatsAppReady({...pk,text:'  '},bridge),false);assert.equal(WR.notifyWhatsAppReady(undefined,bridge),false);assert.equal(WR.notifyWhatsAppReady(pk,undefined),false,'no bridge (a browser): nothing happens');assert.equal(calls.length,1);
   assert.equal(D.cleanState({...D.emptyState(),deliveryPackets:[pk,{...pk,id:'x',kind:'bogus'}]}).deliveryPackets.map(x=>x.kind).join(),'report,','the kind survives loading; an unknown kind is dropped');
 });
+check('one person target by chat: set/change forms, "my" and "everyone", clear errors, the store split is untouched, Undo snapshot, Autopilot class',()=>{
+  const b=base(),st={...b,settings:{...b.settings,myPersonId:'maya'},targets:{[month]:Object.fromEntries(['maya','noor','lee'].map(id=>[id,{personId:id,month,source:'manual',importedAt:'now',lines:[{segment:'flagship1',target:40,achieved:0}]}]))}};
+  const P=t=>AS.previewAssistant({...st,assistantRequests:[{id:'a',at:today,text:t,status:'pending',output:''}]},phones,team,today,t);
+  const T=(p,id)=>p.business.after.targets[month][id].lines.find(l=>l.segment==='flagship1').target;
+  let p=P("set Maya's Flagship 1 target to 12");assert.ok(p.handled&&!p.blockers.length,p.blockers.join(' '));assert.deepEqual(['maya','noor','lee'].map(id=>T(p,id)),[12,40,40],'only Maya changes');
+  assert.ok(p.lines.some(l=>/Maya Demo · .*: 40 → 12/.test(l)),'shows before and after');assert.ok(p.lines.some(l=>/120 → 92/.test(l)),'shows the total for all people');assert.ok(p.lines.some(l=>/Sold and achieved numbers are not changed/.test(l)));
+  assert.equal(p.business.before.targets,st.targets,'Undo returns to the targets there were before');assert.deepEqual(TK.actionClasses(p,"set Maya's Flagship 1 target to 12"),['targets']);
+  assert.equal(T(P('change Noor Flagship 1 target to 8'),'noor'),8);assert.equal(T(P("set Maya's target for Flagship 1 to 15"),'maya'),15);assert.equal(T(P('set my Flagship 1 target to 10'),'maya'),10,'"my" is the person set as me');
+  p=P("set everyone's Flagship 1 target to 20");assert.deepEqual(['maya','noor','lee'].map(id=>T(p,id)),[20,20,20]);
+  assert.match(P("set Maya's Flagship 1 target to 40").blockers.join(' '),/already 40/);
+  assert.match(P('set Flagship 1 target to 12').blockers.join(' '),/store target to divide/,'no person named: the older question about the store target is kept');
+  assert.match(P("set Maya's Banana target to 12").blockers.join(' '),/Choose one saved segment/,'unknown segment');
+  const split=P('change flagship 1 target to 12 and divide it to promoters');assert.ok(!split.lines.some(l=>/Sold and achieved/.test(l)),'a divide sentence is still the store-target split, not a one-person edit');
+  assert.ok(!P('set report Fold6 to 6').lines.some(l=>/Sold and achieved/.test(l)),'other set commands are not captured');
+});
 delete globalThis.localStorage;delete globalThis.window;
 console.log(count+' release-planning checks passed');
