@@ -36,7 +36,7 @@ const readDb=()=>run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1)
 const results=[];const ok=n=>{results.push(n);console.log('PASS:',n);};
 try{
   await send('Page.enable');
-  await send('Page.addScriptToEvaluateOnNewDocument',{source:"localStorage.setItem('imei-lens-simple-view','false');"});
+  await send('Page.addScriptToEvaluateOnNewDocument',{source:"localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('retaillens-processing-v1',JSON.stringify({autoFindBoxes:true,backgroundSingleCrop:false,autoReview:false}));"}); // Manual editing on purpose: the production default is Automatic, which finishes a crop in the background instead of reopening the editor
   await send('Page.navigate',{url:'http://localhost:4194/'});
   await waitFor(`document.readyState==='complete'`,'load');
   await run(`new Promise((res,rej)=>{const o=indexedDB.open('imei-lens-v2',1);o.onupgradeneeded=()=>o.result.createObjectStore('inventory');o.onsuccess=()=>{const db=o.result;const tx=db.transaction('inventory','readwrite');tx.objectStore('inventory').put({id:'seed-1',pictureId:'PIC-SEED1',sourcePictureId:'PIC-SEED1',number:3,personId:'',name:'two-products.jpg',dataUrl:${JSON.stringify(photo)},originalDataUrl:${JSON.stringify(photo)},model:'SM-A165F',imei:'',status:'Review',duplicate:false,createdAt:new Date().toISOString(),raw:''},'record:seed-1');tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);};})`);
@@ -58,9 +58,9 @@ try{
   }
 
   const r=await imgRect();
-  await drag(r.x+r.w*0.08,r.y+r.h*0.06,r.x+r.w*0.92,r.y+r.h*0.46);
+  await drag(r.x+r.w*0.08,r.y+r.h*0.06,r.x+r.w*0.92,r.y+r.h*0.38);
   await waitFor(`/1 label/.test(document.querySelector('.studio-title').textContent)`,'1 label');
-  await drag(r.x+r.w*0.08,r.y+r.h*0.54,r.x+r.w*0.92,r.y+r.h*0.94);
+  await drag(r.x+r.w*0.08,r.y+r.h*0.62,r.x+r.w*0.92,r.y+r.h*0.94);
   await waitFor(`/2 labels/.test(document.querySelector('.studio-title').textContent)`,'2 labels');
   ok('count is automatic: drawing 2 boxes shows "2 labels"');
 
@@ -76,7 +76,9 @@ try{
   await waitFor(`!!document.querySelector('.studio')&&/2 labels/.test(document.querySelector('.studio-title').textContent)`,'draft restored');
   ok('Resume restores the 2 boxes');
 
-  // a third box: closing keeps it as a draft with no question
+  // a third box: closing keeps it as a draft with no question. A press within 26 px of a box edge grabs that box, so the third one starts in the free band between the first two
+  await waitFor(`!!document.querySelector('.studio-viewport img')&&document.querySelector('.studio-viewport img').naturalWidth>0&&!/Looking for labels/.test(document.querySelector('.studio-message')?.textContent||'')&&!document.querySelector('.studio-tools .spin')`,'the automatic search on open finished',120000);
+  await sleep(500);
   const r2=await imgRect();
   await drag(r2.x+r2.w*0.25,r2.y+r2.h*0.47,r2.x+r2.w*0.75,r2.y+r2.h*0.53);
   await waitFor(`/3 labels/.test(document.querySelector('.studio-title').textContent)`,'3 labels');

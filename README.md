@@ -210,7 +210,7 @@ Direct source files in the repository root:
 - `scripts/`: [scripts/README.md](scripts/README.md) - build helpers, the unit-style tests behind `npm test`, optional browser checks, accuracy evals, privacy guard, and the Windows laptop-scanner install scripts.
 - `brands/`: [brands/README.md](brands/README.md) - brand profile data shared by the web and Android readers, with a conformance file shared with the Java tests.
 - `e2e/`: [e2e/README.md](e2e/README.md) - emulator and phone test suite for the isolated test app (`com.imeilens.scanner.phonetest`). `e2e/phone-tools/` has its own [contract](e2e/phone-tools/README.md).
-- `docs/`: plans, progress notes and the phone-test checklist. It contains no source code, so it has no contract file.
+- `docs/`: the [App Quality Standards](docs/APP-QUALITY-STANDARDS.md), plans, progress notes and the phone-test checklist. It contains no source code, so it has no contract file.
 - Git-ignored, not documented: `test-photos/`, `phase1-results/`, `phase2-results/`, `server-data/`, `e2e/reports/`, `public/ocr/`, `public/brands/`, `verification-ocr-eval/`.
 
 ## Global Invariants

@@ -2,6 +2,10 @@
 
 For using the app, see [README.md](README.md). This file holds build, test and release steps.
 
+## Quality standards
+
+All work follows [docs/APP-QUALITY-STANDARDS.md](docs/APP-QUALITY-STANDARDS.md): what to check before calling a change done, which test commands cover which screen, how findings are classed (Critical / High / Medium / Low), and the release quality gate.
+
 ## Run locally
 Install Node.js 24 or newer, then:
 

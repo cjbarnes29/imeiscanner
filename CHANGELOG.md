@@ -5,6 +5,10 @@
 - Global target-link policy, single-day/date-range availability; Detailed People visibility and swipe-dismissible Home notice.
 - IMEI calendar planned days with person/model quantities and proposed/approved/completed states; shift schedules remain separate.
 - Android code 44, unchanged package IDs and signing for matching in-place upgrades.
+- **Reports made by the assistant:** ask in the chat ("make a PowerPoint report for last month", "excel report for Asha", "simple notes of my targets") and open **Home → Make a report**. One press makes an Excel file (a sheet each for targets, people, month outlook, sales and stock), a PowerPoint file (title, key numbers, target bars, what to push and leave, people, sales and stock) or plain notes to copy, share or save as text. A finished report can be **downloaded** or **sent on WhatsApp**: the phone's share menu opens with the file (choose WhatsApp, then the chat), or WhatsApp opens with the notes ready. You press send in WhatsApp; the app cannot tell whether it was delivered. Built only from the numbers already in the app; no IMEI numbers or photos; nothing is changed. Tests: `scripts/test-report-builder.mjs`, assistant browser test.
+- The assistant icon in the header is now a small face that shows what the assistant is really doing: checking your saved data, reading a file, working out an answer, paused while you edit, something ready for your review on Home, or something that could not be finished. Real activity only; with "reduce motion" nothing moves and each state keeps its own picture and words.
+- The assistant no longer says a request was saved when 20 requests are already waiting on Home; it says nothing was changed and what to do.
+
 
 # Changelog
 

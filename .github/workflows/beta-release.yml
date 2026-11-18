@@ -50,6 +50,7 @@ jobs:
           2. It installs as **RetailLens Test**, next to your current IMEI Lens, with its own data. It does **not** replace or touch your existing app, records or photos.
 
           ### What is new
+          - **Reports from the assistant:** ask for an Excel, PowerPoint or simple-notes report (Home → Make a report), then download it or send it on WhatsApp; built from the app's own numbers, no IMEI numbers, nothing changed.
           - **1.27.1 automation:** shared Automatic/Manual processing, edit-priority background crop checks, Home attention/assistant and today/coming-days suggestions, global target policy and IMEI calendar model quantities. Sale release and final WhatsApp Send still require review.
           - **Daily plans and Stored:** Home shows Release today / Not today, true stock and upcoming editable quantities. Auto recalculates proposals; it never confirms sales automatically.
           - **Saved work calendars and AL targets:** Off/annual leave skips automatic transfers; manual overrides warn and are recorded. Divisors and shares are editable. Store120 splits40 each; AL40/(30-5)*5=8 adjusts to32/44/44 while retaining store120.

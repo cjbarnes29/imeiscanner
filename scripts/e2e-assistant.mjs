@@ -74,9 +74,91 @@ const state={version:1,settings:{myPersonId:'me',myThreshold:100,lowStock:2,repo
 await run(`localStorage.setItem('imei-lens-simple-view','false');localStorage.setItem('imei-lens-people-v1',${JSON.stringify(JSON.stringify(people))});localStorage.setItem('retaillens-processing-v1',JSON.stringify({autoFindBoxes:false,autoReview:false,autoSplit:false,autoRetry:false}));new Promise(resolve=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const db=o.result,t=db.transaction('inventory','readwrite'),store=t.objectStore('inventory');store.put(${JSON.stringify(state)},'retail:state');for(const r of ${JSON.stringify(rows)})store.put(r,'record:'+r.id);t.oncomplete=()=>{db.close();resolve(true);};};})`);
 await send('Page.navigate',{url:'http://localhost:4204/'});await sleep(1000);await run(`[...document.querySelectorAll('button')].find(b=>/Got it/.test(b.textContent))?.click()`);await sleep(500);
 await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-panel')`,'global assistant');await sleep(1000);await capture('17-assistant-panel');
-const ask=async(text)=>{await setInput('.assistant-panel [aria-label="Ask local assistant"]',text);await click('.assistant-panel button','Get answer');await sleep(350);};
-await ask('give 4 Fold6 to Maya and 10 to Noor');await waitFor(`!!document.querySelector('.assistant-panel .assistant-request')`,'request preview');await run(`document.querySelector('.assistant-panel .assistant-requests').scrollIntoView({block:'start'})`);await capture('18-give-preview',true);let saved=await readDb('retail:state');assert.equal((await readDb('record:')).filter(r=>r.personId).length,0);assert.equal(saved.assistantRequests[0].status,'pending');await click('.assistant-panel .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.assistantRequests[0].status,'applied');assert.equal((await readDb('record:')).filter(r=>r.personId==='me').length,4);assert.equal((await readDb('record:')).filter(r=>r.personId==='asha').length,10);await run(`document.querySelector('.assistant-panel .assistant-requests>details').open=true`);await capture('19-approved-action-receipt',true);await click('.assistant-panel .assistant-request button','Undo this action');await sleep(500);assert.equal((await readDb('record:')).filter(r=>r.personId).length,0);await capture('20-undo-result',true);
-await ask('set report Fold6 to 6');await run(`document.querySelector('.assistant-panel .assistant-requests').scrollIntoView({block:'start'})`);await capture('21-report-output-warning',true);assert.equal(await run(`document.querySelector('.assistant-panel .assistant-request .primary').disabled`),true);await run(`document.querySelector('.assistant-panel .assistant-request input[type=checkbox]').click()`);await click('.assistant-panel .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.reportDrafts[today].report.entries.find(r=>r.t==='item').sold,6);assert.equal(saved.releases?.length||0,0);
-await ask('Turn off auto-detection');await click('.assistant-panel .assistant-request button','Approve changes');await sleep(300);assert.equal(await run(`JSON.parse(localStorage.getItem('retaillens-processing-v1')).autoFindBoxes`),false);await capture('22-settings-action-result',true);
-await click('.assistant-panel .modal-head button','Close assistant');await tap('Home');await run(`document.querySelector('.assistant-requests').scrollIntoView({block:'start'})`);await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: assistant from global header; give4/10 preview/approve/receipt/Undo; report mismatch review; settings approval; Home history; unchanged sales.');
+const openChat=async()=>{if(!await run(`!!document.querySelector('.assistant-panel')`)){await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-panel')`,'the chat opens from the header');await sleep(300);}};
+const ask=async(text)=>{await openChat();await setInput('.assistant-panel [aria-label="Ask local assistant"]',text);await click('.assistant-panel button','Get answer');await sleep(350);};
+const toHome=async()=>{await click('.assistant-panel button','Review requests on Home');await waitFor(`!document.querySelector('.assistant-panel')&&!!document.querySelector('.assistant-requests')`,'Home review');await sleep(300);};
+const atReview=()=>run(`document.querySelector('.assistant-requests').scrollIntoView({block:'start'})`);
+// 1. the compact chat only summarises: a request is saved and reviewed on Home, never approved inside the chat
+await ask('give 4 Fold6 to Maya and 10 to Noor');await waitFor(`!!document.querySelector('.assistant-panel .plan-ai-output')`,'summary answer in the chat');
+assert.equal(await run(`!!document.querySelector('.assistant-panel .assistant-request')||!!document.querySelector('.assistant-panel .assistant-requests')`),false,'the compact chat holds no approval controls or request list');
+assert.match(await run(`document.querySelector('.assistant-panel .plan-ai-status').innerText`),/saved for review on Home/);
+const faceState=()=>run(`document.querySelector('.assistant-launch .ai-mascot')?.dataset.state||''`);
+await waitFor(`document.querySelector('.assistant-launch .ai-mascot')?.dataset.state==='ready'`,'the face says something is ready for review');
+assert.equal(await run(`document.querySelector('.assistant-panel .ai-mascot-label').innerText`),'Something is ready for your review on Home','the chat says it in words too');
+let saved=await readDb('retail:state');assert.equal((await readDb('record:')).filter(r=>r.personId).length,0,'nothing is given by asking');assert.equal(saved.assistantRequests[0].status,'pending');
+// 2. Home shows the full preview; approving gives 4 and 10, and the receipt has Undo
+await toHome();await waitFor(`!!document.querySelector('.assistant-requests .assistant-request')`,'request preview on Home');await atReview();await capture('18-give-preview',true);
+await click('.assistant-requests .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.assistantRequests[0].status,'applied');assert.equal((await readDb('record:')).filter(r=>r.personId==='me').length,4);assert.equal((await readDb('record:')).filter(r=>r.personId==='asha').length,10);
+await run(`document.querySelector('.assistant-requests>details').open=true`);await capture('19-approved-action-receipt',true);
+await click('.assistant-requests button','Undo this action');await sleep(500);assert.equal((await readDb('record:')).filter(r=>r.personId).length,0,'Undo hands every phone back');await capture('20-undo-result',true);
+await waitFor(`document.querySelector('.assistant-launch .ai-mascot')?.dataset.state!=='ready'`,'nothing is waiting for review any more, so the face is no longer in the ready state');
+// 3. a report change shows its warning on Home and needs an explicit tick
+await ask('set report Fold6 to 6');await toHome();await atReview();await capture('21-report-output-warning',true);
+assert.equal(await run(`document.querySelector('.assistant-requests .assistant-request .primary').disabled`),true,'blocked until the warning is accepted');
+await run(`document.querySelector('.assistant-requests .assistant-request input[type=checkbox]').click()`);await click('.assistant-requests .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.reportDrafts[today].report.entries.find(r=>r.t==='item').sold,6);assert.equal(saved.releases?.length||0,0,'a report change records no sale');
+// 4. a settings request is also approved on Home
+await ask('Turn off auto-detection');await toHome();await click('.assistant-requests .assistant-request button','Approve changes');await sleep(300);assert.equal(await run(`JSON.parse(localStorage.getItem('retaillens-processing-v1')).autoFindBoxes`),false);await atReview();await capture('22-settings-action-result',true);
+// 5. an app report (Excel, PowerPoint or simple notes) is asked for in the chat and made on Home; it can be downloaded or sent on WhatsApp. Making a report changes nothing.
+// WhatsApp is never really opened in this test: the browser's share and open functions are replaced by recorders.
+const ownersBefore=JSON.stringify((await readDb('record:')).map(r=>[r.id,r.personId]).sort());
+const lastMonth=(()=>{const d=new Date(now.getFullYear(),now.getMonth()-1,1);return d.getFullYear()+'-'+pad(d.getMonth()+1);})();
+await ask('make a powerpoint report for last month');
+await waitFor(`/Report ready to make: a PowerPoint file for everyone, ${lastMonth}/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'the chat understood the report request');
+assert.equal(await run(`!!document.querySelector('.assistant-panel [aria-label^="Make "]')||!!document.querySelector('.assistant-panel [aria-label="Send report on WhatsApp"]')`),false,'the chat only summarises: the report is made and sent from Home');
+await toHome();
+await waitFor(`!!document.querySelector('.assistant-report-files[open]')`,'the request opened the Make a report card on Home');
+assert.equal(await run(`document.querySelector('[aria-label="Report month"]').value`),lastMonth,'the month was filled in');
+assert.match(await run(`document.querySelector('[aria-label="Make PowerPoint report"]').className`),/primary/,'the PowerPoint button is the highlighted one');
+assert.equal(await run(`!!document.querySelector('[aria-label="Send report on WhatsApp"]')`),false,'nothing to send before the report is made');
+await run(`window.__blobs=[];window.__opened=[];window.__shared=[];const make=URL.createObjectURL.bind(URL);URL.createObjectURL=b=>{window.__blobs.push(b);return make(b)};window.open=(u)=>{window.__opened.push(String(u));return null};true`);
+// PowerPoint: made first, then downloaded
+await click('.assistant-report-files button','PowerPoint (.pptx)');
+await waitFor(`!!document.querySelector('[aria-label="Report ready"]')`,'the PowerPoint report is ready');
+assert.match(await run(`document.querySelector('[aria-label="Report ready"]').innerText`),/PowerPoint · AI-LENS-report-\d{4}-\d{2}\.pptx · \d+ KB/);
+assert.equal(await run(`window.__blobs.length`),0,'making does not download by itself');
+await click('.assistant-report-files button','Download');
+await waitFor(`window.__blobs.length>=1`,'the PowerPoint file was downloaded');
+assert.equal(await run(`window.__blobs[0].type`),'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+assert.ok(await run(`window.__blobs[0].size`)>3000,'a real file, not an empty one');assert.equal(await run(`window.__blobs[0].slice(0,2).text()`),'PK','a zip package (.pptx)');
+// Send on WhatsApp where the browser can share files: the file goes to the share menu with a caption, nothing is saved
+await run(`navigator.canShare=d=>!!(d&&d.files&&d.files.length);navigator.share=async d=>{window.__shared.push({names:d.files.map(f=>f.name),types:d.files.map(f=>f.type),size:d.files[0].size,text:d.text||''});};true`);
+await click('.assistant-report-files button','Send on WhatsApp');
+await waitFor(`window.__shared.length>=1`,'the PowerPoint file was handed to the share menu');
+const sharedPpt=await run(`window.__shared[0]`);
+assert.match(sharedPpt.names[0],/^AI-LENS-report-\d{4}-\d{2}\.pptx$/);assert.equal(sharedPpt.types[0],'application/vnd.openxmlformats-officedocument.presentationml.presentation');assert.ok(sharedPpt.size>3000);assert.match(sharedPpt.text,/^AI LENS report · /);
+await waitFor(`/share menu is open[\\s\\S]*cannot tell whether it was sent/.test(document.querySelector('[aria-label="Report ready"]').parentElement.innerText)`,'the status says the person finishes sending in WhatsApp');
+assert.equal(await run(`window.__blobs.length`),1,'sending shared the file without saving another copy');
+// Send on WhatsApp where files cannot be shared: the file is saved so it can be attached, and nothing is claimed as sent
+await run(`navigator.canShare=()=>false;true`);
+await click('.assistant-report-files button','Send on WhatsApp');
+await waitFor(`window.__blobs.length>=2`,'the file was saved when files cannot be shared');
+await waitFor(`/Nothing was sent/.test(document.querySelector('[aria-label="Report ready"]').parentElement.innerText)`,'the status does not claim it was sent');
+// Excel: made, downloaded
+await click('.assistant-report-files button','Excel (.xlsx)');
+await waitFor(`/Excel · AI-LENS-report/.test(document.querySelector('[aria-label="Report ready"]')?.innerText||'')`,'the Excel report is ready');
+await click('.assistant-report-files button','Download');
+await waitFor(`window.__blobs.length>=3`,'the Excel file was downloaded');
+assert.equal(await run(`window.__blobs[2].type`),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');assert.equal(await run(`window.__blobs[2].slice(0,2).text()`),'PK');
+// Simple notes for one person: sent on WhatsApp as a link with the text ready, or downloaded as a .txt
+await setVal('.assistant-report-files select[aria-label="Report for"]','asha');
+await click('.assistant-report-files button','Simple notes');
+await waitFor(`!!document.querySelector('[aria-label="Report notes"]')`,'the notes appear');
+const notesText=await run(`document.querySelector('[aria-label="Report notes"]').value`);
+assert.match(notesText,/^AI LENS report · /);assert.match(notesText,/For: Noor Demo/);assert.ok(!/\d{15}/.test(notesText),'no IMEI in the notes');
+await click('.assistant-report-files button','Send on WhatsApp');
+await waitFor(`window.__opened.length>=1`,'WhatsApp was asked to open with the notes');
+const wa=await run(`window.__opened[0]`);
+assert.ok(wa.startsWith('https://wa.me/?text='),'the WhatsApp link: '+wa.slice(0,40));assert.match(decodeURIComponent(wa.slice('https://wa.me/?text='.length)),/AI LENS report · [\s\S]*For: Noor Demo/,'the notes travel in the WhatsApp text');
+await click('.assistant-report-files button','Download .txt');
+await waitFor(`window.__blobs.length>=4`,'the notes were downloaded');
+assert.match(await run(`window.__blobs[3].type`),/^text\/plain/);assert.match(await run(`window.__blobs[3].text()`),/^AI LENS report · /);
+assert.equal(JSON.stringify((await readDb('record:')).map(r=>[r.id,r.personId]).sort()),ownersBefore,'making and sending reports changed no phone owner');
+assert.equal((await readDb('retail:state')).releases?.length||0,0,'and recorded no sale');
+await atReview();await capture('24-make-a-report',true);
+await waitFor(`['idle','checking','waiting','ready'].includes(document.querySelector('.assistant-launch .ai-mascot')?.dataset.state)`,'the face is showing');
+await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await sleep(200);
+assert.equal(await run(`getComputedStyle(document.querySelector('.assistant-launch .ai-mascot .eye')).animationName`),'none','with reduced motion nothing on the face animates');
+assert.equal(await run(`document.querySelector('.assistant-launch .ai-mascot').getAttribute('aria-label').length>8`),true,'and the state is still given in words');
+await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await sleep(200);
+await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
 }catch(error){console.error(error.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}

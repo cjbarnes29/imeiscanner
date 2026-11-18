@@ -4,6 +4,10 @@ import {readHomeOptions} from './home-options';
 import {availabilityLabel} from './retail/availability';
 import {AutomaticAttention} from './AutomaticAttention';
 import {AssistantFiles} from './AssistantFiles';
+import {setActivity} from './assistant-activity';
+import {parseReportIntent} from './retail/report-intent';
+import {buildReport as buildAppReport} from './retail/report-model';
+import {requestReport} from './AssistantReportFiles';
 import {useWorkflowOptions} from './AutoWorkflow';
 import {calculatedDatedReport,compareDatedReport,datedReportText} from './retail/dated-reports';
 import {buildReport} from './retail/stockreport';
@@ -27,13 +31,16 @@ export function LocalAI({ ctx, onDraft,initialPrompt,summary=false }: { ctx: Ret
   useEffect(()=>{if(initialPrompt!==undefined)setPrompt(initialPrompt);},[initialPrompt]);
   const [status, setStatus] = useState('Model is optional. It runs locally after download; speed depends on your phone.');
   const [busy, setBusy] = useState(false), [answer, setAnswer] = useState(''), [draft, setDraft] = useState<Partial<PlanRequest> | null>(null), [cached, setCached] = useState(false);
+  useEffect(() => { setActivity('model', busy ? 'thinking' : null); return () => setActivity('model', null); }, [busy]);
   const worker = useRef<Worker | null>(null);
   const stop = () => { worker.current?.terminate(); worker.current = null; setBusy(false); };
   useEffect(() => { if (typeof caches !== 'undefined') void caches.has(CACHE).then(async exists => { if (exists) setCached(!!(await (await caches.open(CACHE)).match('local-ai-ready'))); }).catch(()=>setCached(false)); return () => { worker.current?.terminate(); }; }, []);
   const enabled = !!ctx.state.localAI?.enabled;
   const requestSettings=()=>{const state=ctx.latest?.()||ctx.state;
+    // a request for an app report file (Excel, PowerPoint or simple notes): the choices go to Home, where the file is made; nothing is changed
+    const reportIntent=parseReportIntent(prompt,ctx.people,ctx.today);if(reportIntent){requestReport(reportIntent);const preview=buildAppReport(state,ctx.records,ctx.people,ctx.today,{month:reportIntent.month||undefined,personId:reportIntent.personId||undefined});setAnswer(`Report ready to make: ${reportIntent.summary}.${reportIntent.personUnclear?' I could not tell which person you meant, so it is for everyone. Change For on Home to pick one person.':''}\n${preview.highlights.slice(0,3).join('\n')}\nOpen Home to make the file.`);setDraft(null);setReportPreview(null);saveAssistantHistory(ctx,prompt,`Report requested: ${reportIntent.summary}.`,'answered');setStatus('Report options are ready on Home. Nothing was changed.');return true;}
     if(/\b(?:check|preview|show|compare|final)\b/i.test(prompt)&&/\breport\b/i.test(prompt)&&!/\b(?:set|edit|update)\b/i.test(prompt)){const date=prompt.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]||ctx.today;if(!isDateKey(date)){setAnswer('Choose a valid YYYY-MM-DD report date.');return true;}if(/accessor|tablet|osr/i.test(prompt)){if(!state.accessoryReport){setAnswer('No tablet/accessory OSR is saved. Open Tablets & accessories to import one.');return true;}const text=buildReport(state.accessoryReport);setReportPreview({text,date});setAnswer('Saved tablets/accessories report preview. This register is separate from phone IMEIs. Review model stock against the saved register before sharing.');saveAssistantHistory(ctx,prompt,text);return true;}const report=state.reportDrafts?.[date]?.report||state.report||calculatedDatedReport(state,ctx.records,date,ctx.today),check=compareDatedReport(state,ctx.records,report,date,ctx.today),text=datedReportText(report,date,ctx.today);setReportPreview({text,date});setAnswer(`Report check: ${check.match?'matches known data':check.differences.join(' · ')}. True stock: ${check.realStock}. Sharing does not confirm releases or submission.`);setDraft(null);saveAssistantHistory(ctx,prompt,text+'\n'+check.differences.join('\n'));return true;}
-    const result=queueAssistant(ctx,prompt);if(!result)return false;setAnswer(result.output);setDraft(null);setStatus(result.pending?'Request saved for review on Home. Nothing applied yet.':'Current settings explained.');return true;};
+    const result=queueAssistant(ctx,prompt);if(!result)return false;setAnswer(result.output);setDraft(null);setStatus(!result.saved?'Not saved: too many requests are waiting on Home. Review or reject some first. Nothing was changed.':result.pending?'Request saved for review on Home. Nothing applied yet.':'Current settings explained.');return true;};
   const savedAnswer=()=>{if(requestSettings())return;const result=localAnswer(ctx.latest?.()||ctx.state,ctx.records,ctx.people,ctx.today,prompt);setAnswer(result.answer);setDraft(result.draft||null);saveAssistantHistory(ctx,prompt,result.answer);setStatus('Saved-data answer calculated on this device. No model or internet required.');};
   const start = (loadOnly = false, kind:'chat'|'plan'='chat') => {
     if(!loadOnly&&requestSettings())return;

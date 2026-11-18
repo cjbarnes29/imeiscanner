@@ -112,7 +112,7 @@ await run(`(()=>{const el=document.querySelector('select[aria-label="Daily quant
 await tap('Calculate & review →');await tap('Approve plan · 35 IMEIs');await tap('Home');await capture('18-home-upcoming');assert.match(await body(),/Release today/);assert.match(await body(),/Not today/);assert.match(await body(),/UPCOMING/);
 // Interactive tutorials operate only on demo state, including a simulated sale.
 const actualBefore=JSON.stringify(await readDb('retail:state'));
-await click('button[aria-label="Help and tutorials"]','');await waitFor(`!!document.querySelector('.guide-modal')`,'interactive help');await click('.guide-topic > button','3. Daily plans: Auto and Manual');
+await click('button[aria-label="Help and tutorials"]','');await waitFor(`!!document.querySelector('.guide-modal')`,'interactive help');await click('.guide-topic > button','4. Daily plans: Auto and Manual');
 await tap('Calculate demo plan');await tap('Approve demo plan');await tap('Review today’s 10 IMEIs');await tap('Confirm demo release');await capture('17-interactive-tutorial');assert.match(await run(`document.querySelector('.practice-tour').innerText`),/50%/);assert.equal(JSON.stringify(await readDb('retail:state')),actualBefore,'tutorials cannot alter actual inventory, targets, releases or reports');await click('.guide-modal button','Close');
 assert.deepEqual(errors,[],'no browser runtime exceptions');console.log('PASS: approve, reserve, release to 70%, report 20 of 30, stock38, persistence, layout, records preserved.');
 }catch(e){console.error(e.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}

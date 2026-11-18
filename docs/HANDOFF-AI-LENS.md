@@ -1,6 +1,6 @@
 # AI LENS — live continuation handover
 
-Updated 2026-11-18, 09:44 UTC / 13:44 Dubai. **Read this document first.** It supersedes the older checkpoints in HANDOFF-RELEASE-PLANNING.md.
+Updated 2026-11-18, 09:44 UTC / 13:44 Dubai. **Read this document first, and follow [APP-QUALITY-STANDARDS.md](APP-QUALITY-STANDARDS.md) for all work.** It supersedes the older checkpoints in HANDOFF-RELEASE-PLANNING.md.
 
 ## Current state — do not mistake this for a finished release
 
@@ -174,3 +174,26 @@ Old release for reference only: https://github.com/cjbarnes29/imeiscanner/releas
 - web.dev INP guidance: https://web.dev/explore/how-to-optimize-inp
 
 Do not claim experimental native startup APIs, arbitrary closed-app AI work, universal natural-language comprehension, zero bugs or measured physical-phone responsiveness. Deliver a verified, reviewable update with explicit remaining limitations.
+
+## Progress update — Claude, 2026-11-18 (after commit f92d930)
+
+Done and verified in this session (all synthetic data, browser tests on built `dist`):
+
+- **Undo popups** (person delete, archived duplicates, deleted photos) now use `SwipeUndoBar` in `src/SwipeNotice.tsx`: 2 seconds, swipe sideways, clock waits while touched. `scripts/e2e-undo-bar.mjs` (7 checks, port 4205/CDP 9365). A test can lengthen the clock with `localStorage['imei-lens-undo-ms']` (photo-edit test does).
+- **Follow-up 1 (activity visuals): implemented.** `src/assistant-activity.ts` (store, priority error > thinking > reading > checking > waiting > ready > idle) and `src/AssistantMascot.tsx` (SVG face, transform/opacity only, still picture per state, `prefers-reduced-motion` stops all movement). Real sources only: forecast engine (`AutoWorkflow.tsx`: checking / waiting while you edit by hand / error), optional model answering (`RetailPlanAI.tsx`: thinking), files queued/reading and pending Home requests (derived in `App.tsx`: reading / ready). No invented temperature or progress, no timers for show. Unit test `scripts/test-assistant-activity.mjs`; browser checks in `e2e-assistant.mjs`.
+- **Follow-up 2 (e2e-assistant) rewritten** for compact chat -> Home review -> approve / Undo (give 4+10, report warning tick, settings). **Follow-up 3 (e2e-automation)** now uses the header chat. Guide topic number shift (new "AI assistant" topic is 1) fixed in `e2e-release-plan.mjs`. `e2e-studio.mjs` seeds the Manual preference and leaves room for a third box (a press within 26 px of a box edge grabs that box).
+- **Follow-up 6 fixed:** `saveAssistantHistory` returns the id or `null`; `queueAssistant` returns `saved`; the chat says "Not saved: too many requests are waiting on Home" instead of claiming it was saved; the routine engine does not mark a routine prepared when nothing was saved. `scripts/test-assistant-queue.mjs` (part of `npm test`).
+- Backup restore (`DataTab.pick`) names the file, retries an empty read and lets the same file be chosen again; the legacy backup marker stays `app:'RetailLens'` (a rename pass had changed it in the retail test; fixed).
+
+Verification at this point: `npm test` (all groups), `tsc`, privacy check, JVM 178/0 failures; browser: retail 51, photo-edit 23, undo-bar 7, studio 12, queue, layout at 411px and 360px with 130% zoom, simple, storage, processing, automation, assistant, workforce-plan, release-plan, schedules-accessories. `e2e-review` / `e2e-bulk` were not run (they use real photos). Not verified: physical phone, Qwen free-text inference, the Android emulator with this build, upgrade retention of the new APK.
+
+Still open from the list above: 4 (more test-count updates, only if a suite fails), 5 (browser tests for manual stock add + Undo, accessory balances, TXT/CSV/XLSX interpretation, file failure/restart, roster review, routine prepare-once / next-day / paused), 7-13, 14 (Java branding diff review), 15 (device-size checks done in the layout test; keyboard / nested-modal checks not done). Release work (version stamp, native builds, upgrade-retention test, AI-LENS named artifacts, GitHub prerelease, screenshot gallery) has NOT started.
+
+### Reports made by the assistant (Claude, 2026-11-18, uncommitted)
+
+The user asked for the AI to make a report from the app's data as Excel, PowerPoint or simple notes.
+
+- Pure modules in `src/retail/`: `report-model.ts` (the month in numbers built only from existing engines: targets, sales, stock, month outlook; percentages rounded to four places; never an IMEI), `report-notes.ts`, `report-xlsx.ts` (exceljs, loaded only when asked), `report-pptx.ts` (hand-written package with jszip; no new dependency; slides continue instead of overflowing; text is XML-escaped), `report-intent.ts` (strict understanding of "make a PowerPoint report for last month", "excel report for Asha", "simple notes of my targets"; the older meaning of "report" = WhatsApp stock report is left to the other assistant rules; an unknown person name is reported, never guessed).
+- UI: `src/AssistantReportFiles.tsx` = Home > Assistant review > **Make a report** (month, person, three buttons; the finished report offers **Download** and **Send on WhatsApp**: files go through the existing `ctx.shareFile` share menu, notes through `ctx.whatsapp` = wa.me link; notes can also be shared/copied or saved as .txt). Final send is the person's tap in WhatsApp; delivery is never claimed. The chat only understands the request, stores the choices (`localStorage['retaillens-report-request-v1']` + event) and says to open Home. Making a report changes no data.
+- Tests: `scripts/test-report-builder.mjs` (in `npm test`: model numbers, notes, Excel read back with exceljs, PowerPoint package checked part by part, awkward characters, long lists, request parsing) and new steps in `scripts/e2e-assistant.mjs` (chat request -> Home card filled in -> real .pptx/.xlsx blobs -> notes -> nothing changed). Also opened with python-pptx and openpyxl in a throwaway venv (6 slides, 6 sheets, percent format).
+- Not verified: the files in Microsoft PowerPoint / Excel themselves or on a phone, and slide text fit in PowerPoint (sizes are conservative; no renderer was available). Reports use no model: the optional on-device model is not involved.

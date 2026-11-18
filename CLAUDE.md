@@ -8,6 +8,10 @@ The checkpoint also covers separate shift/IMEI calendars, tablet/accessory repor
 
 Offline retail app (React + TypeScript + Vite in an Android WebView, with a native Android scanner). Package id `com.imeilens.scanner` must never change. Signing config stays untouched.
 
+## Quality standards (read and follow)
+
+The full standard is [docs/APP-QUALITY-STANDARDS.md](docs/APP-QUALITY-STANDARDS.md): functionality, performance, UI/UX, data integrity and security, testing, maintainability, a release quality gate, and classifying findings as Critical / High / Medium / Low. In short: quality, reliability, simplicity and data integrity come before new features; never claim something works unless it was verified with real test output; say what could not be tested (emulator, real phone); fix approved issues without unrelated changes. For Android, emulator testing comes first, on the isolated test app only.
+
 ## Every time code is written
 1. Look first: check what already exists (search the repo) and reuse it. Smallest change that solves the problem; no unrelated rewrites.
 2. Verify before saying "done": run `npx tsc --noEmit` and `npm test`. For any screen change also run the matching browser test (`npm run build`, then `node scripts/e2e-retail.mjs`; `e2e-layout`, `e2e-simple`, `e2e-review`, `e2e-photo-edit` when those screens are touched).

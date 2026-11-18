@@ -56,6 +56,8 @@ export type RetailCtx = {
   openRecords: (filter: string) => void;
   download: (blob: Blob, name: string) => void;
   share: (text: string) => void;
+  /** Opens WhatsApp with this text ready: the person chooses the chat and presses send. */
+  whatsapp?: (text: string) => void;
 };
 
 export const num = (value: string) => Math.max(0, Math.floor(Number(value) || 0));
