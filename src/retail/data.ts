@@ -29,9 +29,10 @@ function cleanPeopleOps(value: unknown): import('./types').PeopleOp[] | undefine
   const ops = arr(value).map(obj).flatMap((o): import('./types').PeopleOp[] => {
     const id = str(o.id).slice(0, 100), name = str(o.name).slice(0, 40);
     if (!id) return [];
-    if (o.kind === 'add' && name) return [{ kind: 'add', id, name }];
+    const label = str(o.label).slice(0, 40), index = typeof o.index === 'number' && Number.isInteger(o.index) && o.index >= 0 && o.index <= 1000 ? o.index : undefined, where = { ...(label ? { label } : {}), ...(index !== undefined ? { index } : {}) };
+    if (o.kind === 'add' && name) return [{ kind: 'add', id, name, ...where }];
     if (o.kind === 'rename' && str(o.from) && str(o.to)) return [{ kind: 'rename', id, from: str(o.from).slice(0, 40), to: str(o.to).slice(0, 40) }];
-    if (o.kind === 'delete' && name) return [{ kind: 'delete', id, name, moved: arr(o.moved).map(x => str(x).slice(0, 100)).filter(Boolean).slice(0, 5000) }];
+    if (o.kind === 'delete' && name) return [{ kind: 'delete', id, name, moved: arr(o.moved).map(x => str(x).slice(0, 100)).filter(Boolean).slice(0, 5000), ...where }];
     return [];
   }).slice(0, 10);
   return ops.length ? ops : undefined;

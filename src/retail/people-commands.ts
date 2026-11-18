@@ -6,7 +6,7 @@ import type { PeopleOp } from './types';
  * Everyday wording is accepted ("can you add maya to the team", "get rid of bilal", "asha should be called ashley"), but a person is only ever matched
  * strictly (the whole name, or a word of it that only one person has), and questions, "what if" sentences and negations are never read as commands.
  */
-type Person = { id: string; name: string };
+type Person = { id: string; name: string; label?: string };
 type Owned = { id: string; personId: string };
 export type PeoplePreview = { handled: boolean; lines: string[]; blockers: string[]; warnings: string[]; ops: PeopleOp[]; moves: { id: string; personId: string }[] };
 
@@ -146,7 +146,7 @@ function remove(list: string[], strict: boolean, people: Person[], records: Owne
   if (found.length >= people.length) { out.blockers.push('At least one person must remain. Add the new person first.'); return out; }
   for (const person of found) {
     const phones = records.filter(r => r.personId === person.id).map(r => r.id);
-    out.ops.push({ kind: 'delete', id: person.id, name: person.name, moved: phones });
+    out.ops.push({ kind: 'delete', id: person.id, name: person.name, moved: phones, ...(person.label ? { label: person.label } : {}), index: people.findIndex(p => p.id === person.id) });
     for (const id of phones) out.moves.push({ id, personId: UNASSIGNED });
     out.lines.push(`Delete ${person.name}.${phones.length ? ` ${phones.length} phone${phones.length === 1 ? '' : 's'} move to Unassigned (phones are never deleted).` : ' They have no phones.'}`);
     if (person.id === myPersonId) out.warnings.push(`${person.name} is marked as you (My person). Choose another My person in Settings afterwards.`);
@@ -207,5 +207,5 @@ export function previewPeople(text: string, people: Person[], records: Owned[], 
 
 /** What the opposite of each change is: used by Undo. A deleted person comes back with the same id so the phones can go back to them. */
 export function inversePeopleOps(ops: PeopleOp[]): PeopleOp[] {
-  return [...ops].reverse().map((op): PeopleOp => op.kind === 'add' ? { kind: 'delete', id: op.id, name: op.name, moved: [] } : op.kind === 'rename' ? { kind: 'rename', id: op.id, from: op.to, to: op.from } : { kind: 'add', id: op.id, name: op.name });
+  return [...ops].reverse().map((op): PeopleOp => op.kind === 'add' ? { kind: 'delete', id: op.id, name: op.name, moved: [] } : op.kind === 'rename' ? { kind: 'rename', id: op.id, from: op.to, to: op.from } : { kind: 'add', id: op.id, name: op.name, ...(op.label ? { label: op.label } : {}), ...(op.index !== undefined ? { index: op.index } : {}) });
 }

@@ -14,7 +14,7 @@ export type RetailCtx = {
   records: RetailRecord[];
   /** Records as they are right now, even in the middle of a multi-step task (`records` is a snapshot of the last screen draw). */
   latestRecords?: () => RetailRecord[];
-  people: { id: string; name: string }[];
+  people: { id: string; name: string; label?: string }[];
   today: DateKey;
   /** Sets the owner of phones (an approved Give, or its undo). */
   assign: (changes: { id: string; personId: string }[]) => boolean | void;
@@ -31,7 +31,7 @@ export type RetailCtx = {
   /** Adds, renames or removes people (an approved assistant request, or its undo). False = nothing was changed. */
   editPeople?: (ops: PeopleOp[]) => boolean;
   /** The people as they are right now, even in the middle of a multi-step task (`people` is a snapshot of the last screen draw). */
-  latestPeople?: () => { id: string; name: string }[];
+  latestPeople?: () => { id: string; name: string; label?: string }[];
   openPlan?: () => void;
   openHome?: () => void;
   openAssistant?: () => void;

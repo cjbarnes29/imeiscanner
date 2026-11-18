@@ -58,7 +58,7 @@ assert.deepEqual(names(preview('add Zed as a person')), ['Zed']);
 {
   const records = [phone('1', 'p2'), phone('2', 'p2'), phone('3', 'p1')];
   const p = preview('delete Bilal', people, records);
-  assert.deepEqual(p.people.ops, [{ kind: 'delete', id: 'p2', name: 'Bilal Test', moved: ['1', '2'] }]);
+  assert.deepEqual(p.people.ops, [{ kind: 'delete', id: 'p2', name: 'Bilal Test', moved: ['1', '2'], index: 1 }]);
   assert.deepEqual(p.people.moves, [{ id: '1', personId: '' }, { id: '2', personId: '' }]);
   assert.match(p.lines.join(' '), /2 phones move to Unassigned/);
   assert.equal(preview('remove person Asha from the team').people.ops[0].id, 'p1');
@@ -95,7 +95,7 @@ assert.deepEqual(names(preview('add Zed as a person')), ['Zed']);
   assert.deepEqual(applied.changes, [{ id: '1', personId: '' }, { id: '2', personId: '' }]);
   const after = [people[0]], movedRecords = records.map(r => ({ ...r, personId: '' }));
   const back = undoAssistantRequest(applied.next, movedRecords, 'r0', after);
-  assert.deepEqual(back.people, [{ kind: 'add', id: 'p2', name: 'Bilal Test' }]);
+  assert.deepEqual(back.people, [{ kind: 'add', id: 'p2', name: 'Bilal Test', index: 1 }]);
   assert.deepEqual(back.changes, [{ id: '1', personId: 'p2' }, { id: '2', personId: 'p2' }]);
   assert.throws(() => undoAssistantRequest(applied.next, [{ ...movedRecords[0], personId: 'p1' }, movedRecords[1]], 'r0', after), /given to someone/);
   assert.throws(() => undoAssistantRequest(applied.next, movedRecords, 'r0', [people[0], { id: 'x', name: 'bilal test' }]), /Another person is called/);
@@ -105,6 +105,17 @@ assert.deepEqual(names(preview('add Zed as a person')), ['Zed']);
   const backName = undoAssistantRequest(renamed.next, [], 'r0', [{ id: 'p1', name: 'Asha K' }, people[1]]);
   assert.deepEqual(backName.people, [{ kind: 'rename', id: 'p1', from: 'Asha K', to: 'Asha Test' }]);
   assert.throws(() => undoAssistantRequest(renamed.next, [], 'r0', people), /changed after this action/);
+}
+// 7b. Undo of a delete puts the person back exactly where and as they were (same id, same list position, same label), and the receipt survives saving
+{
+  const labelled = [{ id: 'p1', name: 'Asha', label: 'Person 1' }, { id: 'p2', name: 'Bilal', label: 'Person 2' }, { id: 'p3', name: 'Chen', label: 'Person 3' }];
+  const state = { ...emptyState(), assistantRequests: [{ id: 'q', at: '2026-11-19T00:00:00Z', text: 'delete bilal', output: '', status: 'pending' }] };
+  const applied = applyAssistantRequest(state, [], labelled, today, 'q');
+  assert.deepEqual(applied.people, [{ kind: 'delete', id: 'p2', name: 'Bilal', moved: [], label: 'Person 2', index: 1 }]);
+  const saved = cleanState(applied.next).assistantRequests[0].peopleOps;
+  assert.deepEqual(saved, applied.people, 'the position and label survive saving and loading');
+  const back = undoAssistantRequest(applied.next, [], 'q', [labelled[0], labelled[2]]);
+  assert.deepEqual(back.people, [{ kind: 'add', id: 'p2', name: 'Bilal', label: 'Person 2', index: 1 }], 'undo says where and as what to restore');
 }
 // 8. with nobody saved yet, any target command says so plainly (it used to explain "dividing a store target", and looked like it worked)
 for (const text of ['split store target 120 for Flagship 1 among everyone', "set everyone's Flagship 1 target to 8", 'set my Flagship 1 target to 10', 'set Flagship 1 target to 12']) {

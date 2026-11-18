@@ -53,7 +53,7 @@ const setMode = async mode => { await run(`(()=>{localStorage.setItem('retaillen
   const waiting = await pendingCount();
   if (waiting) {
     if (await chatOpen()) await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);
-    await sleep(500); await waitFor(`!!document.querySelector('.assistant-requests')`, 'the Home review area');
+    await sleep(500); await clickText('.bottom-nav button', 'Home'); await sleep(600); await waitFor(`!!document.querySelector('.assistant-requests')`, 'the Home review area');
     if (await clickText('.assistant-requests button', 'Reject all')) { await sleep(300); await click('.assistant-requests button', 'Yes, reject all'); } else await click('.assistant-requests .assistant-request button', 'Reject');
     await sleep(900);
   }
@@ -126,7 +126,7 @@ try {
   await step('mode switched back to Assistant; the held delete is approved by a person and Zed is removed', async () => {
     await run(`localStorage.removeItem('retaillens-auto-workflow-v1');window.dispatchEvent(new Event('retaillens-workflow-change'));true`); await sleep(500);
     await openChat(); await toHome().catch(async () => { await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`); }); await sleep(300);
-    const hasCard = await run(`!!document.querySelector('.assistant-requests .assistant-request')`); if (!hasCard) { await ask('delete zed'); await toHome(); }
+    if (!(await pendingCount())) { await ask('delete zed'); await toHome(); }
     await approve(); await settle(async () => !(await names()).includes('Zed'), 'Zed removed after approval');
   });
   await step('cleanup: remove the 3 test people so the app is as found', async () => {

@@ -147,7 +147,7 @@ export type WorkSchedule = { requireSchedule?: boolean; windows?: AvailabilityWi
 export type LeaveTransfer = { id: string; personId: string; start: DateKey; end: DateKey; createdAt: string; status: 'active' | 'cancelled' | 'draft'; adjustmentsApplied?: boolean; targetSnapshots?: Record<string, Record<Segment, { target: number; levels?: TargetLine['levels']; appliedLevels?: TargetLine['levels'] }>>; monthDays?: number; leaveDays?: number; divisor?: number; segments: { segment: Segment; total: number; shares: { personId: string; units: number }[] }[] };
 
 /** One change to the list of people made by the assistant. `moved` = phones that go to Unassigned when the person is deleted (kept, never deleted). */
-export type PeopleOp = { kind: 'add'; id: string; name: string } | { kind: 'rename'; id: string; from: string; to: string } | { kind: 'delete'; id: string; name: string; moved: string[] };
+export type PeopleOp = { kind: 'add'; id: string; name: string; label?: string; index?: number } | { kind: 'rename'; id: string; from: string; to: string } | { kind: 'delete'; id: string; name: string; moved: string[]; label?: string; index?: number };
 export type RetailState = {
   version: 1;
   assistantRoutines?:TimedRoutine[];
