@@ -73,3 +73,6 @@ section.modal.settings-modal>.modal-head{width:100%;max-width:100%;margin:0 0 8p
 .assistant-panel button,.assistant-requests button,.home-attention button{min-height:48px}.assistant-panel .modal-head button{min-width:48px}.assistant-panel,.settings-modal,.plan-modal-body{overscroll-behavior:contain}.assistant-panel textarea:focus,.assistant-files textarea:focus{outline:2px solid var(--g1,#50d4b0);outline-offset:2px}@media(max-width:480px){.topbar{backdrop-filter:none;background:#0d1727}.topbar .brand{display:none}.topbar .top-actions{width:100%;justify-content:space-between}.topbar .top-actions .settings-btn{width:44px;height:44px;min-width:44px;min-height:44px}.modal-backdrop,.plan-overlay{backdrop-filter:none}}
 
 .leave-mark{display:block;color:#f0b429;font-weight:700;font-size:10px}.leave-status small{color:#f0b429}.roster-leave .share-toolbar{margin-top:8px}
+
+.task-bar{height:8px;border-radius:4px;background:#233446;margin:8px 0;overflow:hidden}.task-bar span{display:block;height:100%;background:#4fd1a1}.assistant-tasks ol{margin:6px 0 6px 18px;padding:0}.assistant-modes{border:1px solid var(--line,#304253);border-radius:12px;padding:10px;margin:10px 0}
+.assistant-tasks>summary{min-height:44px;display:flex;align-items:center;flex-wrap:wrap;gap:4px}.assistant-tasks .plan-link,.assistant-tasks .practice-choice{min-height:44px}

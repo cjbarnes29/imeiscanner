@@ -1,4 +1,5 @@
 import {featureHelp} from './capabilities';
+import {handoverSummary} from './assistant-tasks';
 import {attentionItems} from './attention';
 import {dailyUploads} from './daily-uploads';
 import {compareDatedReport,calculatedDatedReport,datedReportText} from './dated-reports';
@@ -12,6 +13,7 @@ import type {RetailRecord} from './ui-helpers';
 /** Useful offline answers from saved data, explicitly distinct from optional model-generated text. */
 export function localAnswer(state:RetailState,records:RetailRecord[],people:{id:string;name:string}[],today:string,text:string,selectedPerson?:string):{answer:string;draft?:Partial<PlanRequest>} {
   const help=featureHelp(text);if(help)return{answer:help};
+  if(/hand.?over|what did (?:you|the assistant) do|summary of (?:today|what)|catch me up/i.test(text)){const h=handoverSummary(state,Date.now());return{answer:[...h.lines,'Next:',...h.next].join('\n')};}
   const question=text.toLowerCase(),person=people.find(p=>p.name&&question.includes(p.name.toLowerCase()))||people.find(p=>p.id===selectedPerson)||people.find(p=>p.id===state.settings.myPersonId)||people[0];
   if(/attention|issues|check everything|check the app/.test(question)){const items=attentionItems(state,records,people,today,{scanning:0,needsReview:records.filter(r=>r.needsReview).length});return{answer:'Automatic saved-data checks · '+items.length+' items\n\n'+(items.map(i=>i.text).join('\n')||'No issues found in these checks.')+'\n\nHome keeps the full checks and live suggestions. No changes were applied.'};}
   if(/history|what.*(?:did|changed)|last action/.test(question)){const recent=[...(state.assistantRequests||[])].reverse().slice(0,5);return{answer:recent.length?recent.map(r=>`${r.at} · ${r.status} · ${r.text}\n${r.output.slice(0,1000)}`).join('\n\n'):'No assistant history is saved yet.'};}

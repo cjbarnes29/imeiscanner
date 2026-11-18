@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const dir = await mkdtemp(join(tmpdir(), 'imei-retail2-'));
-const files = ['assistant-settings', 'retail/capabilities', 'retail/routines', 'retail/attention', 'processing-options', 'home-options', 'retail/assistant-actions', 'people', 'phone-names', 'samsung-models', 'retail/types', 'retail/planning', 'retail/dated-reports', 'retail/autogive', 'retail/allocation', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'retail/delivery', 'retail/auto-workflow', 'retail/local-assistant', 'retail/accessory-report', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
+const files = ['assistant-settings', 'retail/assistant-tasks', 'retail/capabilities', 'retail/routines', 'retail/attention', 'processing-options', 'home-options', 'retail/assistant-actions', 'people', 'phone-names', 'samsung-models', 'retail/types', 'retail/planning', 'retail/dated-reports', 'retail/autogive', 'retail/allocation', 'retail/catalog', 'retail/data', 'retail/planning-data', 'retail/availability', 'retail/shift-codes', 'retail/availability-import', 'retail/daily-uploads', 'retail/delivery', 'retail/auto-workflow', 'retail/local-assistant', 'retail/accessory-report', 'imei-validate', 'retail/store-targets', 'retail/sales', 'retail/inventory', 'retail/targets', 'retail/pace', 'retail/stockreport', 'retail/colours', 'retail/reconcile', 'retail/segments', 'retail/reportsync', 'retail/soldsync', 'retail/targetsummary', 'retail/dashboard', 'retail/forecast', 'retail/colour-dictionary', 'retail/colourlist'];
 for (const name of files) {
   const source = (await readFile(`src/${name}.ts`, 'utf8')).replace(/from '(\.{1,2}\/[^']+)'/g, (_, path) => `from '${path}.mjs'`);
   await mkdir(dirname(join(dir, name)), { recursive: true });
@@ -89,7 +89,7 @@ check('upcoming giving simulates only known unassigned stock and never mutates o
 check('automatic giving rechecks eligibility after Held becomes Available without changing upload IDs',()=>{const s=base(),rows=[{...records[0],personId:''}];s.giveMode='auto';const before=AU.autoGiveSignature(s,month,today,rows);const next={...s,recordMeta:{...s.recordMeta,[rows[0].id]:{segment:'flagship1'}}};assert.notEqual(AU.autoGiveSignature(next,month,today,rows),before);assert.equal(AU.runAutoGive(next,month,today,[{id:'me',name:'Demo'}],rows).changes[0].personId,'me');});
 check('calendar exposes model quantities and planned dates, replaces proposals with approved reservations, and never changes stock',()=>{const s=base(),snapshot=JSON.stringify(s),opts={...AW.DEFAULT_WORKFLOW,days:3};const people=[{id:'me',name:'Demo'}];const rows=AW.automationCalendar(s,records,people,today,opts);assert.equal(rows.reduce((n,r)=>n+r.recordIds.length,0),30);assert.equal(new Set(rows.map(r=>r.date)).size,3);assert.ok(rows.every(r=>r.status==='proposed'&&r.kind==='release'&&r.recordIds.every(id=>records.find(p=>p.id===id)?.model==='SM-S948B')));assert.equal(JSON.stringify(s),snapshot);const approved=PL.approvePlan(s,records,PL.draftPlan(s,records,{...request,method:'spread',until:'2026-11-20'}));const calendar=AW.automationCalendar(approved,records,people,today,opts);assert.ok(calendar.every(r=>r.status==='approved'));assert.equal(calendar.reduce((n,r)=>n+r.recordIds.length,0),30);});
 
-const AS=await load('retail/assistant-actions'), SET=await load('assistant-settings');
+const AS=await load('retail/assistant-actions'), SET=await load('assistant-settings'); const TK=await load('retail/assistant-tasks');
 const preferences=new Map();globalThis.localStorage={getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,v),removeItem:k=>preferences.delete(k)};globalThis.window={dispatchEvent:()=>{}};
 const team=[{id:'maya',name:'Maya Demo'},{id:'noor',name:'Noor Demo'},{id:'lee',name:'Lee Demo'}];
 const phones=records.slice(0,20).map(r=>({...r,personId:'',model:'SM-F956B'}));
@@ -137,6 +137,51 @@ check('hide-suggestions switch hides every suggestion kind, keeps individual cho
   const hide=SET.interpretSettings('hide all suggestions');assert.ok(hide&&hide.workflow.hideSuggestions===true,'chat command proposes hiding');
   const show=SET.interpretSettings('show suggestions');assert.ok(show&&show.workflow.hideSuggestions===false,'chat command proposes showing');
   const stored={...o,hideSuggestions:true,leaveSuggestions:false};globalThis.localStorage.setItem(AW.WORKFLOW_KEY,JSON.stringify(stored));const back=AW.readWorkflowOptions();assert.equal(back.hideSuggestions,true);assert.equal(back.leaveSuggestions,false);globalThis.localStorage.removeItem(AW.WORKFLOW_KEY);
+});
+check('multi-step tasks: splitting keeps single commands whole and never splits a negated request',()=>{
+  assert.deepEqual(TK.splitSteps('store 4 Fold6 and set report Fold6 to 6, then mark Maya unavailable from 2026-11-20 to 2026-11-22'),['store 4 Fold6','set report Fold6 to 6','mark Maya unavailable from 2026-11-20 to 2026-11-22']);
+  assert.deepEqual(TK.splitSteps('give 4 Fold6 to Maya and 10 to Noor'),['give 4 Fold6 to Maya and 10 to Noor'],'one give with two people is one step');
+  assert.deepEqual(TK.splitSteps('do not give 4 Fold6 to Maya'),['do not give 4 Fold6 to Maya']);
+  assert.deepEqual(TK.splitSteps('   '),[]);assert.equal(TK.splitSteps(Array.from({length:20},(_,i)=>'store '+(i+1)+' Fold6').join('; ')).length,TK.MAX_TASK_STEPS,'step count is capped');
+});
+check('action classes come from the real preview, so permissions follow what a step would change',()=>{
+  const cls=text=>{const s=pending(text);return TK.actionClasses(AS.previewAssistant(s,phones,team,today,text),text);};
+  assert.ok(cls('store 4 Fold6').includes('stock'));
+  assert.ok(cls('give 4 Fold6 to Maya').includes('give'));
+  assert.deepEqual(cls('set report Fold6 to 6'),['report']);
+  assert.deepEqual(cls('mark Maya unavailable from 2026-11-20 to 2026-11-22').sort(),['calendar','targets'],'leave also moves targets, so Autopilot needs both allowed');
+  assert.ok(cls('turn off auto-detection').includes('settings'));
+  assert.ok(cls('remove 2 Fold6 from stock').includes('remove'),'removal is its own class');
+});
+check('Autopilot applies only allowed, warning-free, non-removal steps within the daily cap; Assistant and Copilot never self-apply',()=>{
+  const ok={handled:true,lines:[],blockers:[],warnings:[],giving:[]},ap={allow:['stock','give'],dailyCap:2,usedToday:0};
+  assert.equal(TK.decideStep('assistant',ok,['give'],ap).action,'hold');assert.equal(TK.decideStep('copilot',ok,['give'],ap).action,'hold');
+  assert.equal(TK.decideStep('autopilot',ok,['give'],ap).action,'apply');assert.equal(TK.decideStep('autopilot',ok,['stock','give'],ap).action,'apply');
+  assert.equal(TK.decideStep('autopilot',ok,['targets'],ap).action,'hold','kind not allowed');
+  assert.equal(TK.decideStep('autopilot',ok,['remove'],{...ap,allow:['remove','stock']}).action,'hold','removal never self-applies, even if listed');
+  assert.equal(TK.decideStep('autopilot',{...ok,warnings:['x']},['give'],ap).action,'hold','warnings need a person');
+  assert.equal(TK.decideStep('autopilot',{...ok,blockers:['unclear']},['give'],ap).action,'blocked');
+  assert.equal(TK.decideStep('autopilot',ok,['give'],{...ap,usedToday:2}).action,'hold','daily cap');
+  assert.equal(TK.decideStep('autopilot',ok,[],ap).action,'hold','empty step changes nothing');
+});
+check('task progress, status, retries, daily cap counting and handover summary are derived from saved data',()=>{
+  let n=0,t=TK.newTask('t1','store 4 Fold6 and give 4 Fold6 to Maya','autopilot',['store 4 Fold6','give 4 Fold6 to Maya'],'2026-11-18T08:00:00.000Z',()=>'s'+(++n));
+  assert.equal(TK.taskProgress(t).percent,0);t=TK.finishTask(t,'x');assert.equal(t.status,'review','pending steps mean review');
+  t=TK.patchStep(t,'s1',{status:'done',doneAt:'2026-11-18T08:01:00.000Z'},'x');assert.equal(TK.taskProgress(t).percent,50);
+  t=TK.patchStep(t,'s2',{status:'failed',error:'An IMEI assignment changed.',attempts:3},'x');assert.equal(TK.finishTask(t,'x').status,'failed');
+  assert.equal(TK.autopilotUsedToday({assistantTasks:[t]},'2026-11-18'),1,'counted from saved tasks');assert.equal(TK.autopilotUsedToday({assistantTasks:[t]},'2026-11-19'),0);
+  t=TK.patchStep(t,'s2',{status:'done',doneAt:'2026-11-18T08:02:00.000Z'},'x');assert.equal(TK.finishTask(t,'x').status,'done');
+  t=TK.finishTask(TK.patchStep(TK.patchStep(t,'s1',{status:'undone'},'x'),'s2',{status:'undone'},'x'),'x');assert.equal(t.status,'undone');
+  assert.ok(TK.isStaleError('An IMEI assignment changed. Review the updated request.'));assert.ok(!TK.isStaleError('Recipient shares must match the transferred total.'));
+  const state={...base(),assistantTasks:[TK.patchStep(TK.newTask('t2','give 4 Fold6 to Maya','autopilot',['give 4 Fold6 to Maya'],'2026-11-18T09:00:00.000Z',()=>'q1'),'q1',{status:'done',doneAt:'2026-11-18T09:01:00.000Z'},'2026-11-18T09:01:00.000Z')],assistantRequests:[{id:'a',at:'2026-11-18T09:01:00.000Z',text:'give 4 Fold6 to Maya',status:'applied',output:''},{id:'b',at:'2026-11-18T09:05:00.000Z',text:'store 2 Fold6',status:'pending',output:''}]};
+  const h=TK.handoverSummary(state,Date.parse('2026-11-18T12:00:00.000Z'));
+  assert.match(h.lines[0],/1 change applied/);assert.ok(h.lines.some(l=>/Autopilot applied 1 step/.test(l)));assert.ok(h.next.some(l=>/1 request waiting/.test(l)));
+  assert.match(TK.handoverSummary({...base()},Date.parse('2026-11-18T12:00:00.000Z')).next[0],/Nothing is waiting/);
+});
+check('asking for a handover summary is answered offline from saved data, and the assistant mode is only ever read from settings, never set by a chat proposal',()=>{
+  const r=LA.localAnswer({...base(),assistantRequests:[{id:'a',at:new Date().toISOString(),text:'give 4 Fold6 to Maya',status:'applied',output:''}]},[],team,today,'give me a handover summary').answer;
+  assert.match(r,/Last 24 hours: 1 change applied/);assert.match(r,/Next:/);
+  for(const text of ['set assistant mode to autopilot','turn on autopilot','switch to autopilot mode and allow everything']){const p=SET.interpretSettings(text);assert.ok(!p||!('assistantMode' in p.workflow)&&!('autopilotAllow' in p.workflow)&&!('autopilotDailyCap' in p.workflow),'chat cannot propose a mode or permission change: '+text);}
 });
 delete globalThis.localStorage;delete globalThis.window;
 console.log(count+' release-planning checks passed');

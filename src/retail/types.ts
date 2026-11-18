@@ -139,6 +139,9 @@ export type RosterEntry = { id: string; personId: string; personText: string; st
 export type RosterDraft = { id: string; sourceId?: string; sourceName: string; month: string; order: 'DMY' | 'MDY'; entries: RosterEntry[]; codes: ShiftCode[]; warnings: string[]; targetMode: 'manual' | 'linked'; requireSchedule: boolean; status: 'pending' | 'applied' | 'rejected'; at: string };
 export type DeliverySetting = { enabled: boolean; destination: 'mobile' | 'group'; phone: string; includeReport: boolean; includeImeis: boolean; reportMode: 'all' | 'quantity'; quantities: Record<Segment,number> };
 export type DeliveryPacket = { id: string; at: string; personId: string; phone: string; destination: 'mobile' | 'group'; releaseIds: string[]; recordIds: string[]; reportIds: string[]; text: string; fingerprint?: string; status: 'prepared' | 'opened' | 'sent-by-user' | 'not-sent' };
+export type AssistantMode = 'assistant' | 'copilot' | 'autopilot';
+export type AssistantTaskStep = { id: string; text: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'undone'; requestId?: string; attempts: number; error?: string; classes: string[]; doneAt?: string };
+export type AssistantTask = { id: string; text: string; mode: AssistantMode; status: 'running' | 'review' | 'done' | 'failed' | 'undone' | 'rejected'; at: string; updatedAt: string; steps: AssistantTaskStep[] };
 export type WorkSchedule = { requireSchedule?: boolean; windows?: AvailabilityWindow[]; targetMode?: 'manual' | 'linked'; calculationDays?: Record<Month, number>; offDivisor?: Record<Month, number>; leaveDivisor?: Record<Month, number>; offWeekdays: number[]; offDates: DateKey[]; annualLeave: { id: string; start: DateKey; end: DateKey }[] };
 export type LeaveTransfer = { id: string; personId: string; start: DateKey; end: DateKey; createdAt: string; status: 'active' | 'cancelled' | 'draft'; adjustmentsApplied?: boolean; targetSnapshots?: Record<string, Record<Segment, { target: number; levels?: TargetLine['levels']; appliedLevels?: TargetLine['levels'] }>>; monthDays?: number; leaveDays?: number; divisor?: number; segments: { segment: Segment; total: number; shares: { personId: string; units: number }[] }[] };
 
@@ -146,6 +149,7 @@ export type RetailState = {
   version: 1;
   assistantRoutines?:{id:string;text:string;enabled:boolean;lastPrepared?:string}[];
   assistantFiles?:{id:string;name:string;type:string;bytes:number;at:string;status:'queued'|'reading'|'ready'|'failed';text:string;note:string;truncated?:boolean}[];
+  assistantTasks?: AssistantTask[];
   assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>}[];
   savedQuestions?: string[];
   /** Additive v2 workflow fields; absent on older backups. Scanner records and photos stay untouched. */

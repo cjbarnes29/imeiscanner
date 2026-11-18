@@ -261,5 +261,35 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
 assert.equal(await run(`getComputedStyle(document.querySelector('.assistant-launch .ai-mascot .eye')).animationName`),'none','with reduced motion nothing on the face animates');
 assert.equal(await run(`document.querySelector('.assistant-launch .ai-mascot').getAttribute('aria-label').length>8`),true,'and the state is still given in words');
 await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});await sleep(200);
+// Multi-step tasks. Copilot: approve once, Undo reverses the whole task. Autopilot: allowed steps apply by themselves, others wait. Chat cannot change the mode.
+{
+  const KEY='retaillens-auto-workflow-v1';
+  const setMode=async mode=>{await run(`localStorage.setItem(${JSON.stringify(KEY)},JSON.stringify({assistantMode:${JSON.stringify(mode)}}));window.dispatchEvent(new Event('retaillens-workflow-change'))`);await sleep(200);};
+  const assigned=async()=>{await sleep(800);return(await readDb('record:')).filter(r=>r.personId).length;};
+  const lastTask=async()=>(await readDb('retail:state')).assistantTasks?.at(-1);
+  const until=async(check,label)=>{for(let i=0;i<60;i++){const t=await lastTask();if(t&&check(t))return t;await sleep(300);}throw new Error('task never reached: '+label);};
+  const showTasks=async()=>run(`document.querySelector('.assistant-tasks').open=true;document.querySelector('.assistant-tasks').scrollIntoView({block:'start'})`);
+  const g0=await assigned();
+  await setMode('copilot');await ask('give 2 Fold6 to Maya, then give 3 Fold6 to Noor');await toHome();await waitFor(`!!document.querySelector('.assistant-tasks [data-task-id]')`,'task on Home');
+  let task=await lastTask();assert.equal(task.mode,'copilot');assert.equal(task.steps.length,2);assert.ok(task.steps.every(s=>s.status==='pending'),'Copilot applies nothing before the single approval');assert.equal(await assigned(),g0);
+  await showTasks();await capture('40-task-copilot-review',true);
+  await click('.assistant-tasks button','Approve all remaining steps');task=await until(t=>t.status==='done','copilot done');
+  assert.ok(task.steps.every(s=>s.status==='done'&&s.requestId));assert.equal(await assigned(),g0+5,'both steps gave their phones');
+  saved=await readDb('retail:state');assert.equal(saved.assistantRequests.filter(r=>/^give (2|3) Fold6/.test(r.text)&&r.status==='applied').length,2,'each step has its own receipt');
+  assert.ok(saved.audit.some(a=>/assistant task/.test(a.what)),'the task is written to History');
+  await showTasks();await capture('41-task-copilot-done',true);
+  await click('.assistant-tasks button','Undo applied steps');task=await until(t=>t.status==='undone','copilot undone');assert.equal(await assigned(),g0,'Undo hands every phone back');
+  await setMode('autopilot');await ask('give 2 Fold6 to Maya, then give 1 Fold6 to Noor');
+  task=await until(t=>t.mode==='autopilot'&&t.status==='done','autopilot done');assert.equal(await assigned(),g0+3,'Autopilot applied both allowed steps by itself');assert.ok(task.steps.every(s=>s.doneAt));
+  await toHome();await showTasks();await capture('42-task-autopilot-done',true);
+  await click('.assistant-tasks button','Undo applied steps');await until(t=>t.status==='undone','autopilot undone');assert.equal(await assigned(),g0);
+  const before=await run(`localStorage.getItem('retaillens-processing-v1')`);
+  await ask('turn on auto-detection');task=await until(t=>t.mode==='autopilot'&&t.status==='review','autopilot holds settings');
+  assert.equal(task.steps[0].status,'pending');assert.match(task.steps[0].error,/not allowed to change: settings/);assert.equal(await run(`localStorage.getItem('retaillens-processing-v1')`),before,'a held step changes nothing');
+  await toHome();await showTasks();await capture('43-task-autopilot-held',true);await click('.assistant-tasks button','Reject the rest');await until(t=>t.status==='rejected','rejected');
+  await ask('set assistant mode to assistant');assert.equal(await run(`JSON.parse(localStorage.getItem(${JSON.stringify(KEY)})).assistantMode`),'autopilot','the chat cannot change the mode');
+  try{await run(`document.querySelector('[aria-label="Settings"]')?.click()`);await sleep(600);await run(`[...document.querySelectorAll('details')].forEach(d=>{const t=d.querySelector('summary')?.textContent||'';if(/AI integration|Giving, plans/.test(t))d.open=true;})`);await sleep(200);assert.ok(await run(`!!document.querySelector('[aria-label="Assistant mode"]')`),'mode selector is in Settings');await run(`document.querySelector('.assistant-modes').scrollIntoView({block:'start'})`);await capture('44-assistant-mode-settings',true);await run(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Close')?.click()`);await sleep(300);}catch(e){if(/mode selector/.test(e.message))throw e;console.log('settings screenshot skipped:',e.message);}
+  await setMode('assistant');
+}
 await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: every asked question made or answered and nothing approved or submitted by the chat; search bar finds and opens screens; natural-wording target split previewed, approved and undone; unknown commands explained; summary replies and working next steps; round assistant button, small card with history suggestions; report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
 }catch(error){console.error(error.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}
