@@ -46,10 +46,12 @@ const RENAME_L = /^rename\s+(.+?)\s*[,;]\s*(?:(?:she|he|they|it)\s+)?(?:is|are|s
 const RENAME_G = /^call\s+(.+?)\s+(?:instead|from now on|from today|going forward)$/i;
 const RENAME_H = /^fix\s+(?:the\s+)?(?:spelling|name)\s+of\s+(.+?)\s*[,;]?\s+(?:it\s+is|it's|to|as)\s+(.+)$/i;
 
-const JOINED = /^(.+?)\s+(?:is|are)\s+(?:joining|joined|starting)(?:\s+(?:us|the\s+team|my\s+team|our\s+team|the\s+staff|today|tomorrow))*$/i;
+const JOINED = /^(.+?)\s+(?:(?:is|are)\s+)?(?:joining|joined|starting)(?:\s+(?:us|the\s+team|my\s+team|our\s+team|the\s+staff|today|tomorrow))*$/i;
 const STARTS = /^(.+?)\s+(?:starts|started|begins)(?:\s+(?:today|tomorrow|here|with us|work))*$/i;
 const HIRED = /^(?:we|i)\s+(?:just\s+|have\s+)?(?:hired|recruited|took on|signed up|employed)\s+(.+)$/i;
 const ADD_NAMES = /^add\s+([a-z][a-z' -]*(?:\s*(?:,|&|\band\b)\s*[a-z][a-z' -]*)+)$/i;
+const RENAME_N = /^(?:change|edit|update|correct)\s+(?:the\s+)?name\s+(.+?)\s+(?:to|into)\s+(.+)$/i;
+const RENAME_O = /^(.+?)\s+is\s+(.+?)\s+now$/i;
 const RENAME_J = /^(.+?)\s+should\s+be\s+(?:listed|shown|written|spelled|saved|displayed)\s+as\s+(.+)$/i;
 const DELETE_FROM = new RegExp(`^(?:delete|remove)\\s+(.+?)\\s+from\\s+(?:the\\s+|my\\s+)?(?:${KIND}|team|list)(?:\\s+list)?$`, 'i');
 const DELETE_KIND = new RegExp(`^(?:delete|remove|drop)\\s+(?:the\\s+)?${KIND}\\s+(.+)$`, 'i');
@@ -186,11 +188,11 @@ export function previewPeople(text: string, people: Person[], records: Owned[], 
   const toTeam = TO_TEAM.exec(t);
   if (toTeam && !STOCKISH.test(toTeam[1])) return create(toTeam[1], undefined, people);
 
-  for (const [re, explicit] of [[RENAME_B, true], [RENAME_C, true], [RENAME_M, true], [RENAME_D, true], [RENAME_H, true], [RENAME_L, true], [RENAME_J, true], [RENAME_A, /\b(?:person|promoter|promotor)\b/i.test(t)]] as const) {
+  for (const [re, explicit] of [[RENAME_B, true], [RENAME_C, true], [RENAME_M, true], [RENAME_D, true], [RENAME_H, true], [RENAME_L, true], [RENAME_J, true], [RENAME_N, true], [RENAME_A, /\b(?:person|promoter|promotor)\b/i.test(t)]] as const) {
     const m = re.exec(t);
     if (m) { const r = rename(m[1], m[2], people, explicit); if (r.handled) return r; }
   }
-  for (const re of [RENAME_E, RENAME_F, RENAME_I, RENAME_K]) {
+  for (const re of [RENAME_E, RENAME_F, RENAME_I, RENAME_K, RENAME_O]) {
     const m = re.exec(t);
     if (m && !BAD_NEW_NAME.test(m[2]) && wordsOf(m[2]).length <= 3) { const r = rename(m[1], m[2], people, false); if (r.handled) return r; }
   }

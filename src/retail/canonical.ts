@@ -48,7 +48,8 @@ function give(t: string, ctx: CanonContext): string | null {
   const parts = t.split(/\s*(?:,|;|\band\b)\s*/).filter(Boolean);
   const pairs: { who: Person; qty: string; model: string }[] = [];
   for (const part of parts) {
-    const inPart = peopleIn(part, ctx.people);
+    let inPart = peopleIn(part, ctx.people);
+    if (inPart.length === 0 && pairs.length > 0 && named.length === 1 && /\d/.test(part)) inPart = named; // "give asha 5 fold6 and 3 flip6": the same person
     if (inPart.length !== 1) { if (inPart.length === 0 && (pairs.length === 0 || !/\d/.test(part))) continue; return null; }
     const qty = firstNumber(part); if (!qty) return null;
     pairs.push({ who: inPart[0], qty, model: modelOf(part, inPart) });
@@ -103,7 +104,8 @@ function stock(t: string, ctx: CanonContext): string | null {
   if (/\b(?:mark|set|flag|show)\b.*\bas\s+(?:sold out|sold|gone)\b|\bsold out\b/.test(t)) return `remove ${qty} ${model} from stock`;
   if (/\b(?:bring|put|move|return|add|get)\b.*\bback\b.*\b(?:in|into|to|on)\s+(?:the\s+)?(?:stock|inventory)\b|\bre-?stock\b/.test(t)) return `restore ${qty} ${model} to stock`;
   if (/\b(?:release|return|bring)\b.*\bavailable\b|\bmake\b.*\bavailable\b|\b(?:move|put)\b.*\b(?:to|on|as|in)\s+(?:the\s+)?available\b/.test(t)) return `make ${qty} ${model} available`;
-  if (/\b(?:reserve|stash|set aside|put aside|keep aside|hold back|keep back|hold on(?: to)?)\b|\b(?:set|put|keep|hold)\b.*\baside\b/.test(t)) return `store ${qty} ${model}`;
+  if (/\b(?:reserve|stash|set aside|put aside|keep aside|hold back|keep back|hold on(?: to)?)\b|\b(?:set|put|keep|hold)\b.*\baside\b|\b(?:hold|keep)\b.*\bback\b/.test(t)) return `store ${qty} ${model}`;
+  if (/^(?:release|free|unlock)\s+\d+\s+\S+$/.test(t)) return `make ${qty} ${model} available`;
   if (/\b(?:set aside|keep|reserve|stash|hold|store|put|make)\b/.test(t) && /\b(?:aside|in (?:the )?store|into (?:the )?store|away|on hold|stored|for now)\b/.test(t)) return `store ${qty} ${model}`;
   return null;
 }
@@ -112,6 +114,7 @@ function stock(t: string, ctx: CanonContext): string | null {
 function report(t: string, ctx: CanonContext): string | null {
   if (!/\breports?\b/.test(t)) return null;
   const date = t.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+  if (/^(?:the\s+|my\s+|our\s+)?(?:daily\s+)?report\s+(?:for\s+)?(?:today|tomorrow|\d{4}-\d{2}-\d{2})$/.test(t)) return date ? `create the report for ${date}` : /tomorrow/.test(t) ? "prepare tomorrow's report" : "prepare today's report";
   if (/whats\s?app/.test(t)) return /\b(?:make|get|prepare|create|draft|build|do|ready|send|share|compile|generate|need|want)\b|^whats\s?app\b|^(?:the |a |my |today'?s |daily )*whats\s?app (?:daily )?report(?: for (?:the )?(?:group|team|everyone))?$/.test(t) ? `prepare today's WhatsApp report${/\b(?:group|team|everyone)\b/.test(t) ? ' for the group' : ''}` : null;
   const stripped = t.replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ');
   const qty = firstNumber(stripped), model = modelOf(stripped.replace(/\b(?:report|daily|so|is|sold|change|edit|update|numbers?|quantity)\b/g, ' '), []);

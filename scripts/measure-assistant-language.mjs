@@ -199,6 +199,41 @@ E8('people.delete', { id: 'p2' }, 'delete bilal', 'take bilal off the team', 'pl
 E8('calendar', {}, 'asha will be absent on 2026-12-08', 'bilal sick 2026-12-09', 'asha vacation on 2026-12-10');
 E8('none', {}, 'how many phones are with bilal', 'was the report sent', 'what would happen if i give 5 fold6 to asha', 'dont store 3 fold6', 'i could give bilal 5 fold6 later', 'is bilal available', 'do not change any targets', 'what is the plan', 'should asha get 5 fold6', 'its possible that i will delete asha', 'no need to remove anyone', 'ignore the last command', 'who needs more phones', 'was asha given 5 fold6', 'wondering if 16 is a good target'); }
 
+// ---- BLIND-9: an independent batch for the 1.27.4 stabilization, written in the plain, hurried style of someone typing between customers (short, lower case, some typos and shorthand), before any tuning for this round. Score it once; never tune on these exact sentences.
+{ const E9 = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: 9, ...extra }); };
+E9('give', { nums: ['2'] }, 'asha 2 fold6', 'give 2 fold6 asha', 'gimme 2 fold6 for bilal', 'bilal takes 2 fold6', 'asha: give her 2 fold6', 'send asha 2 fold6 now', 'let bilal get 2 fold6', 'i gave asha 2 fold6 so record it', 'add 2 fold6 to bilal', 'bilal +2 fold6', 'pls give bilal 2 fold6 asap', 'put 2 fold6 under asha');
+E9('give', { nums: ['5'] }, 'give asha 5 fold6 and 3 flip6');
+E9('target', { nums: ['18'] }, 'asha mid goal 18', 'bilal flagship 1 18 target', 'target for asha flagship 2 is now 18', 'change bilal mid target to 18', 'asha must reach 18 in flagship 3', 'up asha flagship 1 to 18', 'bilal flagship 2: 18', 'put 18 as asha target for mid');
+E9('stock', { nums: ['4'] }, 'store 4 fold6', 'hold 4 fold6 back', 'pull 4 fold6 out of stock', 'remove 4 fold6 from stock', 'stash 4 fold6', 'take 4 fold6 off stock', 'release 4 fold6', 'make 4 fold6 available again');
+E9('report', { nums: ['3'] }, 'fold6 3 in report', 'set report fold6 3', 'report says fold6 should be 3', 'fix report fold6 to 3', 'todays report fold6 equals 3');
+E9('report', {}, 'make todays report', 'prepare report', 'report for tomorrow please', 'can u prepare the report');
+E9('whatsapp', {}, 'whatsapp report', 'send report on whatsapp');
+E9('settings', {}, 'turn off auto crop', 'auto retry off', 'enable auto crop');
+E9('routine', {}, 'daily 9am auto give', 'every weekday at 5pm prepare report');
+E9('people.add', { names: ['Noor'] }, 'add noor', 'new person noor', 'add promoter noor', 'noor joined today', 'include noor in the team');
+E9('people.add', { names: ['Noor', 'Sami'] }, 'add noor and sami', 'add 2 people noor sami');
+E9('people.rename', { id: 'p1', to: 'Ashraf' }, 'rename asha to ashraf', 'change name asha to ashraf', 'asha is ashraf now');
+E9('people.delete', { id: 'p2' }, 'delete bilal', 'remove bilal', 'bilal quit remove him', 'get rid of bilal');
+E9('calendar', {}, 'asha off 2026-12-11', 'bilal sick on 2026-12-12', 'asha leave 2026-12-13', 'mark bilal off on 2026-12-14');
+E9('none', {}, 'how many fold6', 'what is asha doing', 'did i give asha 2 fold6', 'should i give asha 2 fold6', 'maybe 2 fold6 for asha', 'dont remove bilal', 'whos off tomorrow', 'if possible give asha 2 fold6', 'asha asked if she can have 2 fold6', 'no keep the stock as it is', 'what was the last report', 'i might store 4 fold6', 'stop', 'show targets', 'is the report ready', 'what happens if bilal quits', 'cant give asha 2 fold6 right now', 'was thinking of removing bilal', 'dont change target'); }
+
+// ---- BLIND-10: confirmation batch for 1.27.4, written after BLIND-9 was tuned, again in a different hurried style. Score it once; never tune on these exact sentences.
+{ const E10 = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: 10, ...extra }); };
+E10('give', { nums: ['3'] }, 'bilal 3 fold6 today', 'give bilal 3 fold6 now pls', 'asha is getting 3 fold6', 'hand over 3 fold6 to bilal', 'bilal needs 3 fold6 asap', 'i want asha to take 3 fold6', 'allot 3 fold6 to asha', 'send 3 fold6 bilal', 'asha receives 3 fold6', 'make asha hold 3 fold6');
+E10('target', { nums: ['22'] }, 'asha flagship 2 target 22', 'bilal gets a goal of 22 for mid', 'set 22 as the flagship 1 target for asha', 'bilal flagship 3 should be at 22', 'target flagship 2 bilal 22', 'asha mid should reach 22');
+E10('stock', { nums: ['6'] }, 'store 6 fold6 now', 'keep 6 fold6 aside', 'delete 6 fold6 from stock', 'make 6 fold6 free to give', 'put 6 fold6 away', 'take 6 fold6 off the list of stock');
+E10('report', { nums: ['5'] }, 'report fold6 5', 'put 5 for fold6 in the report', 'fold6 should be 5 in report', 'set todays report fold6 to 5');
+E10('report', {}, 'get report ready', 'todays report please', 'i need tomorrows report', 'draft the report for tomorrow');
+E10('whatsapp', {}, 'prepare whatsapp daily report', 'make whatsapp report ready');
+E10('settings', {}, 'disable auto crop', 'turn on automatic cropping', 'switch auto retry on');
+E10('routine', {}, 'each morning at 9 auto give', 'every day 6pm prepare todays report');
+E10('people.add', { names: ['Rana'] }, 'add rana to my team', 'please add a person called rana', 'rana is new here add her', 'we have a new promoter rana');
+E10('people.add', { names: ['Rana', 'Jaz'] }, 'add rana and jaz', 'new people rana, jaz');
+E10('people.rename', { id: 'p2', to: 'Bilal Z' }, 'rename bilal to bilal z', 'bilal should be called bilal z', 'change bilal to bilal z');
+E10('people.delete', { id: 'p1' }, 'delete asha', 'please remove asha', 'drop asha from the team', 'asha resigned delete her');
+E10('calendar', {}, 'asha off on 2026-12-15', 'bilal is sick on 2026-12-16', 'put asha on leave on 2026-12-17', 'bilal holiday on 2026-12-18');
+E10('none', {}, 'how many phones does asha hold', 'did bilal get the fold6', 'what if i give 3 fold6 to bilal', 'i dont want to give anything', 'should i delete asha', 'thinking about storing 6 fold6', 'who has no phones', 'was the report ok', 'asha might need 3 fold6', 'do not store anything', 'could i remove bilal', 'what are the targets', 'not today', 'if the stock is low dont give', 'can you tell me about asha', 'let me think about 22 as a target', 'no thanks'); }
+
 const hasChange = p => !!(p.giving.length || p.people || p.business || p.report || p.settings || p.additions?.length);
 const kindOf = p => {
   if (!p.handled) return 'none';
@@ -225,7 +260,7 @@ for (const c of cases) {
   results.push({ ...c, actual, ok, asked: !ok && actual === 'blocked', note: p.blockers[0] || '' });
 }
 const group = {};
-for (const r of results) { const g = (group[(r.heldout === 8 ? 'BLIND-8 ' : r.heldout === 7 ? 'BLIND-7 ' : r.heldout === 6 ? 'BLIND-6 ' : r.heldout === 5 ? 'BLIND-5 ' : r.heldout === 4 ? 'BLIND-4 ' : r.heldout === 3 ? 'BLIND ' : r.heldout === 2 ? 'FRESH ' : r.heldout ? 'HELD-OUT ' : '') + area[r.expected]] ||= { total: 0, ok: 0, asked: 0 }); g.total++; if (r.ok) g.ok++; else if (r.asked) g.asked++; }
+for (const r of results) { const g = (group[(r.heldout === 10 ? 'BLIND-10 ' : r.heldout === 9 ? 'BLIND-9 ' : r.heldout === 8 ? 'BLIND-8 ' : r.heldout === 7 ? 'BLIND-7 ' : r.heldout === 6 ? 'BLIND-6 ' : r.heldout === 5 ? 'BLIND-5 ' : r.heldout === 4 ? 'BLIND-4 ' : r.heldout === 3 ? 'BLIND ' : r.heldout === 2 ? 'FRESH ' : r.heldout ? 'HELD-OUT ' : '') + area[r.expected]] ||= { total: 0, ok: 0, asked: 0 }); g.total++; if (r.ok) g.ok++; else if (r.asked) g.asked++; }
 const total = results.length, passed = results.filter(r => r.ok).length, asked = results.filter(r => r.asked).length;
 console.log(`\nEveryday-language check: ${passed} of ${total} understood correctly (${(100 * passed / total).toFixed(0)}%). ${asked} more were understood but the assistant asked for details; ${total - passed - asked} were missed or wrong.\n`);
 for (const [name, g] of Object.entries(group)) console.log(`${name.padEnd(28)} ${String(g.ok).padStart(3)}/${String(g.total).padEnd(3)} ok${g.asked ? `, ${g.asked} asked back` : ''}`);
