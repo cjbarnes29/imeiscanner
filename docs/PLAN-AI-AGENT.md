@@ -36,3 +36,10 @@ Unit (scripted fake LLM): typos, fragments, follow-ups, clarification, read-then
 
 ## Not in scope
 Cloud sync, reading other apps/files, adding stock by IMEI through the AI, sending WhatsApp messages (reports are only prepared).
+
+## Status (built on branch `ai/agent-1.29`, version 1.29.0 (49); local only, nothing pushed or released)
+- Built as planned: providers (Gemini, OpenRouter free models, Groq), 26 write tools + 4 read tools, agent loop with strict JSON protocol, conversation memory, plan -> ordinary task (never Autopilot), chat plan card (Approve next step / Approve all / Reject / Undo), clarification chips, settings card, offline fallback, daily limit of 60 requests.
+- Verified: `npm test` (incl. `test-ai-agent.mjs`: settings, memory, 3 provider request shapes and errors, every tool compiled and understood by the real assistant, scripted-model scenarios with typos, follow-ups, clarification, read-then-plan, multi-step, refusals and injection attempts), build, 4 browser suites (assistant suite drives the agent through the real UI against a simulated provider), 102-command regression identical to main 84d19b7, safety suites unchanged, language benchmark unchanged, Android WebView check 21 of 21 on a fresh test-app install (includes the agent with a simulated provider).
+- NOT verified: a live call to a real provider (needs the owner's own key; CORS from the web view is expected to work for Gemini and OpenRouter and Groq but is only confirmed by the in-app "Test & save key" button).
+- Known limits: nicknames that are not a whole name (for example "ash" for "Asha") are not masked before sending; free plans may let the provider use what is sent; the AI cannot add phones by IMEI, send WhatsApp messages or read other apps; Google marks the generateContent request format "legacy" (still supported).
+- Test-script fixes made on the way (not app bugs): the Android check now closes a fresh app's welcome dialog, reads the database without creating it, and treats a missing field as equal to an empty default.
