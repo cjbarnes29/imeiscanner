@@ -1,3 +1,9 @@
+## 1.27.4 — Final stabilization (assistant)
+
+- **Saved-data consistency:** if one store loses a write (a person, a phone owner or the saved request), the assistant now puts back only what is missing and checks again before saying "done". If the app closed in the middle of an approval, the next start re-checks that newest change once (and repairs it if needed); a change that still cannot be confirmed is flagged in the history and you are told. Older changes and newer edits are never touched.
+- **Routines:** today's copy of a routine task is reused with a clear message; an untouched copy left from an earlier day is replaced by the new run; a half-done earlier copy is never replaced and says so. A routine skipped because 20 requests are waiting now says why.
+- **Everyday wording:** more phrasings understood (see the notes below); unsafe sentences still change nothing.
+
 ## 1.27.1 — Global automation and edit priority
 
 - Shared Automatic / Manual / Custom processing, background crop finishing and protection for manual edits.

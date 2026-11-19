@@ -41,7 +41,8 @@ function rejectRequest(ctx: RetailCtx, requestId: string, why: string) {
 }
 
 /** Turns one chat message into a task. Returns handled=false when the normal single-request path should answer instead. */
-export function startAssistantTask(base: RetailCtx, text: string): { handled: boolean; message: string; taskId?: string } {
+const localDay = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+export function startAssistantTask(base: RetailCtx, text: string, opts: { routine?: boolean } = {}): { handled: boolean; message: string; taskId?: string; duplicate?: boolean } {
   const ctx = fresh(base);
   const options = readWorkflowOptions(), mode = options.assistantMode, state = ctx.latest?.() || ctx.state;
   // 1. An explicit sequence ("A, then B") whose every part is understood becomes a task: safer than trusting one parse of a combined sentence.
@@ -56,7 +57,13 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   }
   // 3. Anything unclear keeps the original single-request answer.
   if (!steps.length) return { handled: false, message: '' };
-  const twin = findDuplicateTask(state, text, mode); if (twin) return { handled: true, taskId: twin.id, message: 'This exact task is already open under Tasks on Home, so a second copy was not started.' };
+  const twin = findDuplicateTask(state, text, mode);
+  if (twin) {
+    const sameDay = localDay(twin.at) === ctx.today, untouched = !twin.steps.some(s => s.status === 'done' || s.status === 'running');
+    // a routine's copy from an earlier day that nobody approved and nothing ran: replaced by today's run (rejecting it changes no data)
+    if (opts.routine && !sameDay && untouched) rejectTask(ctx, twin.id);
+    else return { handled: true, duplicate: true, taskId: twin.id, message: opts.routine ? (sameDay ? 'Today\'s run is already prepared. Open it under Tasks on Home.' : 'An earlier run of this routine is still partly done, so today\'s run was not started. Finish or reject it under Tasks on Home.') : 'This exact task is already open under Tasks on Home, so a second copy was not started.' };
+  }
   if ((state.assistantTasks || []).filter(t => t.status === 'review' || t.status === 'running').length >= 10) return { handled: true, message: 'Finish or reject some open tasks first (the limit is 10). Nothing was started.' };
   let n = 0;
   const task = newTask(crypto.randomUUID(), text.slice(0, 1000), mode, steps, nowIso(), () => `${Date.now().toString(36)}-${++n}`);

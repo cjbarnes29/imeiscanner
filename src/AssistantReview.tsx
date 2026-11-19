@@ -22,6 +22,7 @@ import {findDuplicateRequest} from './retail/assistant-tasks';
 import {appendAgentLog,updateAgentLog} from './agent/log';
 import {expectedChecks,verifyPersisted,type VerifyInput,type VerifyResult} from './agent/verify';
 import {emitAgent} from './agent/events';
+import {latestUnconfirmed,missingFrom,receiptInput} from './agent/reconcile';
 export type CommitOpts={undo?:boolean;override?:boolean;confirmed?:boolean;notify?:boolean;actor?:'you'|'agent'|'routine';verify?:{timeoutMs?:number;intervalMs?:number}};
 type Core={outcome:'applied'|'undone'|'cancelled';verifyInput?:VerifyInput;logId?:string;text:string};
 /** Applies or undoes a saved request, writes the audit-log entry in the same save, and says what must be true in the stored data afterwards. */
@@ -54,6 +55,37 @@ export function commitAssistantRequest(ctx:RetailCtx,id:string,opts:CommitOpts={
   if(core.outcome!=='cancelled'&&opts.notify!==false)ctx.notify(core.outcome==='undone'?'Assistant action undone. Receipt saved in History.':'Approved. Review what changed in the receipt below.');
   return core.outcome;
 }
+/** The stores are not saved in one atomic step. If a check fails, put back only what is missing (a person, a phone owner, the saved request) and check once more. */
+async function repairOnce(ctx:RetailCtx,input:VerifyInput,prior:VerifyResult,verifyOpts?:{timeoutMs?:number;intervalMs?:number}):Promise<VerifyResult>{
+  if(!ctx.readPersisted)return prior;
+  try{
+    const persisted=await ctx.readPersisted({records:true}),miss=missingFrom(input,persisted);let acted=false;
+    if(miss.people.length&&ctx.editPeople?.(miss.people)===true)acted=true;
+    if(miss.changes.length&&ctx.assign(miss.changes)!==false)acted=true;
+    if(miss.retail){const s=ctx.latest?.()||ctx.state;ctx.change({...s},'');acted=true;}
+    if(!acted)return prior;
+    recordDiagnostic('assistant-store-repair');
+    return await verifyPersisted(ctx.readPersisted,expectedChecks(input),verifyOpts);
+  }catch{return prior;}
+}
+/**
+ * After the app was closed in the middle of an approval, the newest unconfirmed change is checked against the stored data again (and repaired once if a store lost it).
+ * Returns a plain sentence when something needs the person's attention, otherwise null. Older changes are never touched.
+ */
+export async function reconcileRecent(ctx:RetailCtx,verifyOpts?:{timeoutMs?:number;intervalMs?:number}):Promise<string|null>{
+  if(!ctx.readPersisted||ctx.readOnly)return null;
+  const state=ctx.latest?.()||ctx.state,found=latestUnconfirmed(state,Date.now());if(!found)return null;
+  const input=receiptInput(state,found.requestId);if(!input)return null;
+  let result=await verifyPersisted(ctx.readPersisted,expectedChecks(input),{timeoutMs:1500,...verifyOpts});
+  if(result.status==='unverified')result=await repairOnce(ctx,input,result,verifyOpts);
+  const flag=result.status==='verified'?'verified' as const:result.status==='unverified'?'unverified' as const:undefined;if(!flag)return null;
+  const current=ctx.latest?.()||ctx.state;
+  let next=found.logId?updateAgentLog(current,found.logId,{verify:flag,checks:result.checks,failed:result.failed}):current;
+  next={...next,assistantRequests:next.assistantRequests?.map(r=>r.id===found.requestId?{...r,verify:flag}:r)};
+  ctx.change(next,'');
+  recordDiagnostic(flag==='verified'?'assistant-reconcile-verified':'assistant-reconcile-unverified');
+  return flag==='verified'?null:`The last assistant change (“${(input.next.assistantRequests?.find(r=>r.id===found.requestId)?.text||'').slice(0,60)}”) could not be confirmed in the saved data after the app was closed. Check it before relying on it.`;
+}
 export type VerifiedCommit={outcome:'applied'|'undone'|'cancelled';verify:VerifyResult;message:string};
 /** The one way a saved request is applied or undone. The Approve button and the task runner both use it, so the rules are identical. "Done" is only reported after the stored data is read back and matches. */
 export async function commitAssistantRequestVerified(ctx:RetailCtx,id:string,opts:CommitOpts={}):Promise<VerifiedCommit>{
@@ -61,7 +93,7 @@ export async function commitAssistantRequestVerified(ctx:RetailCtx,id:string,opt
   if(core.outcome==='cancelled')return{outcome:'cancelled',verify:{status:'unavailable',checks:0,failed:[]},message:''};
   emitAgent({phase:'verifying',text:core.text});
   let verify:VerifyResult={status:'unavailable',checks:0,failed:[]};
-  if(ctx.readPersisted&&core.verifyInput)verify=await verifyPersisted(ctx.readPersisted,expectedChecks(core.verifyInput),opts.verify);
+  if(ctx.readPersisted&&core.verifyInput){verify=await verifyPersisted(ctx.readPersisted,expectedChecks(core.verifyInput),opts.verify);if(verify.status==='unverified')verify=await repairOnce(ctx,core.verifyInput,verify,opts.verify);}
   const state=ctx.latest?.()||ctx.state,flag=verify.status==='verified'?'verified' as const:verify.status==='unverified'?'unverified' as const:undefined;
   let next=core.logId?updateAgentLog(state,core.logId,{verify:flag||'n/a',checks:verify.checks,failed:verify.failed}):state;
   if(flag&&core.outcome==='applied')next={...next,assistantRequests:next.assistantRequests?.map(r=>r.id===id?{...r,verify:flag}:r)};

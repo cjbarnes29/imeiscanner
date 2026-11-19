@@ -83,7 +83,7 @@ try {
     const ua = await run('navigator.userAgent'); assert.match(ua, /; wv\)/, 'a WebView user agent'); assert.equal(await run('typeof AndroidScanner'), 'object');
     assert.match(await run('location.href'), /appassets\.androidplatform\.net/);
   });
-  await step('Settings > About shows version 1.27.3 and the build commit', async () => {
+  await step('Settings > About shows version 1.27.4 and the build commit', async () => {
     await run(`document.querySelector('[aria-label="Settings"]').click()`); await waitFor(`!!document.querySelector('.settings-about')`, 'Settings');
     const about = await run(`document.querySelector('.settings-about').innerText`); console.log('   About says:', about.replace(/\n/g, ' | ').slice(0, 160));
     assert.match(about, /Version 1\.27\.3 \([0-9a-f]{7}\)/); process.env.ABOUT = about; await reload();
