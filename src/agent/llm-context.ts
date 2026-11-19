@@ -69,6 +69,12 @@ export function buildAiContext(state: RetailState, records: RetailRecord[], peop
   return { text: (opts.shareNames ? joined : maskNames(joined, people.slice(0, 26))).slice(0, MAX_CONTEXT_CHARS), aliases };
 }
 
+/** The label the model sees for each person: "Person A…", or the real name when sharing is on. */
+export function labelMap(people: Person[], shareNames: boolean): (personId: string) => string {
+  const m = new Map<string, string>(); people.slice(0, 26).forEach((p, i) => m.set(p.id, shareNames ? p.name : labelFor(i)));
+  return id => m.get(id) || 'someone';
+}
+
 /** Turns "Person A" in the AI's reply back into the real name, on this phone only. Longest labels first so "Person A" never eats part of another. */
 export function unalias(text: string, aliases: Map<string, string>): string {
   let out = text;

@@ -83,10 +83,10 @@ try {
     const ua = await run('navigator.userAgent'); assert.match(ua, /; wv\)/, 'a WebView user agent'); assert.equal(await run('typeof AndroidScanner'), 'object');
     assert.match(await run('location.href'), /appassets\.androidplatform\.net/);
   });
-  await step('Settings > About shows version 1.28.0 and the build commit', async () => {
+  await step('Settings > About shows version 1.29.0 and the build commit', async () => {
     await run(`document.querySelector('[aria-label="Settings"]').click()`); await waitFor(`!!document.querySelector('.settings-about')`, 'Settings');
     const about = await run(`document.querySelector('.settings-about').innerText`); console.log('   About says:', about.replace(/\n/g, ' | ').slice(0, 160));
-    assert.match(about, /Version 1.28.0 \([0-9a-f]{7}\)/); process.env.ABOUT = about; await reload();
+    assert.match(about, /Version 1.29.0 \([0-9a-f]{7}\)/); process.env.ABOUT = about; await reload();
   });
   await step('default mode is Assistant (nothing applies by itself)', async () => { const o = JSON.parse((await run(`localStorage.getItem('retaillens-auto-workflow-v1')`)) || '{}'); assert.ok(!o.assistantMode || o.assistantMode === 'assistant', 'mode: ' + o.assistantMode); });
   await step(`safety gate in the WebView: ${SAFETY_A.length} questions / what-ifs / negations / unclear requests change nothing`, () => checkUnsafe(SAFETY_A));
@@ -180,6 +180,28 @@ try {
     await click('.assistant-memory .memory-note button', 'Delete'); await settle(async () => (await readDb('retail:state')).agentChat.memory.length === 0, 'a note can be deleted');
     await run(`document.querySelector('.assistant-memory input[type=checkbox]').click()`); await settle(async () => (await readDb('retail:state')).agentChat.memoryOn === false, 'memory is switched off again');
     await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);
+  });
+  await step('AI agent in the WebView (simulated provider): off = no calls; on = answer, plan waits for Approve, approve saves and checks it, Undo removes it; names and IMEIs never sent', async () => {
+    const KEYS = ['imei-lens-ai-v1', 'imei-lens-ai-usage-v1', 'imei-lens-convo-v1'];
+    await run(`(()=>{${JSON.stringify(KEYS)}.forEach(k=>localStorage.removeItem(k));window.__ai={calls:[],next:()=>({action:'reply',text:'ok'})};if(!window.__realFetch)window.__realFetch=window.fetch.bind(window);
+      window.fetch=async(url,init)=>{if(String(url).includes('generativelanguage.googleapis.com')){const b=JSON.parse(init.body);window.__ai.calls.push({user:b.contents[b.contents.length-1].parts[0].text,key:(init.headers||{})['x-goog-api-key']});return {ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{text:JSON.stringify(window.__ai.next())}]}}]})};}return window.__realFetch(url,init);};return true;})()`);
+    const calls = () => run('window.__ai.calls.length');
+    const FAKE = 'AIzaSyFAKEKEYFORANDROIDTESTS0123456789';
+    try {
+      await ask('what is the daily target'); await sleep(800); assert.equal(await calls(), 0, 'AI agent off: nothing is sent');
+      await run(`localStorage.setItem('imei-lens-ai-v1',JSON.stringify({enabled:true,provider:'gemini',model:'gemini-3.5-flash-lite',key:${JSON.stringify(FAKE)},shareNames:false,mode:'always',memory:true}));window.__ai.next=()=>({action:'reply',text:'Nothing is set yet.'})`);
+      await ask('whats the daily targts'); await waitFor(`window.__ai.calls.length===1`, 'the agent was asked'); await sleep(800);
+      const sent = await run('window.__ai.calls[0].user'); assert.ok(!/\b\d{15}\b/.test(sent), 'no IMEI sent'); assert.match(sent, /MESSAGE:\nwhats the daily targts/);
+      assert.match(await outputText(), /Nothing is set yet\./, 'the answer is shown');
+      const before = JSON.stringify(await readPeople());
+      await run(`window.__ai.next=()=>({action:'plan',summary:'Add person Qz',steps:[{tool:'add_person',args:{name:'Qz'}}]})`);
+      await ask('pls add a new persn called Qz'); await waitFor(`!!document.querySelector('.assistant-panel .agent-plan')`, 'the plan card'); await sleep(500);
+      assert.equal(JSON.stringify(await readPeople()), before, 'the plan changed nothing by itself');
+      assert.equal(await clickText('.assistant-panel .agent-plan button', 'Approve next step'), true); await settle(async () => (await names()).includes('Qz'), 'plan approved and saved');
+      const st = await readDb('retail:state'); const last = st.agentLog.at(-1); assert.equal(last.tool, 'people.create'); assert.equal(last.verify, 'verified', 'checked in the saved data');
+      assert.equal(await clickText('.assistant-panel .agent-plan button', 'Undo 1 saved step'), true); await settle(async () => !(await names()).includes('Qz'), 'plan undone');
+      assert.ok(!JSON.stringify(await readDb('retail:state')).includes('AIzaSy'), 'the key is not in the saved data');
+    } finally { await run(`(()=>{${JSON.stringify(KEYS)}.forEach(k=>localStorage.removeItem(k));if(window.__realFetch)window.fetch=window.__realFetch;delete window.__ai;return true;})()`); }
   });
   await step('no JavaScript errors were thrown in the page during the whole run', async () => { assert.equal(pageErrors.length, 0, pageErrors.slice(0, 3).join(' | ')); });
 } finally {

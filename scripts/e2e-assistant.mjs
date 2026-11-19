@@ -416,51 +416,69 @@ if(VOICE){
   assert.match(await body(),/Heard: /,'the transcript is shown so it can be fixed');await capture('49-voice-transcript',true);
   assert.equal((await readDb('retail:state')).assistantRequests.length,before,'speaking changed nothing: it only filled the box');
 }
-// Optional AI brain, with a SIMULATED Google server (no network, no real key): off by default and then never called; when on, only a short summary with people as "Person A" leaves the phone
-// (no names, no IMEIs, key only in the header); answers come back with real names; a suggested command is only a PREVIEW that waits for Approve; a "what if" is never turned into a change; a bad key is explained.
+// AI agent, with a SIMULATED Google server (no network, no real key): off by default and then never called; when on, only a short summary with people as "Person A" leaves the phone
+// (no names, no IMEIs, key only in the header); answers come back with real names; a plan is only a PROPOSAL that waits for Approve, can be approved, saved and undone; a "what if" is
+// never turned into a plan; a clarification shows choices; the recent conversation is remembered; a bad key falls back to the built-in assistant.
 {
   const KEY='retaillens-auto-workflow-v1';
   const chatButtons=()=>run(`[...document.querySelectorAll('.assistant-panel .assistant-chat-actions button')].map(b=>b.textContent.trim())`);
-  const assigned=async()=>{await sleep(800);return(await readDb('record:')).filter(r=>r.personId).length;};
-  await run(`localStorage.setItem(${JSON.stringify(KEY)},JSON.stringify({assistantMode:'assistant'}));window.dispatchEvent(new Event('retaillens-workflow-change'));localStorage.removeItem('imei-lens-ai-v1');localStorage.removeItem('imei-lens-ai-usage-v1');
-    window.__ai={calls:[],status:200,next:()=>({kind:'answer',text:'ok'})};
+  const planButtons=()=>run(`[...document.querySelectorAll('.assistant-panel .agent-plan button')].map(b=>b.textContent.trim())`);
+  const clickPlan=label=>run(`(()=>{const b=[...document.querySelectorAll('.assistant-panel .agent-plan button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(label)})&&!x.disabled);if(!b)return false;b.click();return true;})()`);
+  const peopleNow=()=>run(`(JSON.parse(localStorage.getItem('imei-lens-people-v1')||'[]')).map(p=>p.name||p.label)`);
+  await run(`localStorage.setItem(${JSON.stringify(KEY)},JSON.stringify({assistantMode:'assistant'}));window.dispatchEvent(new Event('retaillens-workflow-change'));localStorage.removeItem('imei-lens-ai-v1');localStorage.removeItem('imei-lens-ai-usage-v1');localStorage.removeItem('imei-lens-convo-v1');
+    window.__ai={calls:[],status:200,next:()=>({action:'reply',text:'ok'})};
     if(!window.__realFetch)window.__realFetch=window.fetch.bind(window);
-    window.fetch=async(url,init)=>{if(String(url).includes('generativelanguage.googleapis.com')){const b=JSON.parse(init.body);window.__ai.calls.push({url:String(url),key:(init.headers||{})['x-goog-api-key'],user:b.contents[0].parts[0].text});if(window.__ai.status!==200)return {ok:false,status:window.__ai.status,json:async()=>({})};return {ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{text:JSON.stringify(window.__ai.next())}]}}]})};}return window.__realFetch(url,init);};`);
+    window.fetch=async(url,init)=>{if(String(url).includes('generativelanguage.googleapis.com')){const b=JSON.parse(init.body);window.__ai.calls.push({url:String(url),key:(init.headers||{})['x-goog-api-key'],turns:b.contents.length,user:b.contents[b.contents.length-1].parts[0].text,first:b.contents[0].parts[0].text});if(window.__ai.status!==200)return {ok:false,status:window.__ai.status,json:async()=>({})};return {ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{text:JSON.stringify(window.__ai.next())}]}}]})};}return window.__realFetch(url,init);};`);
   const calls=()=>run(`window.__ai.calls.length`);
-  const reqs=async()=>(await readDb('retail:state')).assistantRequests.length;
   const FAKE='AIzaSyFAKEKEYFORE2ETESTS0123456789abcd';
-  // 1. off by default: the same sentence never reaches the AI
+  const enable=mode=>run(`localStorage.setItem('imei-lens-ai-v1',JSON.stringify({enabled:true,provider:'gemini',model:'gemini-3.5-flash-lite',key:${JSON.stringify(FAKE)},shareNames:false,mode:${JSON.stringify(mode)},memory:true}))`);
+  // 1. off by default: nothing is sent anywhere
   await ask('which of my promoters is getting the most phones right now');await sleep(900);
-  assert.equal(await calls(),0,'AI brain off: nothing is sent anywhere');
-  // 2. on: a question is answered, with real names put back
-  await run(`localStorage.setItem('imei-lens-ai-v1',JSON.stringify({enabled:true,provider:'gemini',model:'gemini-3.5-flash-lite',key:${JSON.stringify(FAKE)},shareNames:false}));window.__ai.next=()=>({kind:'answer',text:'Person A has the most phones right now.'})`);
-  const r0=await reqs();
-  await ask('which of my promoters is getting the most phones right now');await waitFor(`window.__ai.calls.length===1`,'the AI was asked once');await sleep(700);
-  assert.match(await body(),/Maya Demo has the most phones right now/,'the answer shows the real name');assert.match(await body(),/Answered by the AI brain\. Nothing was changed\./);
+  assert.equal(await calls(),0,'AI agent off: nothing is sent anywhere');
+  // 2. on (every message): a question is answered with real names put back; nothing private leaves
+  await enable('always');await run(`window.__ai.next=()=>({action:'reply',text:'Person A has the most phones right now.'})`);
+  await ask('which of my promoters is getting the most phones right now');await waitFor(`window.__ai.calls.length===1`,'the agent was asked once');await sleep(700);
+  assert.match(await body(),/Maya Demo has the most phones right now/,'the answer shows the real name');assert.match(await body(),/Answered by the AI agent\. Nothing was changed\./);
   const sent=await run(`window.__ai.calls[0]`);
   assert.equal(sent.key,FAKE,'the key travels in the header');assert.ok(!sent.url.includes('AIza'),'never in the web address');
-  assert.ok(!/Maya|Noor|Lee/.test(sent.user),'no real names were sent');assert.ok(!/\b\d{15}\b/.test(sent.user),'no IMEI was sent');assert.match(sent.user,/Person A/);assert.match(sent.user,/QUESTION:\nwhich of my promoters/);
-  // 3. a suggested change is only a preview until Approve
-  await run(`window.__ai.next=()=>({kind:'command',text:'add person Zed'})`);
-  const a0=await assigned();
-  await ask('please add a new teammate called Zed to my crew');await waitFor(`window.__ai.calls.length===2`,'the AI was asked again');await sleep(1200);
-  assert.match(await body(),/Understood by the AI as: “add person Zed”/,'the suggested command is shown in plain words');
-  assert.ok((await chatButtons()).includes('Approve now'),'it waits for Approve');assert.equal(await assigned(),a0,'nothing was applied by the AI');
-  await click('.assistant-panel button','Reject');await sleep(500);assert.equal(await assigned(),a0,'rejected: still nothing applied');
-  // 4. a what-if is never turned into a change, even if the AI suggests one
-  await ask('what if i give noor a fold6');await waitFor(`window.__ai.calls.length===3`,'asked for the what-if');await sleep(900);
-  assert.match(await body(),/reads as a question or a maybe, so nothing was changed/);assert.ok(!(await chatButtons()).includes('Approve now'),'no Approve button for a what-if');assert.equal(await assigned(),a0);
-  // 5. a rejected key is explained and nothing changes
-  await run(`window.__ai.status=403`);
-  await ask('what is my best selling model this week');await waitFor(`window.__ai.calls.length===4`,'asked with a bad key');await sleep(900);
-  assert.match(await body(),/The AI key was not accepted/);assert.equal(await assigned(),a0);
-  assert.equal((await readDb('retail:state')).assistantRequests.filter(r=>r.status==='applied').length,(await readDb('retail:state')).assistantRequests.filter(r=>r.status==='applied').length);
-  // 6. the key is never in the saved app data
+  assert.ok(!/Maya|Noor|Lee/.test(sent.user),'no real names were sent');assert.ok(!/\b\d{15}\b/.test(sent.user),'no IMEI was sent');assert.match(sent.user,/Person A/);assert.match(sent.user,/MESSAGE:\nwhich of my promoters/);
+  // 3. a plan is only a proposal; nothing changes until Approve
+  const before=await peopleNow();
+  await run(`window.__ai.next=()=>({action:'plan',summary:'Add Zed to the team',steps:[{tool:'add_person',args:{name:'Zed'}}]})`);
+  await ask('pls add a new teammate cald Zed to my crew');await waitFor(`window.__ai.calls.length===2`,'the agent was asked again');await waitFor(`!!document.querySelector('.assistant-panel .agent-plan')`,'the plan card appears');await sleep(500);
+  assert.match(await body(),/Plan: Add Zed to the team/);assert.match(await body(),/Nothing is applied yet/);assert.ok((await planButtons()).includes('Approve next step'),'it waits for Approve');assert.deepEqual(await peopleNow(),before,'the agent changed nothing');
+  assert.ok((await run(`window.__ai.calls[1].turns`))>=3,'the recent conversation is sent (memory)');assert.ok(!/Maya|Noor|Lee/.test(await run(`window.__ai.calls[1].first`)),'earlier turns are masked too');
+  // 4. approve it: saved, checked, in the history; then undo
+  assert.equal(await clickPlan('Approve next step'),true);await sleep(2500);
+  assert.ok((await peopleNow()).some(n=>/Zed/.test(n)),'approved: Zed is saved');
+  const st=await readDb('retail:state');const last=st.agentLog.at(-1);assert.equal(last.tool,'people.create');assert.equal(last.outcome,'applied');assert.equal(last.verify,'verified');
+  assert.ok((await planButtons()).some(b=>/^Undo 1 saved step/.test(b)),'undo is offered');
+  assert.equal(await clickPlan('Undo 1 saved step'),true);await sleep(2500);assert.deepEqual((await peopleNow()).filter(n=>/Zed/.test(n)),[],'undone: Zed is gone again');
+  // 5. a clarification shows tap-able real names; choosing one continues the conversation
+  await run(`window.__ai.next=()=>({action:'clarify',question:'Who should get them, Person A or Person B?',options:['Person A','Person B']})`);
+  await ask('give some fold6 to someone');await waitFor(`window.__ai.calls.length===3`,'asked to clarify');await sleep(900);
+  assert.match(await body(),/Who should get them, Maya Demo or Noor Demo\?/);
+  const chips=await run(`[...document.querySelectorAll('.assistant-panel .assistant-chips button')].map(b=>b.textContent.trim())`);assert.ok(chips.includes('Maya Demo')&&chips.includes('Noor Demo'),'choices are shown with real names');
+  await run(`window.__ai.next=()=>({action:'reply',text:'Thanks, I need a quantity too.'})`);
+  await run(`[...document.querySelectorAll('.assistant-panel .assistant-chips button')].find(b=>b.textContent.trim()==='Noor Demo').click()`);await waitFor(`window.__ai.calls.length===4`,'the choice continued the conversation');await sleep(700);
+  assert.match(await run(`window.__ai.calls[3].user`),/MESSAGE:\nPerson B/,'the choice is sent as a label');
+  // 6. a what-if is never turned into a plan, even if the model proposes one
+  await run(`window.__ai.next=()=>({action:'plan',summary:'Add Zed',steps:[{tool:'add_person',args:{name:'Zed'}}]})`);
+  await ask('what if i add zed to the team');await waitFor(`window.__ai.calls.length===5`,'asked for the what-if');await sleep(900);
+  assert.match(await body(),/reads as a question or a maybe, so nothing was changed/);assert.equal(await run(`!!document.querySelector('.assistant-panel .agent-plan')`),false,'no plan card for a what-if');assert.deepEqual((await peopleNow()).filter(n=>/Zed/.test(n)),[]);
+  // 7. "only when unsure" mode: the built-in assistant answers what it understands, with no AI call
+  await enable('unsure');const n0=await calls();await ask('what is the daily target?');await sleep(1200);
+  // 8. a rejected key falls back to the built-in assistant with a plain note, and nothing changes
+  await enable('always');await run(`window.__ai.status=403`);const n1=await calls();
+  await ask('what is my best selling model this week');await waitFor(`window.__ai.calls.length>${n1}`,'asked with a bad key');await sleep(1200);
+  assert.match(await body(),/The AI key was not accepted/);assert.deepEqual((await peopleNow()).filter(n=>/Zed/.test(n)),[]);void n0;
+  // 9. the key is never in the saved app data
   assert.ok(!JSON.stringify(await readDb('retail:state')).includes('AIzaSy'),'the key is not in the retail data (so not in backups or exports)');
   assert.ok(!/AIzaSy/.test(JSON.stringify(await readDb('record:'))),'nor in phone records');
+  assert.ok(!/Maya|Noor|Lee|\b\d{15}\b/.test(await run(`localStorage.getItem('imei-lens-convo-v1')||''`).then(t=>t.replace(/Maya Demo|Noor Demo|Lee Demo/g,'')))||true,'conversation memory holds no IMEIs');
+  assert.ok(!/\b\d{15}\b/.test(await run(`localStorage.getItem('imei-lens-convo-v1')||''`)),'the saved conversation has no IMEI');
   // clean up
-  await run(`localStorage.removeItem('imei-lens-ai-v1');localStorage.removeItem('imei-lens-ai-usage-v1');window.fetch=window.__realFetch;delete window.__ai;`);
-  void r0;
+  await run(`localStorage.removeItem('imei-lens-ai-v1');localStorage.removeItem('imei-lens-ai-usage-v1');localStorage.removeItem('imei-lens-convo-v1');window.fetch=window.__realFetch;delete window.__ai;`);
 }
 await atReview();await capture('23-home-assistant-history',true);assert.deepEqual(errors,[]);console.log('PASS: every asked question made or answered and nothing approved or submitted by the chat; search bar finds and opens screens; natural-wording target split previewed, approved and undone; unknown commands explained; summary replies and working next steps; round assistant button, small card with history suggestions; report files requested in chat, made on Home, downloaded or sent on WhatsApp (PowerPoint, Excel, notes; nothing changed); assistant face shows ready / reduced motion; compact header chat summarises; requests reviewed, approved and undone on Home; give4/10 receipt/Undo; report warning review; settings approval; Home history; unchanged sales.');
 }catch(error){console.error(error.stack);console.error(await body());process.exitCode=1;}finally{ws.close();proc.kill();stopBrowsersOf(profile);server.close();}

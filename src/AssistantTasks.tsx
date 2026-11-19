@@ -147,6 +147,23 @@ export async function undoTask(ctx: RetailCtx, taskId: string): Promise<string> 
   edit(ctx, taskId, t => ({ ...t, steps: t.steps.map(s => s.status === 'pending' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task undone', task.text.slice(0, 200)]);
   return 'Task undone. Receipts are saved in History.';
 }
+/**
+ * A plan from the AI agent becomes an ordinary task, so it uses the same runner, previews, Approve, verified save, audit log and Undo. It is NEVER run by Autopilot:
+ * in Assistant mode the person approves each step, otherwise (Copilot) once for the whole plan. Each step is previewed against the data as it is when the step runs.
+ */
+export function startAgentTask(base: RetailCtx, summary: string, commands: string[], now = nowIso()): { taskId?: string; message: string; duplicate?: boolean } {
+  const ctx = fresh(base), state = ctx.latest?.() || ctx.state;
+  const mode: AssistantMode = readWorkflowOptions().assistantMode === 'assistant' ? 'assistant' : 'copilot';
+  const text = `AI plan: ${summary}`.slice(0, 1000);
+  const twin = findDuplicateTask(state, text, mode);
+  if (twin) return { taskId: twin.id, duplicate: true, message: 'This exact plan is already open, so a second copy was not started.' };
+  if ((state.assistantTasks || []).filter(t => t.status === 'review' || t.status === 'running').length >= 10) return { message: 'Finish or reject some open tasks first (the limit is 10). Nothing was started.' };
+  let n = 0;
+  const task = newTask(crypto.randomUUID(), text, mode, commands.slice(0, 8), now, () => `${Date.now().toString(36)}-${++n}`);
+  saveTask(ctx, { ...task, status: 'review' }, ['assistant task started', `AI plan (${mode}): ${summary.slice(0, 160)} · ${task.steps.length} step${task.steps.length === 1 ? '' : 's'}`]);
+  emitAgent({ phase: 'planning', taskId: task.id, done: 0, total: task.steps.length, text: `${task.steps.length} step${task.steps.length === 1 ? '' : 's'}` });
+  return { taskId: task.id, message: mode === 'assistant' ? 'Review the plan and approve each step.' : 'Review the plan, then approve it once.' };
+}
 export function rejectTask(ctx: RetailCtx, taskId: string) {
   stopped.add(taskId);
   edit(ctx, taskId, t => ({ ...t, status: 'rejected' as const, steps: t.steps.map(s => s.status === 'pending' || s.status === 'failed' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task rejected', latestTask(ctx, taskId)?.text.slice(0, 200) || '']);

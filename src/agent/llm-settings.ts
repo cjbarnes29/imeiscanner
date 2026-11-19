@@ -1,13 +1,17 @@
+import { PROVIDER_IDS, type Provider } from './providers';
+
 /**
- * Optional AI brain settings. OFF by default. Kept in this phone's local storage under one key, NOT in the retail data, so the API key is never part of a
- * backup, an export, the audit log, a receipt or a diagnostics file. Nothing here makes a network call.
+ * AI agent settings. OFF by default. Kept in this phone's local storage under one key, NOT in the retail data, so the API key is never part of a backup,
+ * an export, the audit log, a receipt or a diagnostics file. Nothing here makes a network call.
  */
 export const AI_KEY = 'imei-lens-ai-v1';
 export const AI_USAGE_KEY = 'imei-lens-ai-usage-v1';
-export const DAILY_AI_LIMIT = 40;
+export const DAILY_AI_LIMIT = 60;
 
-export type AiSettings = { enabled: boolean; provider: 'gemini'; model: string; key: string; shareNames: boolean };
-export const DEFAULT_AI: AiSettings = { enabled: false, provider: 'gemini', model: '', key: '', shareNames: false };
+/** mode "always": every message goes to the agent (best conversation, follow-ups). "unsure": the built-in assistant first, the agent only when it does not understand. */
+export type AiMode = 'always' | 'unsure';
+export type AiSettings = { enabled: boolean; provider: Provider; model: string; key: string; shareNames: boolean; mode: AiMode; memory: boolean };
+export const DEFAULT_AI: AiSettings = { enabled: false, provider: 'gemini', model: '', key: '', shareNames: false, mode: 'always', memory: true };
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const store = (): Store | null => { try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; } };
@@ -15,9 +19,10 @@ const store = (): Store | null => { try { return typeof localStorage === 'undefi
 /** Only the exact shape is accepted; anything odd falls back to "off". */
 export function cleanAiSettings(raw: unknown): AiSettings {
   const v = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const key = typeof v.key === 'string' ? v.key.trim().slice(0, 200) : '';
-  const model = typeof v.model === 'string' && /^[a-z0-9][a-z0-9._-]{1,80}$/i.test(v.model) ? v.model : '';
-  return { enabled: v.enabled === true && key.length >= 20 && !!model, provider: 'gemini', model, key, shareNames: v.shareNames === true };
+  const key = typeof v.key === 'string' ? v.key.trim().slice(0, 300) : '';
+  const model = typeof v.model === 'string' && /^[a-z0-9][a-z0-9._:/-]{1,100}$/i.test(v.model) ? v.model : '';
+  const provider = PROVIDER_IDS.includes(v.provider as Provider) ? v.provider as Provider : 'gemini';
+  return { enabled: v.enabled === true && key.length >= 20 && !!model, provider, model, key, shareNames: v.shareNames === true, mode: v.mode === 'unsure' ? 'unsure' : 'always', memory: v.memory !== false };
 }
 export function readAiSettings(s: Store | null = store()): AiSettings {
   try { return cleanAiSettings(JSON.parse(s?.getItem(AI_KEY) || '{}')); } catch { return { ...DEFAULT_AI }; }
@@ -28,7 +33,7 @@ export function saveAiSettings(next: AiSettings, s: Store | null = store()): AiS
   return clean;
 }
 export function clearAiSettings(s: Store | null = store()) { try { s?.removeItem(AI_KEY); s?.removeItem(AI_USAGE_KEY); } catch { /* nothing to clear */ } }
-/** The brain is only used when it is switched on AND a key and model are saved. */
+/** The agent is only used when it is switched on AND a key and model are saved. */
 export const aiReady = (s: AiSettings) => s.enabled && s.key.length >= 20 && !!s.model;
 export const maskKey = (key: string) => key.length < 10 ? '' : `${key.slice(0, 4)}…${key.slice(-3)}`;
 
