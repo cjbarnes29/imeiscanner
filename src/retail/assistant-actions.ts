@@ -69,7 +69,7 @@ function reinterpret(args:Parameters<typeof previewAssistantRaw>,raw:AssistantPr
   }
   return fallback||raw;
 }
-const changesData=(p:AssistantPreview)=>!!(p.giving.length||p.business||p.report||p.settings||p.additions?.length||p.people?.ops.length||p.moves?.length);
+export const changesData=(p:AssistantPreview)=>!!(p.giving.length||p.business||p.report||p.settings||p.additions?.length||p.people?.ops.length||p.moves?.length);
 /** The one door for every sentence: chat, tasks, routines and Autopilot all come through here. Only a plain request can produce a change; a question, "what if", plan, past statement or unclear request never can (answers such as the people list stay). */
 export function previewAssistant(...args:Parameters<typeof previewAssistantRaw>):AssistantPreview{
   const [,,,,text,fileReport]=args;

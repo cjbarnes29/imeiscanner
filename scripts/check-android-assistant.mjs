@@ -83,10 +83,10 @@ try {
     const ua = await run('navigator.userAgent'); assert.match(ua, /; wv\)/, 'a WebView user agent'); assert.equal(await run('typeof AndroidScanner'), 'object');
     assert.match(await run('location.href'), /appassets\.androidplatform\.net/);
   });
-  await step('Settings > About shows version 1.27.4 and the build commit', async () => {
+  await step('Settings > About shows version 1.28.0 and the build commit', async () => {
     await run(`document.querySelector('[aria-label="Settings"]').click()`); await waitFor(`!!document.querySelector('.settings-about')`, 'Settings');
     const about = await run(`document.querySelector('.settings-about').innerText`); console.log('   About says:', about.replace(/\n/g, ' | ').slice(0, 160));
-    assert.match(about, /Version 1.27.4 \([0-9a-f]{7}\)/); process.env.ABOUT = about; await reload();
+    assert.match(about, /Version 1.28.0 \([0-9a-f]{7}\)/); process.env.ABOUT = about; await reload();
   });
   await step('default mode is Assistant (nothing applies by itself)', async () => { const o = JSON.parse((await run(`localStorage.getItem('retaillens-auto-workflow-v1')`)) || '{}'); assert.ok(!o.assistantMode || o.assistantMode === 'assistant', 'mode: ' + o.assistantMode); });
   await step(`safety gate in the WebView: ${SAFETY_A.length} questions / what-ifs / negations / unclear requests change nothing`, () => checkUnsafe(SAFETY_A));
