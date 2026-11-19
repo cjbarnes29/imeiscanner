@@ -53,6 +53,8 @@ const reload = async () => { await run('location.reload()').catch(() => {}); awa
 const ALL = ['stock', 'give', 'report', 'calendar', 'targets', 'routine', 'whatsapp', 'settings', 'accessory', 'add-stock', 'people', 'remove'];
 const setMode = async mode => { await run(`(()=>{localStorage.setItem('retaillens-auto-workflow-v1',JSON.stringify(${mode ? `{assistantMode:'${mode}',autopilotAllow:${JSON.stringify(ALL)},autopilotDailyCap:50}` : '{}'}));window.dispatchEvent(new Event('retaillens-workflow-change'));return true;})()`); await sleep(400); };
 
+// a freshly installed test app shows its one-time welcome dialog: close it so the check starts from the normal screen
+await run(`(()=>{const welcome=document.body.innerText.includes('Welcome to AI LENS');const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Close');if(welcome&&b)b.click();return true;})()`); await sleep(700);
 // leftovers from an earlier run of this check (isolated test app only): reject waiting requests and remove the test people, so every run starts the same
 {
   // held tasks from an earlier (possibly failed) run would hit the app's limit of 10 open tasks: reject them first
