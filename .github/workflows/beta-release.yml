@@ -80,7 +80,15 @@ jobs:
         run: |
           key="$RUNNER_TEMP/signing-key.jks"
           trap 'rm -f "$key"' EXIT   # the key file is removed even if the build fails
-          printf '%s' "$IMEI_KEYSTORE_B64" | base64 -d > "$key"
+          # A secret pasted into the GitHub web page can carry invisible characters (line breaks, spaces). Keep only real base64 characters,
+          # and say how many were dropped (a count only, never the text). The release gate below still checks the signing certificate,
+          # so a damaged key can only fail the build, never publish a wrongly signed APK.
+          raw_len=${#IMEI_KEYSTORE_B64}
+          printf '%s' "$IMEI_KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=' > "$RUNNER_TEMP/key.b64"
+          clean_len=$(wc -c < "$RUNNER_TEMP/key.b64")
+          echo "Signing key text: $raw_len characters saved, $clean_len valid base64 characters kept, $((raw_len - clean_len)) dropped."
+          if ! base64 -d < "$RUNNER_TEMP/key.b64" > "$key"; then rm -f "$RUNNER_TEMP/key.b64"; echo "::error title=Signing key text is not valid::IMEI_KEYSTORE_B64 does not decode to a key file even after cleaning. Expected about 3492 characters; re-create the secret."; exit 1; fi
+          rm -f "$RUNNER_TEMP/key.b64"
           chmod 600 "$key"
           export IMEI_KEYSTORE="$key"
           gradle --project-dir android :app:assembleDebug -PsignDebugWithEnv --stacktrace
