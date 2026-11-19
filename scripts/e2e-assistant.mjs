@@ -184,6 +184,54 @@ await click('.assistant-panel button','Open the full assistant');
 await waitFor(`!!document.querySelector('.assistant-backdrop .assistant-panel')&&!document.querySelector('.assistant-quick')`,'the full assistant opens');
 await click('.assistant-backdrop button','Close assistant');await waitFor(`!document.querySelector('.assistant-panel')`,'the full assistant closes');
 await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-quick')`,'the round button opens the small card again');
+// 4c. Conversation: Approve / Reject / Undo right in the chat, "yes", "no", "undo that", a follow-up number, and the opt-in memory. A destructive change is only offered on Home.
+{
+  const peopleNow=()=>run(`JSON.parse(localStorage.getItem('imei-lens-people-v1')||'[]').map(p=>p.name)`);
+  const chatButtons=()=>run(`[...document.querySelectorAll('.assistant-panel .assistant-chat-actions button')].map(b=>b.textContent.trim())`);
+  const reply=()=>run(`document.querySelector('.assistant-panel .plan-ai-output')?.innerText||''`);
+  const said=async text=>{await ask(text);await sleep(700);};
+  const start=await peopleNow();
+  await said('add person Zed');
+  assert.deepEqual(await peopleNow(),start,'nothing is applied before Approve');
+  assert.ok((await chatButtons()).includes('Approve now')&&(await chatButtons()).includes('Reject'),'Approve and Reject are offered in the chat');
+  await click('.assistant-panel .assistant-chat-actions button','Approve now');
+  await waitFor(`/Approved and saved/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'approved in the chat and checked in the saved data');
+  assert.ok((await peopleNow()).includes('Zed'),'Zed is saved');assert.ok((await chatButtons()).includes('Undo'),'Undo is offered after it');
+  await said('rename zed to zack');await said('yes');
+  await waitFor(`/Approved and saved/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'"yes" approved the waiting change');
+  assert.ok((await peopleNow()).includes('Zack'),'the rename is saved');
+  await said('undo that');await waitFor(`/Undone/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'"undo that" undid it');
+  assert.ok((await peopleNow()).includes('Zed')&&!(await peopleNow()).includes('Zack'),'the old name is back');
+  await said('rename zed to zoe');await said('no');
+  assert.ok((await peopleNow()).includes('Zed')&&!(await peopleNow()).includes('Zoe'),'"no" rejects it');assert.match(await reply(),/Rejected/);
+  await said('delete zed');assert.ok(!(await chatButtons()).includes('Approve now'),'a delete is only offered on Home, never in the chat');
+  await said('yes');assert.ok((await peopleNow()).includes('Zed'),'"yes" cannot approve a delete from the chat');
+  await toHome();await click('.assistant-requests .assistant-request button','Approve changes');await sleep(900);assert.deepEqual(await peopleNow(),start,'Zed is removed on Home');
+  // a follow-up with another number is a new request that says how it was read
+  const month4c=today.slice(0,7),target4c=async()=>((await readDb('retail:state')).targets?.[month4c]?.me?.lines||[]).find(l=>l.segment==='flagship1')?.target||0,t0=await target4c();
+  await said('set maya flagship 1 target to 9');await said('make it 5');
+  assert.match(await reply(),/Same as before, with 5/,'the follow-up shows how it was understood');
+  await said('yes');await waitFor(`/Approved and saved/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'the follow-up number was approved');
+  assert.equal(await target4c(),5,'the new number was applied, not the old one');
+  await said('undo that');await waitFor(`/Undone/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'the target was undone');assert.equal(await target4c(),t0,'the target is back');
+  await toHome();await click('.assistant-requests .assistant-request button','Reject');await sleep(500);
+  // memory: off by default, opt-in, visible, editable and deletable; never IMEIs
+  await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);await waitFor(`!document.querySelector('.assistant-panel')`,'the chat closes');await run(`document.querySelector('[aria-label="Settings"]').click()`);await waitFor(`!!document.querySelector('.settings-local-ai button')`,'Settings');await click('.settings-local-ai button','Local AI');await waitFor(`!!document.querySelector('.assistant-backdrop .assistant-panel')&&!!document.querySelector('.assistant-memory')`,'the assistant opened from Settings shows Memory & preferences');
+  await said('remember that maya covers the north store');assert.match(await reply(),/Memory is off/,'nothing is remembered while memory is off');
+  assert.ok(!(await readDb('retail:state')).agentChat?.memory?.length,'nothing was stored');
+  await run(`document.querySelector('.assistant-memory').open=true;document.querySelector('.assistant-memory input[type=checkbox]').click()`);await sleep(700);
+  assert.equal((await readDb('retail:state')).agentChat.memoryOn,true,'memory is on only after the switch');
+  await said('remember that maya covers the north store');await waitFor(`/Remembered/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'remembered');
+  await said('what do you remember');assert.match(await reply(),/maya covers the north store/i,'the notes can be listed');
+  const imeiNote=imei();await said('remember that the phone is '+imeiNote);assert.match(await reply(),/never remember IMEI/,'IMEIs are refused');
+  assert.ok(!JSON.stringify(await readDb('retail:state')).includes(imeiNote),'the IMEI is nowhere in the saved data, not even in the chat history');
+  await run(`(()=>{const el=document.querySelector('.assistant-memory .memory-note input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'maya covers the south store');el.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`);
+  await click('.assistant-memory .memory-note button','Save');await sleep(700);assert.equal((await readDb('retail:state')).agentChat.memory[0].text,'maya covers the south store','an edit is saved');
+  await click('.assistant-memory .memory-note button','Delete');await sleep(700);assert.equal((await readDb('retail:state')).agentChat.memory.length,0,'a note can be deleted');
+  await run(`document.querySelector('.assistant-memory input[type=checkbox]').click()`);await sleep(700);assert.equal((await readDb('retail:state')).agentChat.memoryOn,false,'memory can be switched off again');
+  await click('.assistant-backdrop button','Close assistant');await waitFor(`!document.querySelector('.assistant-panel')`,'the assistant closes');await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-quick')`,'the small card is open again, as the next steps expect');
+  await atReview();
+}
 await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!document.querySelector('.assistant-panel')`,'and closes it');
 // natural wording: the sentence the user typed is understood, previewed first, approved and undone; nothing changes before approval
 await ask('change flagship 3 target to 12 and divide it to promoters');

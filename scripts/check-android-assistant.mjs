@@ -25,7 +25,9 @@ const readDb = key => run(`new Promise(res=>{const o=indexedDB.open('imei-lens-v
 const readPeople = async () => JSON.parse(await run(`localStorage.getItem('imei-lens-people-v1')||'[]'`));
 const names = async () => (await readPeople()).map(p => p.name);
 const SKIP = ['assistantRequests', 'assistantTasks', 'audit', 'history'];
-const snap = async () => { const s = await readDb('retail:state'); for (const k of SKIP) delete s[k]; return JSON.stringify({ retail: s, people: await readPeople(), options: await run(`localStorage.getItem('retaillens-auto-workflow-v1')`) }); };
+// compared as data: the order of the keys inside an object does not matter (the loader tidies it on the first save after a reload)
+const stable = v => JSON.stringify(v, (k, val) => val && typeof val === 'object' && !Array.isArray(val) ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => a.localeCompare(b))) : val);
+const snap = async () => { const s = await readDb('retail:state'); for (const k of SKIP) delete s[k]; return stable({ retail: s, people: await readPeople(), options: await run(`localStorage.getItem('retaillens-auto-workflow-v1')`) }); };
 const requests = async () => (await readDb('retail:state')).assistantRequests || [];
 const tasks = async () => ((await readDb('retail:state')).assistantTasks || []).length;
 const pendingCount = async () => (await requests()).filter(r => r.status === 'pending').length;
@@ -67,7 +69,9 @@ console.log('emulator check starting; app date', tomorrow, 'is tomorrow; people 
 
 const SAFETY_A = ['what if i give 4 fold6 to person 1', 'should i store 4 fold6', "don't give anything", 'delete everything', 'give about 4 fold6 to person 1', 'how do i set my flagship 1 target to 12', 'can i remove 2 fold6 from stock', 'set report fold6 to 6 if possible', 'i might add a person called zed', 'never delete anyone', 'what happens if i turn off auto detection', 'i planned to give person 1 4 fold6'];
 const SAFETY_B = ['what if i delete khuram', 'should i remove raseen', "don't remove carlou", 'rename khuram or raseen to zed', 'is raseen on leave tomorrow', 'asha might be off friday', 'what happens if i set khuram flagship 1 target to 12'];
-const checkUnsafe = async list => { for (const text of list) { const before = await snap(), p0 = await pendingCount(); const r = await ask(text); assert.equal(await snap(), before, `"${text}" changed saved data`); assert.equal(await pendingCount(), p0, `"${text}" left a request waiting for approval`); assert.ok(!/saved for review/.test(r.status), `"${text}" was queued: ${r.status}`); } };
+const quiet = async () => { let prev = await snap(); for (let i = 0; i < 8; i++) { await sleep(500); const cur = await snap(); if (cur === prev) return cur; prev = cur; } return prev; };
+const diffKeys = (a, b) => { const x = JSON.parse(a), y = JSON.parse(b), out = [...new Set([...Object.keys(x.retail), ...Object.keys(y.retail)])].filter(k => JSON.stringify(x.retail[k]) !== JSON.stringify(y.retail[k])); if (JSON.stringify(x.people) !== JSON.stringify(y.people)) out.push('people'); if (x.options !== y.options) out.push('options'); return out; };
+const checkUnsafe = async list => { for (const text of list) { const before = await quiet(), p0 = await pendingCount(); const r = await ask(text); const after = await snap(); assert.ok(after === before, `"${text}" changed saved data: ${diffKeys(before, after).join(', ')}` + (diffKeys(before, after).includes('agentLog') ? ' | log before ' + JSON.stringify(JSON.parse(before).retail.agentLog?.slice(-2)) + ' | log after ' + JSON.stringify(JSON.parse(after).retail.agentLog?.slice(-2)) : '')); assert.equal(await pendingCount(), p0, `"${text}" left a request waiting for approval`); assert.ok(!/saved for review/.test(r.status), `"${text}" was queued: ${r.status}`); } };
 
 try {
   await step('real Android WebView with the native bridge, test app (not the main app)', async () => {
@@ -136,6 +140,41 @@ try {
   await step('cleanup: remove the 3 test people so the app is as found', async () => {
     await ask('delete khuram, raseen and carlou'); await toHome(); await approve(); await settle(async () => (await names()).length === JSON.parse(originalPeople).length, 'people back to the start');
     assert.equal(JSON.stringify(await readPeople()), originalPeople, 'the same people as before the test');
+  });
+  const chatButtons = () => run(`[...document.querySelectorAll('.assistant-panel .assistant-chat-actions button')].map(b=>b.textContent.trim())`);
+  await step('in-chat Approve now: previewed, approved in the chat, saved and checked, then "undo that" removes it', async () => {
+    const before = JSON.stringify(await names());
+    const r = await ask('add person Qa'); assert.match(r.answer, /Not applied yet/); assert.equal(JSON.stringify(await names()), before, 'nothing is applied before Approve');
+    assert.ok((await chatButtons()).includes('Approve now') && (await chatButtons()).includes('Reject'), 'Approve and Reject are offered in the chat');
+    await click('.assistant-panel .assistant-chat-actions button', 'Approve now');
+    await settle(async () => (await names()).includes('Qa'), 'Qa saved'); await settle(async () => /Approved and saved/.test(await outputText()), 'the chat says it was checked in the saved data');
+    await settle(async () => ((await readDb('retail:state')).agentLog || []).slice(-1)[0]?.verify === 'verified', 'the audit log shows it was verified');
+    await ask('undo that'); await settle(async () => !(await names()).includes('Qa'), 'undone by "undo that"'); assert.equal(JSON.stringify(await names()), before);
+  });
+  await step('follow-ups in the WebView: "rename qa to qb" then "yes" approves; "no" rejects; a delete is never approved from the chat', async () => {
+    await ask('add person Qa'); await click('.assistant-panel .assistant-chat-actions button', 'Approve now'); await settle(async () => (await names()).includes('Qa'), 'Qa saved');
+    await ask('rename qa to qb'); await ask('yes'); await settle(async () => (await names()).includes('Qb'), 'the rename was approved by "yes"');
+    await ask('rename qb to qc'); await ask('no'); assert.ok((await names()).includes('Qb') && !(await names()).includes('Qc'), '"no" rejects it'); assert.match(await outputText(), /Rejected/);
+    await ask('delete qb'); assert.ok(!(await chatButtons()).includes('Approve now'), 'a delete is only offered on Home'); await ask('yes'); assert.ok((await names()).includes('Qb'), '"yes" cannot approve a delete');
+    await toHome(); await approve(); await settle(async () => !(await names()).includes('Qb'), 'the delete was approved on Home');
+    assert.equal(JSON.stringify(await readPeople()), originalPeople, 'the same people as at the start');
+  });
+  await step('memory in the WebView: off by default, opt-in from Settings, visible, editable, deletable, never IMEIs', async () => {
+    if (await chatOpen()) await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`); await sleep(500);
+    await ask('remember that maya covers the north store'); assert.match(await outputText(), /Memory is off/, 'nothing is remembered while memory is off');
+    assert.ok(!(await readDb('retail:state')).agentChat?.memory?.length, 'nothing was stored');
+    await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`); await sleep(500);
+    await run(`document.querySelector('[aria-label="Settings"]').click()`); await waitFor(`!!document.querySelector('.settings-local-ai button')`, 'Settings'); await click('.settings-local-ai button', 'Local AI');
+    await waitFor(`!!document.querySelector('.assistant-backdrop .assistant-panel')&&!!document.querySelector('.assistant-memory')`, 'Memory & preferences opened from Settings');
+    await run(`document.querySelector('.assistant-memory').open=true;document.querySelector('.assistant-memory input[type=checkbox]').click()`); await sleep(900);
+    assert.equal((await readDb('retail:state')).agentChat.memoryOn, true, 'memory is on only after the switch');
+    await ask('remember that maya covers the north store'); await settle(async () => /Remembered/.test(await outputText()), 'remembered'); await ask('what do you remember'); assert.match(await outputText(), /maya covers the north store/i);
+    const fake = '49015420' + '000123' + '9'; await ask('remember that the phone is ' + fake); assert.match(await outputText(), /never remember IMEI/, 'IMEIs are refused'); assert.ok(!JSON.stringify(await readDb('retail:state')).includes(fake), 'the digits are nowhere in the saved data');
+    await run(`(()=>{const el=document.querySelector('.assistant-memory .memory-note input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'maya covers the south store');el.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`);
+    await click('.assistant-memory .memory-note button', 'Save'); await settle(async () => (await readDb('retail:state')).agentChat.memory[0]?.text === 'maya covers the south store', 'an edit is saved');
+    await click('.assistant-memory .memory-note button', 'Delete'); await settle(async () => (await readDb('retail:state')).agentChat.memory.length === 0, 'a note can be deleted');
+    await run(`document.querySelector('.assistant-memory input[type=checkbox]').click()`); await settle(async () => (await readDb('retail:state')).agentChat.memoryOn === false, 'memory is switched off again');
+    await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);
   });
   await step('no JavaScript errors were thrown in the page during the whole run', async () => { assert.equal(pageErrors.length, 0, pageErrors.slice(0, 3).join(' | ')); });
 } finally {

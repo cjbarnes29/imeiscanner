@@ -7,7 +7,7 @@ import { parseSchedule } from './routine-schedule';
  * rewrite only when the sentence as written was not understood, and it shows "Understood as: ..." so the person sees how it was read.
  */
 type Person = { id: string; name: string };
-export type CanonContext = { people: Person[]; segments: { id: string; name: string }[] };
+export type CanonContext = { people: Person[]; segments: { id: string; name: string }[]; defaultModel?: string };
 
 const WORD_NUMBERS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20 };
 const digits = (t: string) => t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty)\b/gi, w => String(WORD_NUMBERS[w.toLowerCase()]));
@@ -54,7 +54,7 @@ function give(t: string, ctx: CanonContext): string | null {
     pairs.push({ who: inPart[0], qty, model: modelOf(part, inPart) });
   }
   if (!pairs.length || new Set(pairs.map(p => p.who.id)).size !== named.length) return null;
-  let last = pairs.find(p => p.model)?.model || modelOf(t, named);
+  let last = pairs.find(p => p.model)?.model || modelOf(t, named) || ctx.defaultModel || '';
   if (!last) return null;
   return 'give ' + pairs.map(p => { last = p.model || last; return `${p.qty} ${last} to ${p.who.name}`; }).join(' and ');
 }

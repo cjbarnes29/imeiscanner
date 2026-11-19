@@ -60,7 +60,7 @@ function parseStoreTarget(q: string, state: RetailState): { segment: { id: strin
 function reinterpret(args:Parameters<typeof previewAssistantRaw>,raw:AssistantPreview):AssistantPreview{
   const [state,records,people,today,text]=args;let fallback:AssistantPreview|undefined;
   if(raw.blockers.some(b=>/separate requests/.test(b)))return raw;
-  for(const alt of canonicalCandidates(text,{people,segments:segmentDefs(state)})){
+  for(const alt of canonicalCandidates(text,{people,segments:segmentDefs(state),defaultModel:state.agentChat?.memoryOn?state.agentChat.prefs.defaultModel:undefined})){
     const p=previewAssistantRaw(state,records,people,today,alt);
     if(p.handled&&!p.blockers.length&&changesData(p))return{...p,lines:[`Understood as: “${alt}”.`,...p.lines]};
     if(!fallback&&p.handled&&(!raw.handled||alt==='auto give'))fallback=p;
