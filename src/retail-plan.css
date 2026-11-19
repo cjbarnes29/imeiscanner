@@ -138,3 +138,5 @@ main,.app-main{scroll-padding-bottom:96px}
 .tg-seg.tg-seg-unset{padding:10px 14px;gap:0}
 .tg-seg.tg-seg-unset .tg-bar,.tg-seg.tg-seg-unset .tg-need{display:none}
 .tg-seg.tg-seg-unset .tg-top small{color:#8fa3b8}
+.assistant-panel .modal-head .subtle-btn{padding-inline:14px}
+.first-use-checklist .plan-top{flex-wrap:nowrap;align-items:flex-start}.first-use-checklist .plan-top p{flex:1;margin:4px 0}.first-use-checklist .plan-top button{flex:0 0 auto;width:auto;min-width:84px}
