@@ -121,8 +121,8 @@ export function handoverSummary(state: RetailState, now: number): { lines: strin
 const same = (a: string) => a.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 /** An open task (running or waiting) that already has this exact request: starting it again would apply everything twice. */
-export const findDuplicateTask = (state: Pick<RetailState, 'assistantTasks'>, text: string): AssistantTask | undefined =>
-  (state.assistantTasks || []).find(t => (t.status === 'running' || t.status === 'review') && same(t.text) === same(text));
+export const findDuplicateTask = (state: Pick<RetailState, 'assistantTasks'>, text: string, mode: AssistantMode): AssistantTask | undefined =>
+  (state.assistantTasks || []).find(t => (t.status === 'running' || t.status === 'review') && t.mode === mode && same(t.text) === same(text));
 
 /** A request that is already waiting for approval with the same words: the existing one is used instead of a second copy. */
 export const findDuplicateRequest = (state: Pick<RetailState, 'assistantRequests'>, text: string) =>

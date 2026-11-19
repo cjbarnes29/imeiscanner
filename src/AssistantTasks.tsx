@@ -55,7 +55,7 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   }
   // 3. Anything unclear keeps the original single-request answer.
   if (!steps.length) return { handled: false, message: '' };
-  const twin = findDuplicateTask(state, text); if (twin) return { handled: true, taskId: twin.id, message: 'This exact task is already open under Tasks on Home, so a second copy was not started.' };
+  const twin = findDuplicateTask(state, text, mode); if (twin) return { handled: true, taskId: twin.id, message: 'This exact task is already open under Tasks on Home, so a second copy was not started.' };
   if ((state.assistantTasks || []).filter(t => t.status === 'review' || t.status === 'running').length >= 10) return { handled: true, message: 'Finish or reject some open tasks first (the limit is 10). Nothing was started.' };
   let n = 0;
   const task = newTask(crypto.randomUUID(), text.slice(0, 1000), mode, steps, nowIso(), () => `${Date.now().toString(36)}-${++n}`);

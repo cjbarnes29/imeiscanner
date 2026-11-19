@@ -23,9 +23,10 @@ const task = (text, mode = 'autopilot', steps = ['store 2 fold6', 'give 2 fold6 
 {
   const t = { ...task('store 2 fold6, then give 2 fold6 to asha'), status: 'review' };
   const st = { ...emptyState(), assistantTasks: [t] };
-  assert.equal(findDuplicateTask(st, 'Store 2 Fold6, then give 2 Fold6 to Asha!')?.id, t.id);
-  assert.equal(findDuplicateTask(st, 'store 3 fold6, then give 3 fold6 to asha'), undefined, 'different numbers are a different task');
-  assert.equal(findDuplicateTask({ ...st, assistantTasks: [{ ...t, status: 'done' }] }, t.text), undefined);
+  assert.equal(findDuplicateTask(st, 'Store 2 Fold6, then give 2 Fold6 to Asha!', 'autopilot')?.id, t.id);
+  assert.equal(findDuplicateTask(st, t.text, 'assistant'), undefined, 'a task in another mode is not a copy');
+  assert.equal(findDuplicateTask(st, 'store 3 fold6, then give 3 fold6 to asha', 'autopilot'), undefined, 'different numbers are a different task');
+  assert.equal(findDuplicateTask({ ...st, assistantTasks: [{ ...t, status: 'done' }] }, t.text, 'autopilot'), undefined);
 }
 
 // duplicate request: the second identical ask reuses the waiting one; nothing is added
