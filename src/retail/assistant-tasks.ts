@@ -1,4 +1,5 @@
 import type { AssistantPreview } from './assistant-actions';
+import { toolOf } from '../agent/registry';
 import type { AssistantMode, AssistantTask, AssistantTaskStep, RetailState } from './types';
 
 /**
@@ -26,6 +27,8 @@ export function actionClasses(preview: AssistantPreview, text: string): string[]
   if (preview.report) out.add('report');
   if (preview.settings) out.add('settings');
   if (preview.people) { out.add('people'); if (preview.people.ops.some(op => op.kind === 'delete')) out.add('remove'); }
+  if (preview.moves?.length) out.add('give');
+  if (toolOf(preview, text)?.risk === 'destructive') out.add('remove');
   const after = preview.business?.after || {};
   if ('recordMeta' in after) out.add(/\b(?:remove|delete)\b/i.test(text) ? 'remove' : 'stock');
   if ('targets' in after || 'storeTargets' in after) out.add('targets');

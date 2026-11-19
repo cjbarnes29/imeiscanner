@@ -80,3 +80,13 @@ section.modal.settings-modal>.modal-head{width:100%;max-width:100%;margin:0 0 8p
 .routine-schedule{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}.routine-schedule input[type=time]{min-height:44px}.routine-schedule [role=group]{display:flex;flex-wrap:wrap;gap:6px}.routine-schedule .chip{min-width:44px;min-height:44px;background:#16283a;color:#dbe7f0;border:1px solid #304253;border-radius:10px}.routine-schedule .chip.on{background:#2f8f6f;color:#fff;border-color:#4fd1a1}.routine-runs summary{min-height:44px;display:flex;align-items:center}
 
 .voice-input{display:flex;flex-direction:column;gap:6px;min-width:0}.voice-btn{display:inline-flex;align-items:center;gap:6px;min-height:44px}.voice-recording{display:flex;flex-direction:column;gap:6px}.voice-dot{width:12px;height:12px;border-radius:50%;background:#e5534b;display:inline-block;margin-right:6px;animation:voice-pulse 1s ease-in-out infinite}@keyframes voice-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.voice-dot{animation:none}}.voice-heard{font-style:italic}
+
+/* Phase 4: removals need a deliberate action — press and hold (small) or type CONFIRM (big). Only transform/opacity animate. */
+.hold-btn{position:relative;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+.hold-btn .hold-fill{position:absolute;inset:0;background:rgba(255,255,255,.3);transform:scaleX(0);transform-origin:left center;transition:transform .15s linear;pointer-events:none}
+.hold-btn.holding .hold-fill{transform:scaleX(1);transition:transform .9s linear}
+.hold-btn .hold-label{position:relative}
+.confirm-typed{display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center}
+.confirm-typed input{min-width:0;width:9em;padding:8px 10px;border-radius:8px;border:1px solid currentColor;background:transparent;color:inherit}
+@media (prefers-reduced-motion:reduce){.hold-btn .hold-fill,.hold-btn.holding .hold-fill{transition:none}}
+.danger-btn{background:#b3261e;border-color:#b3261e;color:#fff}

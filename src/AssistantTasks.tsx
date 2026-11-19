@@ -24,7 +24,7 @@ const latestTask = (ctx: RetailCtx, id: string) => (ctx.latest?.() || ctx.state)
 const nowIso = () => new Date().toISOString();
 /** Same context, but with the records as they are at this moment. Every step must see what the step before it did. */
 const fresh = (ctx: RetailCtx): RetailCtx => ({ ...ctx, records: ctx.latestRecords?.() || ctx.records, people: ctx.latestPeople?.() || ctx.people });
-const actionable = (p: ReturnType<typeof previewAssistant>) => !!(p.giving.length || p.report || p.settings || p.business || p.people || p.additions?.length);
+const actionable = (p: ReturnType<typeof previewAssistant>) => !!(p.giving.length || p.report || p.settings || p.business || p.people || p.moves?.length || p.additions?.length);
 
 function saveTask(ctx: RetailCtx, task: AssistantTask, audit?: [string, string]) {
   const state = upsertTask(ctx.latest?.() || ctx.state, task);
@@ -89,7 +89,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
       if (stopped.has(taskId)) continue;
       ctx = fresh(base);
       const state = ctx.latest?.() || ctx.state, preview = previewAssistant(state, ctx.records, ctx.people, ctx.today, step.text), classes = actionClasses(preview, step.text);
-      const decision: StepDecision = guardVerdict(step.text).kind !== 'command' ? { action: 'blocked', reason: 'This does not read as a clear request, so nothing was applied.' } : opts.manual
+      const decision: StepDecision = guardVerdict(step.text).kind !== 'command' ? { action: 'blocked', reason: 'This does not read as a clear request, so nothing was applied.' } : classes.includes('remove') && opts.manual ? { action: 'hold', reason: 'Removing something needs your explicit confirmation on Home: ask for it on its own, then press and hold the button (or type CONFIRM for a big change).' } : opts.manual
         ? preview.blockers.length ? { action: 'blocked', reason: preview.blockers.join(' ') } : !classes.length ? { action: 'hold', reason: 'Nothing to change for this step.' } : preview.warnings.length && !opts.override ? { action: 'hold', reason: 'This step has warnings. Tick “I reviewed the warnings” and approve again.' } : { action: 'apply', reason: 'Approved by you.' }
         : decideStep(task.mode, preview, classes, { allow: options.autopilotAllow, dailyCap: options.autopilotDailyCap, usedToday: autopilotUsedToday(state, ctx.today) });
       if (decision.action !== 'apply') {

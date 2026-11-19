@@ -32,12 +32,31 @@ export function toolOf(preview: AssistantPreview, text: string): ToolInfo | null
   if (preview.additions?.length) return find('stock', 'create');
   if (preview.report) return find('reports', 'update');
   if (preview.settings) return find('settings', 'update');
+  if (preview.moves?.length) return find('gives', preview.moves.every(m => m.to === '') ? 'delete' : 'update');
   const keys = Object.keys(preview.business?.after || {});
-  if (keys.includes('workSchedules')) return find('calendar', 'create');
-  if (keys.includes('targets') || keys.includes('storeTargets')) return find('targets', 'update');
+  if (keys.includes('workSchedules')) return find('calendar', /\b(?:cancel|remove|delete|clear)\b/i.test(text) ? 'delete' : /\b(?:move|shift|reschedule|extend|shorten|change)\b/i.test(text) ? 'update' : 'create');
+  if (keys.includes('targets') || keys.includes('storeTargets')) return find('targets', /\b(?:clear|remove|delete|zero|reset|unset)\b/i.test(text) ? 'delete' : 'update');
+  if (keys.includes('reportDrafts')) return find('reports', 'delete');
   if (keys.includes('recordMeta')) return find('stock', /\b(?:remove|delete|take)\b/i.test(text) ? 'delete' : 'update');
-  if (keys.includes('assistantRoutines')) return find('routines', 'create');
+  if (keys.includes('assistantRoutines')) return find('routines', /\b(?:delete|remove|cancel)\b/i.test(text) ? 'delete' : /\b(?:pause|resume|enable|disable|stop|turn)\b/i.test(text) ? 'update' : 'create');
   if (keys.includes('deliveryPackets')) return find('whatsapp', 'create');
   if (keys.includes('accessoryStock') || keys.includes('accessoryReport')) return find('accessories', 'update');
   return null;
+}
+
+/**
+ * How firmly a removal must be confirmed. Minor: press and hold the button for a moment. Major: type CONFIRM. Not destructive: null (the normal Approve).
+ * Major = more than one person, a person who holds phones, more than 5 phones, or more than one saved leave/target line.
+ */
+export type ConfirmLevel = 'minor' | 'major';
+export function confirmLevel(tool: ToolInfo | null, preview: AssistantPreview): ConfirmLevel | null {
+  if (!tool || tool.risk !== 'destructive') return null;
+  const deletes = preview.people?.ops.filter(op => op.kind === 'delete') || [];
+  if (deletes.length > 1 || deletes.some(op => op.kind === 'delete' && op.moved.length > 0)) return 'major';
+  if ((preview.moves?.length || 0) > 5) return 'major';
+  if (tool.name === 'stock.delete') {
+    const before = (preview.business?.before.recordMeta || {}) as Record<string, { status?: string }>, after = (preview.business?.after.recordMeta || {}) as Record<string, { status?: string }>;
+    if (Object.keys(after).filter(id => after[id]?.status !== before[id]?.status).length > 5) return 'major';
+  }
+  return 'minor';
 }

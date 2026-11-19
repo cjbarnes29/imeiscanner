@@ -161,7 +161,7 @@ export type RetailState = {
   /** Append-only record of what the assistant did (newest last, at most 2000): who asked, which tool, what happened and whether the saved data was confirmed. */
   agentLog?: AgentLogEntry[];
   agentChat?: AgentChatState;
-  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>;peopleOps?:PeopleOp[];tool?:string;verify?:'verified'|'unverified'}[];
+  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>;peopleOps?:PeopleOp[];moves?:{id:string;from:string;to:string}[];tool?:string;verify?:'verified'|'unverified'}[];
   savedQuestions?: string[];
   /** Additive v2 workflow fields; absent on older backups. Scanner records and photos stay untouched. */
   planningVersion?: 1;
