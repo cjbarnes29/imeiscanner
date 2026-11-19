@@ -53,6 +53,10 @@ const setMode = async mode => { await run(`(()=>{localStorage.setItem('retaillen
 
 // leftovers from an earlier run of this check (isolated test app only): reject waiting requests and remove the test people, so every run starts the same
 {
+  // held tasks from an earlier (possibly failed) run would hit the app's limit of 10 open tasks: reject them first
+  if (await chatOpen()) await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);
+  await sleep(400); await clickText('.bottom-nav button', 'Home'); await sleep(600);
+  for (let i = 0; i < 12 && await clickText('.assistant-tasks button', 'Reject the rest'); i++) await sleep(500);
   const waiting = await pendingCount();
   if (waiting) {
     if (await chatOpen()) await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);
