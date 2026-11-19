@@ -55,6 +55,8 @@ const setMode = async mode => { await run(`(()=>{localStorage.setItem('retaillen
 
 // a freshly installed test app shows its one-time welcome dialog: close it so the check starts from the normal screen
 await run(`(()=>{const welcome=document.body.innerText.includes('Welcome to AI LENS');const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Close');if(welcome&&b)b.click();return true;})()`); await sleep(700);
+// a brand-new app has not saved its data yet: do one harmless question so the first full save happens BEFORE the safety checks take their baseline
+if (!Object.keys(await readDb('retail:state')).length) { await ask('how many people do i have'); await settle(async () => Object.keys(await readDb('retail:state')).length > 0, 'the first save of a fresh app'); await sleep(1200); }
 // leftovers from an earlier run of this check (isolated test app only): reject waiting requests and remove the test people, so every run starts the same
 {
   // held tasks from an earlier (possibly failed) run would hit the app's limit of 10 open tasks: reject them first
