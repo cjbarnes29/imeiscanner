@@ -32,3 +32,10 @@ Branch `ci/release-main-apk` (local only, **nothing pushed, merged, tagged or re
 
 ## Next steps (need your approval)
 Real-phone test; decide on pushing/merging `ci/release-main-apk`; decide on Phase 8 and routine plans; more wording tests with real sentences from the user.
+
+## Update: final round (commits 62a5744, 3f7ae71)
+- More everyday wording; two new blind batches written before tuning scored 81% and 88% first pass (earlier: 69, 77, 80, 84). Target 90% still not reached on unseen sentences; the 626-sentence set is 99% but tuned. Unsafe sentences: 0 changed anything. 102/102 identical to main 84d19b7.
+- Routines were already plans: a saved routine runs through the task runner, so several steps become several checked steps (test added). A yesterday-still-open identical task blocks today's run of the same routine on purpose (no duplicates).
+- Final checks on 3f7ae71: npm test, build, 4 browser suites, Android WebView 20 of 20.
+- **Final main APK:** `phase2-results/builds/AI-LENS-3f7ae71.apk` (git-ignored), 50,644,723 bytes, SHA-256 `050F3B706E93609E49BDD84409EB6124D8C808C0263104A1B103086090C4B926`; package com.imeilens.scanner, 1.27.3 (46), label AI LENS, one signer f2a58bb2…7a27 (updates the installed app in place). Replaces AI-LENS-e624bcc.apk. Test APK: `AI-LENS-Test-p8.apk`.
+- Deferred as instructed: Phase 8 adapters (cloud off, no network code), real-phone test, any push/merge/tag/release.
