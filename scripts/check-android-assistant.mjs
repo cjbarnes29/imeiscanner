@@ -30,7 +30,7 @@ const names = async () => (await readPeople()).map(p => p.name);
 const SKIP = ['assistantRequests', 'assistantTasks', 'audit', 'history'];
 // compared as data: the order of the keys inside an object does not matter (the loader tidies it on the first save after a reload)
 const stable = v => JSON.stringify(v, (k, val) => val && typeof val === 'object' && !Array.isArray(val) ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => a.localeCompare(b))) : val);
-const snap = async () => { const s = await readDb('retail:state'); for (const k of SKIP) delete s[k]; const ac = s.agentChat; if (ac && !ac.memoryOn && !(ac.memory || []).length && !Object.keys(ac.prefs || {}).length) delete s.agentChat; /* an empty default is not saved data */ return stable({ retail: s, people: await readPeople(), options: await run(`localStorage.getItem('retaillens-auto-workflow-v1')`) }); };
+const snap = async () => { const s = await readDb('retail:state'); for (const k of SKIP) delete s[k]; for (const k of Object.keys(s)) { const v = s[k]; if (v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length)) delete s[k]; } /* a missing field and an empty default are the same data (a fresh app writes its defaults on the first save) */ const ac = s.agentChat; if (ac && !ac.memoryOn && !(ac.memory || []).length && !Object.keys(ac.prefs || {}).length) delete s.agentChat; /* an empty default is not saved data */ return stable({ retail: s, people: await readPeople(), options: await run(`localStorage.getItem('retaillens-auto-workflow-v1')`) }); };
 const requests = async () => (await readDb('retail:state')).assistantRequests || [];
 const tasks = async () => ((await readDb('retail:state')).assistantTasks || []).length;
 const pendingCount = async () => (await requests()).filter(r => r.status === 'pending').length;
@@ -56,7 +56,6 @@ const setMode = async mode => { await run(`(()=>{localStorage.setItem('retaillen
 // a freshly installed test app shows its one-time welcome dialog: close it so the check starts from the normal screen
 await run(`(()=>{const welcome=document.body.innerText.includes('Welcome to AI LENS');const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Close');if(welcome&&b)b.click();return true;})()`); await sleep(700);
 // a brand-new app has not saved its data yet: do one harmless question so the first full save happens BEFORE the safety checks take their baseline
-if (!('accessoryStock' in await readDb('retail:state'))) { await ask('what if i give 4 fold6 to person 1'); const end = Date.now() + 90000; while (Date.now() < end && !('accessoryStock' in await readDb('retail:state'))) await sleep(1000); await sleep(2000); } // a fresh app writes its first full save late: wait for it, so the checks below compare like with like
 // leftovers from an earlier run of this check (isolated test app only): reject waiting requests and remove the test people, so every run starts the same
 {
   // held tasks from an earlier (possibly failed) run would hit the app's limit of 10 open tasks: reject them first
