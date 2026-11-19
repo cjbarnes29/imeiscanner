@@ -93,6 +93,61 @@ F('read', {}, 'give me a list of all the promoters', 'how many promoters are the
 F('calendar', {}, 'Asha is on sick leave from monday until wednesday', 'Bilal is away on the 28th', 'put Bilal down as unavailable next friday', 'Asha will not be working on 30 nov', 'Bilal has the day off tomorrow', 'Asha is taking leave from 2 dec to 5 dec', 'Bilal is going on holiday for 5 days from 1 dec', "Asha can't make it tomorrow", 'mark asha as absent on monday');
 F('none', {}, 'will asha be on leave tomorrow', 'if I delete bilal what happens to his phones', 'asha is on top of the target', "I'll rename things later", 'remove the filter', 'did bilal take leave yesterday', 'who is on holiday next week', 'what is the best way to add people', 'no need to delete anyone', "stop, don't remove asha");
 
+// ---- BLIND: a third batch for giving, targets, stock, reports, settings, routines and WhatsApp, written in ordinary wording BEFORE the rules for those areas were
+// generalised and never used to tune them. Score it once per phase; a gap of more than 10 points to the tuned groups means the rules are overfitted.
+const B = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: 3, ...extra }); };
+B('give', { nums: ['5'] }, 'i want to give 5 fold6 to bilal', 'assign bilal 5 fold6 pls', 'bilal should receive 5 fold6', 'pass 5 fold6 across to bilal', 'kindly give bilal 5 units of fold6', 'send over 5 fold6 for bilal', 'hand bilal five fold6 please', 'put 5 fold6 under bilal', 'let bilal take 5 fold6', 'bilal is taking 5 fold6 today');
+B('give', { nums: ['2', '3'] }, 'give bilal two fold6 and asha three');
+B('give', { okIfBlocked: /Nothing to give/ }, 'give out phones to everyone based on limits', "distribute today's stock across the team", 'do the auto give now', 'allocate phones automatically');
+B('target', { nums: ['15'] }, 'asha needs a flagship 1 target of 15', "set asha's flagship 1 target at 15", 'asha flagship 1 target = 15', 'lower asha flagship 1 target to 15');
+B('target', { nums: ['8'] }, 'target for asha on flagship 2 should be 8', 'everyone gets a flagship 2 target of 8', 'all promoters: flagship 2 target 8');
+B('target', { nums: ['80'] }, 'store target for mid is 80, divide it between all promoters', 'split 80 mid among everyone', 'set the mid store target to 80 and share equally', 'the team needs to do 80 mid, split it equally');
+B('stock', { nums: ['3'] }, 'reserve 3 fold6', 'stash 3 fold6 for later', 'put 3 fold6 aside', 'pull 3 fold6 out of stock', 'delete 3 fold6 from my stock', 'take away 3 fold6 from the stock', 'put 3 fold6 back to available');
+B('add-phones', {}, `add new stock fold6 imei ${imei(950)}`, `got one fold6, imei ${imei(951)}, please add`, `please record fold6 with imei ${imei(952)}`);
+B('report', { nums: ['7'] }, 'set fold6 to 7 in the report', 'fold6 sold 7 today, update report', 'correct the report: fold6 should be 7');
+B('report', {}, 'generate a report for 2026-11-21', 'i need todays phone report', 'build me the daily stock report', 'make a report for tomorrow');
+B('whatsapp', {}, 'ready the whatsapp daily report', "get today's whatsapp report ready for the group", 'whatsapp report please');
+B('settings', {}, 'disable auto crop', 'turn auto detection back on', 'please stop automatic retries', 'enable automatic detection', 'uploads should be stored automatically');
+B('routine', {}, 'every morning at 8 prepare the report', 'each weekday at 17:30 auto give', 'daily at 9am prepare todays whatsapp report', 'set up a routine: every friday at 4pm prepare the report');
+B('none', {}, 'how many fold6 does asha have', "what is bilal's flagship 1 target", 'can i give asha 4 fold6', "should i set asha's target to 12", 'what happens if i split store target 120', 'did you give the phones yet', 'i gave bilal 3 fold6 earlier', 'if there is stock left give asha 2 fold6', 'maybe store 2 fold6', "don't hold any fold6", 'never turn off auto detection', 'is the report ready', 'what time does my routine run');
+
+// ---- BLIND-4: a fourth batch, written in new wording (dispatch, credit, allot, shorthand, "fold 6") before the rules were looked at again. Score it once; never tune on it.
+const D = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: 4, ...extra }); };
+D('give', { nums: ['4'] }, 'dispatch 4 fold6 to bilal', 'asha will take 4 fold 6', "i'd like asha to get 4 fold6", 'bilal wants 4 fold6, give them to him', 'credit asha with 4 fold6', 'allot 4 fold6 to asha today');
+D('give', { nums: ['3', '2'] }, 'give 3 z fold6 to asha and 2 to bilal');
+D('give', { nums: ['2'] }, '2 fold6 for bilal');
+D('give', { okIfBlocked: /Nothing to give/ }, 'share out the phones automatically', 'run auto give');
+D('target', { nums: ['9'] }, "bilal's target on flagship 1 is 9", "make asha's mid target 9", 'flagship 3 for asha: 9');
+D('target', { nums: ['30'] }, "i want everyone's low target to be 30", 'set flagship 2 target for all promoters to 30');
+D('target', { nums: ['150'] }, 'split a store target of 150 for low between everyone');
+D('stock', { nums: ['5'] }, 'store 5 fold6 pls', 'hold 5 fold6', 'put 5 fold6 back in available stock', 'remove 5 fold6 from stock', 'write off 5 fold6 from stock');
+D('add-phones', {}, `add stock: fold6 imei ${imei(960)}`, `i have a new fold6 with imei ${imei(961)} add to stock`);
+D('report', { nums: ['3'] }, 'update the report so fold6 is 3', 'can you set the report for fold6 to 3', 'set todays report fold6 sold = 3');
+D('report', {}, 'create report for 2026-11-22', 'make me a daily report');
+D('whatsapp', {}, 'prepare the whatsapp report', 'whatsapp daily report for the team please');
+D('settings', {}, 'disable automatic detection', 'turn off auto retry', 'switch on auto crop');
+D('routine', {}, 'every day at 7pm prepare the whatsapp report', 'daily 8:30 auto give', 'each friday at 3pm prepare the report');
+D('people.add', { names: ['Zoya'] }, 'add zoya to my people');
+D('people.rename', { id: 'p2', to: 'Bilal Ahmed' }, 'rename bilal to bilal ahmed');
+D('calendar', {}, 'asha is on leave from monday to wednesday');
+D('none', {}, 'who has the most fold6', 'how many phones are stored', 'would it be possible to give bilal 3 fold6', 'i think i will store 3 fold6', 'give 3 fold6 to asha or bilal', 'delete everything from stock', "can you tell me asha's target", "i didn't give bilal anything", 'what is the whatsapp report');
+
+// ---- BLIND-5: a fifth batch with new vocabulary ("goal", "inventory", "register as a promoter", "arrange"), written after BLIND-4 was fixed. Score it once; never tune on it.
+const E = (expected, extra, ...phrases) => { for (const t of phrases) cases.push({ expected, t, heldout: 5, ...extra }); };
+E('give', { nums: ['4'] }, 'pls give bilal 4 fold6', 'bilal 4 fold6', 'arrange 4 fold6 for asha', 'move 4 fold6 over to bilal', 'i need bilal to have 4 fold6');
+E('target', { nums: ['11'] }, 'asha target flagship 3 equals 11', 'set a goal of 11 on mid for bilal');
+E('target', { nums: ['90'] }, 'total team target for flagship 1 is 90, divide equally among all');
+E('stock', { nums: ['4'] }, 'hold on to 4 fold6', 'set 4 fold6 aside please', 'remove 4 fold6 from the inventory', 'pull 4 fold6 from stock');
+E('report', { nums: ['4'] }, 'report: fold6 = 4', 'set fold6 to 4 in todays report');
+E('report', {}, 'prepare tomorrows report');
+E('whatsapp', {}, 'send the daily whatsapp report');
+E('settings', {}, 'stop automatic cropping', 'disable auto retries');
+E('routine', {}, 'everyday at 9am auto give', 'weekdays at 6pm prepare the report');
+E('people.add', { names: ['Nida'] }, 'register nida as a new promoter');
+E('people.rename', { id: 'p1', to: 'Ashi' }, 'change asha to ashi');
+E('calendar', {}, 'bilal off on friday', 'asha: sick 2026-11-24');
+E('none', {}, 'how many fold6 are left', "asha hasn't been given anything", 'if bilal is free give him 3 fold6', 'could you maybe store 3 fold6', 'never remove anybody', 'do i have any stored fold6', 'why was my report empty', 'what would the report say if fold6 were 4', 'is asha off on friday', 'tell me which phones bilal has', "can asha's flagship 2 target be 11");
+
 const hasChange = p => !!(p.giving.length || p.people || p.business || p.report || p.settings || p.additions?.length);
 const kindOf = p => {
   if (!p.handled) return 'none';
@@ -119,7 +174,7 @@ for (const c of cases) {
   results.push({ ...c, actual, ok, asked: !ok && actual === 'blocked', note: p.blockers[0] || '' });
 }
 const group = {};
-for (const r of results) { const g = (group[(r.heldout === 2 ? 'FRESH ' : r.heldout ? 'HELD-OUT ' : '') + area[r.expected]] ||= { total: 0, ok: 0, asked: 0 }); g.total++; if (r.ok) g.ok++; else if (r.asked) g.asked++; }
+for (const r of results) { const g = (group[(r.heldout === 5 ? 'BLIND-5 ' : r.heldout === 4 ? 'BLIND-4 ' : r.heldout === 3 ? 'BLIND ' : r.heldout === 2 ? 'FRESH ' : r.heldout ? 'HELD-OUT ' : '') + area[r.expected]] ||= { total: 0, ok: 0, asked: 0 }); g.total++; if (r.ok) g.ok++; else if (r.asked) g.asked++; }
 const total = results.length, passed = results.filter(r => r.ok).length, asked = results.filter(r => r.asked).length;
 console.log(`\nEveryday-language check: ${passed} of ${total} understood correctly (${(100 * passed / total).toFixed(0)}%). ${asked} more were understood but the assistant asked for details; ${total - passed - asked} were missed or wrong.\n`);
 for (const [name, g] of Object.entries(group)) console.log(`${name.padEnd(28)} ${String(g.ok).padStart(3)}/${String(g.total).padEnd(3)} ok${g.asked ? `, ${g.asked} asked back` : ''}`);
@@ -127,4 +182,8 @@ if (process.argv.includes('--show-failures')) { console.log('\nNot understood co
 // the safety group is a hard rule: a question, a "what if" or a negation must NEVER be turned into a change
 const unsafe = results.filter(r => r.expected === 'none' && !r.ok);
 if (unsafe.length) { console.log('\nUNSAFE: these must not change anything but did:'); for (const r of unsafe) console.log('- ' + r.t); process.exit(1); }
+// the original 204 sentences must stay at or above the required share (--min-original)
+const original = results.filter(r => !r.heldout), originalPassed = original.filter(r => r.ok).length;
+console.log(`Original ${original.length} sentences: ${originalPassed} understood (${(100 * originalPassed / original.length).toFixed(1)}%).`);
+const minOriginal = process.argv.indexOf('--min-original'); if (minOriginal > 0 && 100 * originalPassed / original.length < +process.argv[minOriginal + 1]) { console.log(`\nThe original sentences are below the required ${process.argv[minOriginal + 1]}%.`); process.exit(1); }
 const min = process.argv.indexOf('--min'); if (min > 0 && 100 * passed / total < +process.argv[min + 1]) { console.log(`\nBelow the required ${process.argv[min + 1]}%.`); process.exit(1); }

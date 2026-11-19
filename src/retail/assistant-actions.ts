@@ -9,6 +9,7 @@ import {dateKey,isDateKey,monthOf,type PeopleOp,type RetailState,type StockRepor
 import {previewPeople,inversePeopleOps} from './people-commands';
 import {leaveMatch} from './calendar-commands';
 import {guardVerdict} from './guard';
+import {canonicalCandidates} from './canonical';
 import type {RetailRecord} from './ui-helpers';
 import {isSold} from './sales';
 import {luhnValid} from '../imei-validate';
@@ -55,6 +56,17 @@ function parseStoreTarget(q: string, state: RetailState): { segment: { id: strin
   return { segment: named[0], value: +value };
 }
 
+/** Everyday wording: when a sentence was not understood as written, try the plain command it most likely means ("give asha 4 fold6" -> "give 4 fold6 to asha"). The result is the normal previewed, approved, undoable request, and says how it was read. */
+function reinterpret(args:Parameters<typeof previewAssistantRaw>,raw:AssistantPreview):AssistantPreview{
+  const [state,records,people,today,text]=args;let fallback:AssistantPreview|undefined;
+  if(raw.blockers.some(b=>/separate requests/.test(b)))return raw;
+  for(const alt of canonicalCandidates(text,{people,segments:segmentDefs(state)})){
+    const p=previewAssistantRaw(state,records,people,today,alt);
+    if(p.handled&&!p.blockers.length&&changesData(p))return{...p,lines:[`Understood as: “${alt}”.`,...p.lines]};
+    if(!fallback&&p.handled&&(!raw.handled||alt==='auto give'))fallback=p;
+  }
+  return fallback||raw;
+}
 const changesData=(p:AssistantPreview)=>!!(p.giving.length||p.business||p.report||p.settings||p.additions?.length||p.people?.ops.length);
 /** The one door for every sentence: chat, tasks, routines and Autopilot all come through here. Only a plain request can produce a change; a question, "what if", plan, past statement or unclear request never can (answers such as the people list stay). */
 export function previewAssistant(...args:Parameters<typeof previewAssistantRaw>):AssistantPreview{
@@ -62,7 +74,7 @@ export function previewAssistant(...args:Parameters<typeof previewAssistantRaw>)
   if(fileReport)return previewAssistantRaw(...args);
   const verdict=guardVerdict(text);
   if(verdict.kind==='negated'||verdict.kind==='ambiguous')return{handled:true,lines:[],blockers:[verdict.message],warnings:[],giving:[]};
-  const preview=previewAssistantRaw(...args);
+  let preview=previewAssistantRaw(...args);if(verdict.kind==='command'&&(!preview.handled||(preview.blockers.length&&!changesData(preview))))preview=reinterpret(args,preview);
   if(verdict.kind!=='command'&&(changesData(preview)||preview.blockers.length))return{handled:false,lines:[],blockers:[],warnings:[],giving:[]};
   return preview;
 }
