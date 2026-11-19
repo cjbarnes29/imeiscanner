@@ -8,12 +8,12 @@ import { build } from 'esbuild';
 
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 const bundled = await build({
-  stdin: { contents: "export { queueAssistant } from './src/AssistantReview'; export { findDuplicateTask, findDuplicateRequest, recoverInterrupted, taskCheckpoint, INTERRUPTED, finishTask, newTask, patchStep } from './src/retail/assistant-tasks'; export { emptyState } from './src/retail/data';", resolveDir: process.cwd(), loader: 'ts', sourcefile: 'entry.ts' },
+  stdin: { contents: "export { queueAssistant } from './src/AssistantReview'; export { findDuplicateTask, findDuplicateRequest, recoverInterrupted, taskCheckpoint, INTERRUPTED, finishTask, newTask, patchStep } from './src/retail/assistant-tasks'; export { emptyState } from './src/retail/data'; export { splitSteps } from './src/retail/assistant-tasks'; export { suitableRoutine } from './src/retail/routines';", resolveDir: process.cwd(), loader: 'ts', sourcefile: 'entry.ts' },
   bundle: true, write: false, format: 'esm', platform: 'node', jsx: 'automatic', logLevel: 'silent', loader: { '.css': 'empty', '.svg': 'dataurl', '.png': 'dataurl', '.wasm': 'empty' }, define: { 'import.meta.env': '{}' }, banner: { js: 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);' }
 });
 const dir = await mkdtemp(join(tmpdir(), 'imei-agent-planner-'));
 const file = join(dir, 'p.mjs'); await writeFile(file, bundled.outputFiles[0].text);
-const { queueAssistant, findDuplicateTask, findDuplicateRequest, recoverInterrupted, taskCheckpoint, INTERRUPTED, finishTask, newTask, patchStep, emptyState } = await import(pathToFileURL(file).href);
+const { queueAssistant, findDuplicateTask, findDuplicateRequest, recoverInterrupted, taskCheckpoint, INTERRUPTED, finishTask, newTask, patchStep, emptyState, splitSteps, suitableRoutine } = await import(pathToFileURL(file).href);
 
 const now = '2026-11-19T10:00:00.000Z';
 let n = 0; const sid = () => 's' + ++n;
@@ -61,6 +61,12 @@ const task = (text, mode = 'autopilot', steps = ['store 2 fold6', 'give 2 fold6 
   assert.match(taskCheckpoint(finishTask(t, now)).line, /1 of 2 steps saved; stopped at “give 2 fold6 to asha”/);
   const undone = finishTask(patchStep(patchStep(fresh, fresh.steps[0].id, { status: 'undone' }, now), fresh.steps[1].id, { status: 'skipped' }, now), now);
   assert.equal(undone.status, 'undone'); assert.equal(taskCheckpoint(undone).canRollBack, false);
+}
+// a routine is a plan: its saved sentence is run through the task runner, so several steps become several checked steps
+{
+  const text = "give 1 fold6 to asha, then prepare today's report";
+  assert.ok(suitableRoutine(text), 'a multi-step sentence can be saved as a routine');
+  assert.deepEqual(splitSteps(text), ['give 1 fold6 to asha', "prepare today's report"]);
 }
 console.log('agent planner: duplicate guard, interrupted-task recovery and checkpoints all checked');
 process.exit(0);
