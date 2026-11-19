@@ -27,11 +27,11 @@ import {segmentDefs} from './retail/segments';
 import {withAudit} from './retail/data';
 import {AssistantMemory} from './AssistantMemory';
 import {AiBrainSettings} from './AiBrainSettings';
-import {readAiSettings,aiReady,spendAiBudget,DAILY_AI_LIMIT} from './agent/llm-settings';
+import {readAiSettings,aiReady,spendAiBudget,DAILY_AI_LIMIT,MINUTE_AI_LIMIT} from './agent/llm-settings';
 import {runAgent} from './agent/agent';
 import {appendConvo,readConvo} from './agent/convo';
 import {AgentPlanCard} from './AgentPlanCard';
-import {AiError,aiMessage} from './agent/providers';
+import {AiError,aiMessage,aiCooldownSeconds} from './agent/providers';
 import type {RetailState} from './retail/types';
 import {localAnswer} from './retail/local-assistant';
 import { useEffect, useRef, useState } from 'react';
@@ -95,7 +95,8 @@ export function LocalAI({ ctx, onDraft,initialPrompt,summary=false,quick=false,a
   const runAgentFlow=():boolean=>{
     const text=prompt.trim();if(!text||offlineOnly.current)return false;
     const s=readAiSettings();if(!aiReady(s)||text.length>600)return false;
-    if(!spendAiBudget(ctx.today).ok){setStatus(`The daily AI limit (${DAILY_AI_LIMIT} requests) is used up, so the built-in assistant answered.`);return false;}
+    const wait=aiCooldownSeconds();if(wait>0){setStatus(`The AI asked us to wait about ${wait} seconds, so the built-in assistant answered.`);return false;}
+    const budget=spendAiBudget(ctx.today);if(!budget.ok){setStatus(budget.reason==='minute'?`That is more than ${MINUTE_AI_LIMIT} AI requests in a minute, so the built-in assistant answered. Try again in a moment.`:`The daily AI limit (${DAILY_AI_LIMIT} requests) is used up, so the built-in assistant answered.`);return false;}
     setAiBusy(true);setAnswer('');setDraft(null);setPlan(null);setClarify([]);setChatReq(null);setAskBack(null);setStatus('Thinking…');emitAgent({phase:'thinking',text:'the AI agent'});
     const state=ctx.latest?.()||ctx.state,notes=chatOf(state).memoryOn?describeMemory(state):undefined;
     const remember=(role:'user'|'assistant',t:string)=>{if(s.memory)appendConvo({role,text:t});};

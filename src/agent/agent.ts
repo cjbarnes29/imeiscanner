@@ -76,7 +76,7 @@ export async function runAgent(i: AgentInput): Promise<AgentRun> {
   const share = i.settings.shareNames, people = i.people.slice(0, 26);
   const ctx = buildAiContext(i.state, i.records, people, i.today, { shareNames: share });
   const env: ToolEnv = { state: i.state, records: i.records, people, today: i.today, aliases: ctx.aliases, labelOf: labelMap(people, share) };
-  const mask = (t: string) => share ? t : maskNames(t, people);
+  const mask = (t: string) => share ? t : maskNames(t, people, undefined, { fuzzy: true }); // what the person typed: nicknames, part-names and small typos too
   const question = mask(i.userText.replace(/\b\d{15}\b/g, '[IMEI hidden]').slice(0, 600));
   const notes = i.notes ? mask(i.notes).slice(0, 800) : '';
   const first = `DATA (untrusted summary of the saved data):\n${ctx.text}${notes ? `\n\nNOTES THE PERSON SAVED:\n${notes}` : ''}\n\nMESSAGE:\n${question}`;

@@ -23,14 +23,49 @@ const wordsOfName = (name: string) => new Set(name.toLowerCase().match(/[\p{L}\p
  * Replaces every real name in a piece of text with its "Person A" label: full names first, then single words of a name (3+ letters) that belong to only
  * one person ("Maya" for "Maya Demo"; a shared word like "Demo" is left alone). Used for the question and for free text such as routine sentences.
  */
-export function maskNames(text: string, people: Person[], label: (index: number) => string = labelFor): string {
+export function maskNames(text: string, people: Person[], label: (index: number) => string = labelFor, opts: { fuzzy?: boolean } = {}): string {
   const count = new Map<string, number>();
   for (const p of people) for (const w of wordsOfName(p.name)) count.set(w, (count.get(w) || 0) + 1);
   const bounded = (v: string) => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(v)}(?![\\p{L}\\p{N}])`, 'giu');
   let out = text;
   people.forEach((p, i) => { if (p.name.trim()) out = out.replace(bounded(p.name.trim()), label(i)); });
   people.forEach((p, i) => { for (const w of wordsOfName(p.name)) if (count.get(w) === 1) out = out.replace(bounded(w), label(i)); });
-  return out;
+  return opts.fuzzy ? maskNearNames(out, people, count, label) : out;
+}
+
+const COMMON = new Set('the and for nor but are was were has had have can may not you your any all one two six ten new old out off who why how what when will with from that this them they then than give get put set add now stock phone phones take make move send show tell does did hey please thanks thank yes'.split(' '));
+/** Damerau-Levenshtein distance (adjacent swaps count as one edit), with an early exit when it is clearly larger than `max`. */
+export function editDistance(a: string, b: string, max = 3): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+/**
+ * Words the person TYPED that are clearly a person's name but not spelled exactly: a nickname or part of the name ("ash" for "Asha", at least 60% of the name, 3+ letters),
+ * or a small typo ("bilall", "ashaa"). They are replaced by the same label. Common words are never touched, and a word that could mean two people is left alone.
+ * Over-hiding is the safe side: the model only ever sees the label, and the answer is mapped back on this phone.
+ */
+function maskNearNames(text: string, people: Person[], count: Map<string, number>, label: (index: number) => string): string {
+  const owners: { word: string; index: number }[] = [];
+  people.forEach((p, i) => { for (const w of wordsOfName(p.name)) if (count.get(w) === 1) owners.push({ word: w, index: i }); });
+  if (!owners.length) return text;
+  return text.replace(/[\p{L}]{3,}/gu, token => {
+    const t = token.toLowerCase();
+    if (COMMON.has(t) || /^\p{Lu}[\p{L}]*\d/u.test(token)) return token;
+    const hits = new Set<number>();
+    for (const o of owners) {
+      if (t === o.word) { hits.add(o.index); continue; }
+      const prefix = o.word.startsWith(t) && t.length >= 3 && t.length >= Math.ceil(o.word.length * 0.6);
+      const typo = t.length >= 4 && editDistance(t, o.word, 2) <= (o.word.length >= 7 ? 2 : 1);
+      if (prefix || typo) hits.add(o.index);
+    }
+    return hits.size === 1 ? label([...hits][0]) : token;
+  });
 }
 
 export function buildAiContext(state: RetailState, records: RetailRecord[], people: Person[], today: string, opts: { shareNames?: boolean } = {}): AiContext {

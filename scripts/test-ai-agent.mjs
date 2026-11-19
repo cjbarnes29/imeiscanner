@@ -40,7 +40,7 @@ const settings = (over = {}) => M.saveAiSettings({ ...M.DEFAULT_AI, enabled: tru
   assert.equal(M.saveAiSettings({ ...M.DEFAULT_AI, enabled: true, key: KEY, model: 'x-flash', provider: 'evil' }, s).provider, 'gemini', 'unknown providers fall back');
   assert.equal(M.cleanAiSettings({ enabled: true, key: KEY, model: 'meta-llama/llama-3.3-70b-instruct:free', provider: 'openrouter' }).model, 'meta-llama/llama-3.3-70b-instruct:free', 'OpenRouter model ids are allowed');
   s.setItem(M.AI_KEY, '{broken'); assert.equal(M.aiReady(M.readAiSettings(s)), false); M.clearAiSettings(s); assert.equal(s.m.size, 0);
-  const b = fakeStore(); let last; for (let i = 0; i < M.DAILY_AI_LIMIT; i++) last = M.spendAiBudget(today, b); assert.ok(last.ok); assert.equal(M.spendAiBudget(today, b).ok, false, 'a daily budget stops a loop'); assert.equal(M.spendAiBudget('2026-11-20', b).ok, true);
+  M.resetMinuteBudget(); const b = fakeStore(); let last; for (let i = 0; i < M.DAILY_AI_LIMIT; i++) last = M.spendAiBudget(today, b, M.DAILY_AI_LIMIT, 5000000 + i * 20000); assert.ok(last.ok); assert.equal(M.spendAiBudget(today, b, M.DAILY_AI_LIMIT, 5000000 + 99 * 20000).ok, false, 'a daily budget stops a loop'); assert.equal(M.spendAiBudget('2026-11-20', b, M.DAILY_AI_LIMIT, 5000000 + 200 * 20000).ok, true); M.resetMinuteBudget();
   const c = fakeStore(), now = Date.now();
   M.appendConvo({ role: 'user', text: `give asha 2 fold6 imei ${imei(7)}` }, now, c); M.appendConvo({ role: 'assistant', text: 'Plan: give 2 Fold6 to Asha' }, now + 1, c);
   const turns = M.readConvo(now + 2, c); assert.equal(turns.length, 2); assert.ok(!turns[0].text.includes(imei(7)), 'IMEIs are never remembered'); assert.deepEqual([...c.m.keys()], [M.CONVO_KEY]);
@@ -57,14 +57,14 @@ const oai = text => ({ ok: true, status: 200, json: async () => ({ choices: [{ m
   const calls = []; const f = r => async (url, init) => { calls.push({ url, init }); return r; };
   const turns = [{ role: 'user', text: 'U1' }, { role: 'assistant', text: 'A1' }, { role: 'user', text: 'U2' }];
   assert.equal(await M.complete({ provider: 'gemini', key: KEY, model: 'gemini-3.5-flash-lite', system: 'SYS', turns, fetchImpl: f(gem('{"a":1}')) }), '{"a":1}');
-  let c = calls[0]; assert.match(c.url, /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.5-flash-lite:generateContent$/); assert.equal(c.init.headers['x-goog-api-key'], KEY); assert.ok(!c.url.includes(KEY));
+  let c = calls.at(-1); assert.match(c.url, /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.5-flash-lite:generateContent$/); assert.equal(c.init.headers['x-goog-api-key'], KEY); assert.ok(!c.url.includes(KEY));
   let b = JSON.parse(c.init.body); assert.deepEqual(b.contents.map(x => x.role), ['user', 'model', 'user']); assert.equal(b.systemInstruction.parts[0].text, 'SYS'); assert.equal(b.generationConfig.responseMimeType, 'application/json');
   for (const [provider, host] of [['openrouter', 'https://openrouter.ai/api/v1/chat/completions'], ['groq', 'https://api.groq.com/openai/v1/chat/completions']]) {
     calls.length = 0; assert.equal(await M.complete({ provider, key: KEY, model: 'some-model', system: 'SYS', turns, fetchImpl: f(oai('{"b":2}')) }), '{"b":2}');
     c = calls[0]; assert.equal(c.url, host); assert.equal(c.init.headers.authorization, 'Bearer ' + KEY); assert.ok(!c.url.includes(KEY)); b = JSON.parse(c.init.body);
     assert.deepEqual(b.messages.map(x => x.role), ['system', 'user', 'assistant', 'user']); assert.equal(b.response_format.type, 'json_object'); assert.equal(JSON.stringify(b).includes(KEY), false, 'the key is never in the body');
   }
-  const failWith = async (provider, status, kind) => assert.rejects(() => M.complete({ provider, key: KEY, model: 'm', system: '', turns, fetchImpl: async () => ({ ok: false, status, json: async () => ({}) }) }), e => { assert.equal(e.kind, kind); assert.ok(!e.message.includes(KEY)); return true; });
+  const failWith = async (provider, status, kind) => { M.resetAiCooldown(); M.resetGeminiRoute(); return assert.rejects(() => M.complete({ provider, key: KEY, model: 'm', system: '', turns, fetchImpl: async () => ({ ok: false, status, json: async () => ({}) }) }), e => { assert.equal(e.kind, kind); assert.ok(!e.message.includes(KEY)); return true; }); }
   for (const p of ['gemini', 'openrouter', 'groq']) { await failWith(p, 401, 'bad-key'); await failWith(p, 403, 'bad-key'); await failWith(p, 429, 'limit'); await failWith(p, 500, 'unexpected'); }
   await assert.rejects(() => M.complete({ provider: 'groq', key: KEY, model: 'm', system: '', turns, fetchImpl: async () => { throw new TypeError('Failed to fetch'); } }), e => e.kind === 'network');
   await assert.rejects(() => M.complete({ provider: 'groq', key: KEY, model: 'm', system: '', turns, fetchImpl: async () => { const e = new Error('x'); e.name = 'AbortError'; throw e; } }), e => e.kind === 'timeout');
@@ -77,6 +77,78 @@ const oai = text => ({ ok: true, status: 200, json: async () => ({ choices: [{ m
   const ol = await M.listModels('groq', KEY, async (url, init) => { assert.equal(url, 'https://api.groq.com/openai/v1/models'); assert.equal(init.headers.authorization, 'Bearer ' + KEY); return { ok: true, status: 200, json: async () => ({ data: [{ id: 'llama-3.1-8b-instant' }] }) }; }); assert.deepEqual(ol, ['llama-3.1-8b-instant']);
 }
 
+// ---- Gemini: the Interactions API first, the older format as an automatic fallback --------------------------------------------------------------------------
+{
+  const turns1 = [{ role: 'user', text: 'U1' }], turns3 = [{ role: 'user', text: 'U1' }, { role: 'assistant', text: 'A1' }, { role: 'user', text: 'U2' }];
+  const inter = text => ({ ok: true, status: 200, json: async () => ({ id: 'int_1', status: 'completed', steps: [{ type: 'model_output', status: 'done', content: [{ type: 'text', text }] }] }) });
+  const mk = (...rs) => { const calls = []; let i = 0; return { calls, f: async (url, init) => { calls.push({ url, init }); const r = rs[Math.min(i++, rs.length - 1)]; if (r instanceof Error) throw r; return typeof r === 'function' ? r(url) : r; } }; };
+  M.resetGeminiRoute(); M.resetAiCooldown();
+  let m = mk(inter('{"ok":1}'));
+  assert.equal(await M.complete({ provider: 'gemini', key: KEY, model: 'gemini-3.8-flash', system: 'SYS', turns: turns3, fetchImpl: m.f }), '{"ok":1}');
+  let c = m.calls[0]; assert.equal(c.url, 'https://generativelanguage.googleapis.com/v1beta/interactions'); assert.equal(c.init.headers['x-goog-api-key'], KEY); assert.ok(!c.url.includes(KEY));
+  let b = JSON.parse(c.init.body); assert.equal(b.model, 'gemini-3.8-flash'); assert.equal(b.system_instruction, 'SYS'); assert.equal(b.store, false); assert.deepEqual(b.response_format, { type: 'text', mime_type: 'application/json' }); assert.ok(b.generation_config.max_output_tokens >= 1500);
+  assert.match(b.input, /^User: U1\n\nAssistant: A1\n\nUser: U2\n\nReply now as the Assistant/, 'a conversation is sent as one plain transcript'); assert.equal(JSON.stringify(b).includes(KEY), false);
+  assert.equal(M.currentGeminiRoute(), 'interactions');
+  m = mk(inter('{"single":1}')); await M.complete({ provider: 'gemini', key: KEY, model: 'm', system: 'S', turns: turns1, fetchImpl: m.f }); assert.equal(JSON.parse(m.calls[0].init.body).input, 'U1', 'one message is sent as it is');
+  m = mk({ ok: true, status: 200, json: async () => ({ output_text: '{"viaOutputText":1}' }) }); assert.equal(await M.complete({ provider: 'gemini', key: KEY, model: 'm', system: 'S', turns: turns1, fetchImpl: m.f }), '{"viaOutputText":1}', 'the convenience field is accepted too');
+  // an unknown format, a blocked call or a service error falls back to the older format once, and that is remembered
+  M.resetGeminiRoute(); m = mk({ ok: false, status: 404, json: async () => ({}) }, gem('{"legacy":1}'));
+  assert.equal(await M.complete({ provider: 'gemini', key: KEY, model: 'gemini-3.5-flash-lite', system: 'S', turns: turns3, fetchImpl: m.f }), '{"legacy":1}'); assert.equal(m.calls.length, 2); assert.match(m.calls[1].url, /:generateContent$/); assert.equal(M.currentGeminiRoute(), 'legacy');
+  await M.complete({ provider: 'gemini', key: KEY, model: 'm', system: 'S', turns: turns3, fetchImpl: m.f }); assert.equal(m.calls.length, 3, 'afterwards only the working route is used (no double calls)'); assert.match(m.calls[2].url, /:generateContent$/);
+  M.resetGeminiRoute(); m = mk(new TypeError('Failed to fetch (blocked in the browser)'), gem('{"legacy":2}')); assert.equal(await M.complete({ provider: 'gemini', key: KEY, model: 'm', system: 'S', turns: turns1, fetchImpl: m.f }), '{"legacy":2}', 'a browser-blocked first route falls back too');
+  M.resetGeminiRoute(); m = mk({ ok: true, status: 200, json: async () => ({ steps: [] }) }, gem('{"legacy":3}')); assert.equal(await M.complete({ provider: 'gemini', key: KEY, model: 'm', system: 'S', turns: turns1, fetchImpl: m.f }), '{"legacy":3}', 'an unreadable answer falls back too');
+  // a bad key or a used-up allowance must NOT trigger a second request
+  for (const [status, kind] of [[401, 'bad-key'], [403, 'bad-key'], [429, 'limit']]) { M.resetGeminiRoute(); M.resetAiCooldown(); m = mk({ ok: false, status, json: async () => ({}) }); await assert.rejects(() => M.complete({ provider: 'gemini', key: KEY, model: 'm', system: 'S', turns: turns1, fetchImpl: m.f }), e => e.kind === kind); assert.equal(m.calls.length, 1, `${status}: no second request`); assert.equal(M.currentGeminiRoute(), 'interactions'); }
+  M.resetAiCooldown(); M.resetGeminiRoute();
+}
+
+// ---- rate limits: a per-minute and a per-day budget, and a cool-down after "too many requests" ---------------------------------------------------------------
+{
+  M.resetMinuteBudget(); const s = fakeStore(), t0 = 1000000; let r;
+  for (let i = 0; i < M.MINUTE_AI_LIMIT; i++) assert.ok(M.spendAiBudget(today, s, M.DAILY_AI_LIMIT, t0 + i * 100).ok);
+  r = M.spendAiBudget(today, s, M.DAILY_AI_LIMIT, t0 + 900); assert.deepEqual([r.ok, r.reason], [false, 'minute'], 'a ninth request in a minute is held back');
+  assert.ok(M.spendAiBudget(today, s, M.DAILY_AI_LIMIT, t0 + 61000).ok, 'a minute later it works again'); M.resetMinuteBudget();
+  const d = fakeStore(); let last; for (let i = 0; i < M.DAILY_AI_LIMIT; i++) last = M.spendAiBudget(today, d, M.DAILY_AI_LIMIT, t0 + i * 20000); assert.ok(last.ok); r = M.spendAiBudget(today, d, M.DAILY_AI_LIMIT, t0 + 61 * 20000); assert.deepEqual([r.ok, r.reason], [false, 'day']); M.resetMinuteBudget();
+  // a 429 with "retry-after" starts a cool-down: nothing is sent until it passes
+  M.resetAiCooldown(); M.resetGeminiRoute(); let n = 0; const limited = async () => { n++; return { ok: false, status: 429, headers: { get: h => h.toLowerCase() === 'retry-after' ? '45' : null }, json: async () => ({}) }; };
+  for (const provider of ['groq', 'openrouter', 'gemini']) { M.resetAiCooldown(); n = 0; await assert.rejects(() => M.complete({ provider, key: KEY, model: 'm', system: '', turns: [{ role: 'user', text: 'x' }], fetchImpl: limited }), e => e.kind === 'limit'); assert.equal(n, 1); const wait = M.aiCooldownSeconds(); assert.ok(wait >= 40 && wait <= 45, `cool-down of about 45 s for ${provider}: ${wait}`); await assert.rejects(() => M.complete({ provider, key: KEY, model: 'm', system: '', turns: [{ role: 'user', text: 'x' }], fetchImpl: limited }), e => e.kind === 'limit'); assert.equal(n, 1, 'during the cool-down no request is sent'); }
+  M.resetAiCooldown(); n = 0; await assert.rejects(() => M.complete({ provider: 'groq', key: KEY, model: 'm', system: '', turns: [{ role: 'user', text: 'x' }], fetchImpl: async () => ({ ok: false, status: 429, json: async () => ({}) }) }), e => e.kind === 'limit'); assert.ok(M.aiCooldownSeconds() >= 25 && M.aiCooldownSeconds() <= 30, 'no retry-after header: 30 s'); M.resetAiCooldown();
+}
+
+// ---- nicknames, part-names and typos are hidden too ------------------------------------------------------------------------------------------------------------
+{
+  const two = [{ id: 'p1', name: 'Asha' }, { id: 'p2', name: 'Bilal Khan' }], mk = t => M.maskNames(t, two, undefined, { fuzzy: true });
+  assert.equal(mk('give ash 2 fold6'), 'give Person A 2 fold6', 'a nickname (part of the name)'); assert.equal(mk('and bil too'), 'and Person B too', 'a part of a name');
+  assert.equal(mk('asha and bilall'), 'Person A and Person B', 'a typo of one letter'); assert.equal(mk('ahsa has them'), 'Person A has them', 'swapped letters'); assert.equal(mk('khaan took it'), 'Person B took it', 'a typo in the surname');
+  assert.equal(mk('the Fold6 and nor Flip6 for you now'), 'the Fold6 and nor Flip6 for you now', 'common words and model names are never touched');
+  assert.equal(mk('ashes'), 'ashes', 'a different word is left alone'); assert.equal(mk('ba'), 'ba', 'too short to be a nickname');
+  const ambiguous = [{ id: 'a', name: 'Sara' }, { id: 'b', name: 'Sarah' }]; assert.equal(M.maskNames('sar took it', ambiguous, undefined, { fuzzy: true }), 'sar took it', 'a word that could be two people is left alone');
+  assert.equal(M.maskNames('give ash 2 fold6', two), 'give ash 2 fold6', 'near-matching is only for what the person typed, not for structured data');
+  // the agent uses it on the typed message, the earlier turns and the notes
+  const sentTexts = []; const f = async (_u, init) => { sentTexts.push(JSON.stringify(JSON.parse(init.body))); return { ok: true, status: 200, json: async () => ({ steps: [{ type: 'model_output', content: [{ type: 'text', text: '{"action":"reply","text":"ok"}' }] }] }) }; };
+  M.resetGeminiRoute(); await M.runAgent({ userText: 'give ash 2 fold6 and tell bilall', settings: settings(), state, records, people, today, history: [{ role: 'user', text: 'what about ash' }], notes: 'bil likes fold6', fetchImpl: f });
+  const body = sentTexts[0]; assert.ok(!/\bash\b|bilall|\bbil\b/i.test(body.replace(/Person A|Person B/g, '')), 'no nickname or typo of a name leaves the phone: ' + body.slice(0, 300)); assert.match(body, /give Person A 2 fold6 and tell Person B/); assert.match(body, /what about Person A/); assert.match(body, /Person B likes fold6/);
+}
+
+// ---- API key security --------------------------------------------------------------------------------------------------------------------------------------------
+{
+  const { readFile, readdir } = await import('node:fs/promises');
+  const files = async d => (await readdir(d, { withFileTypes: true })).flatMap(e => e.isDirectory() ? [] : [join(d, e.name)]);
+  const agentFiles = (await files('src/agent')).filter(f => /\.ts$/.test(f));
+  for (const f of agentFiles) { const text = await readFile(f, 'utf8'); assert.ok(!/console\.(log|info|warn|error|debug)/.test(text), `${f}: nothing is written to the console`); assert.ok(!/recordDiagnostic/.test(text), `${f}: nothing is written to diagnostics`); }
+  const src = await readdir('src'); let users = [];
+  for (const name of src.filter(n => /\.(ts|tsx)$/.test(n))) { const t = await readFile(join('src', name), 'utf8'); if (/imei-lens-ai-v1|AI_KEY|readAiSettings|saveAiSettings/.test(t)) users.push(name); }
+  assert.deepEqual(users.sort(), ['AiBrainSettings.tsx', 'RetailPlanAI.tsx'].sort(), 'only the settings card and the chat read or write the key: ' + users.join(', '));
+  for (const name of src.filter(n => /\.(ts|tsx)$/.test(n))) { const t = await readFile(join('src', name), 'utf8'); if (/backup|export|diagnostic|share/i.test(name)) assert.ok(!/imei-lens-ai|AI_KEY|readAiSettings/.test(t), `${name}: backups, exports and diagnostics never include the AI key`); }
+  const apiErr = await M.complete({ provider: 'groq', key: KEY, model: 'm', system: '', turns: [{ role: 'user', text: 'x' }], fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Invalid key ' + KEY } }) }) }).catch(e => e); assert.ok(!String(apiErr.message).includes(KEY), 'a provider error never repeats the key');
+  M.resetAiCooldown();
+  const cleaned = M.cleanAiSettings({ enabled: true, key: ` ${KEY} \n`, model: 'gemini-3.8-flash' }); assert.equal(cleaned.key, KEY, 'pasted whitespace is trimmed');
+  // provider switching: the old provider's key is never sent to the new one
+  let s2 = M.saveAiSettings({ ...M.DEFAULT_AI, enabled: true, key: KEY, model: 'gemini-3.8-flash', provider: 'gemini' }, fakeStore()); assert.ok(M.aiReady(s2));
+  const switched = M.cleanAiSettings({ ...s2, provider: 'groq', key: '', model: '', enabled: false }); assert.deepEqual([switched.provider, switched.key, switched.model, M.aiReady(switched)], ['groq', '', '', false], 'switching clears the key and switches the agent off until the new key is tested');
+  assert.deepEqual(M.PROVIDER_IDS, ['gemini', 'openrouter', 'groq']);
+  const card = await readFile('src/AiBrainSettings.tsx', 'utf8'); assert.match(card, /provider: e\.target\.value as Provider, key: '', model: '', enabled: false/, 'the settings screen clears the key and switches the agent off when the provider changes'); assert.match(card, /Test & save key/, 'a new key must be tested before it is used');
+}
 // ---- the tool catalog: every write tool becomes a command the REAL assistant understands --------------------------------------------------------------------
 const ctx0 = M.buildAiContext(state, records, people, today);
 const env = { state, records, people, today, aliases: ctx0.aliases, labelOf: M.labelMap(people, false) };
@@ -122,6 +194,7 @@ const env = { state, records, people, today, aliases: ctx0.aliases, labelOf: M.l
   assert.match(M.describeTools(), /give_phones\(person, qty, model\)/); assert.match(M.describeTools(), /get_person\(person\) \[read\]/);
 }
 
+M.setGeminiRoute('legacy'); // these scenarios read the older request shape; the new route has its own scenario below
 // ---- the agent loop with a scripted model ------------------------------------------------------------------------------------------------------------------
 const script = (...replies) => { const sent = []; let i = 0; const f = async (_url, init) => { sent.push(JSON.parse(init.body)); const r = replies[Math.min(i++, replies.length - 1)]; if (r instanceof Error) throw r; return gem(typeof r === 'string' ? r : JSON.stringify(r)); }; return { f, sent, count: () => i }; };
 const run = (userText, replies, over = {}) => { const s = script(...replies); return M.runAgent({ userText, settings: settings(), state, records, people, today, history: [], fetchImpl: s.f, ...over }).then(r => ({ ...r, s })); };
@@ -184,6 +257,15 @@ const give = (person, qty = 2) => ({ tool: 'give_phones', args: { person, qty, m
   const imeiRun = script({ action: 'reply', text: 'ok' }); await M.runAgent({ userText: `give asha 2 fold6 ${imei(3)} and remember Bilal likes fold6`, settings: settings(), state, records, people, today, history: [], notes: 'Bilal prefers Fold6', fetchImpl: imeiRun.f });
   assert.ok(!allSent(imeiRun).includes(imei(3)) && /\[IMEI hidden\]/.test(allSent(imeiRun))); assert.match(allSent(imeiRun), /NOTES THE PERSON SAVED:\\nPerson B prefers Fold6/);
   assert.match(M.AGENT_SYSTEM, /untrusted/); assert.match(M.AGENT_SYSTEM, /never guess|Never guess/i);
+}
+// the agent on the Interactions route: the conversation goes as one masked transcript and the answer is read from steps[].content[].text
+{
+  M.setGeminiRoute('interactions'); const seen = [];
+  const f = async (_u, init) => { seen.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ steps: [{ type: 'model_output', content: [{ type: 'text', text: JSON.stringify({ action: 'plan', summary: 'Give 2 to Person B', steps: [give('Person B')] }) }] }] }) }; };
+  const r = await M.runAgent({ userText: 'same for bilal', settings: settings(), state, records, people, today, history: [{ role: 'user', text: 'give asha 2 fold6' }, { role: 'assistant', text: 'Plan: give 2 Galaxy Z Fold6 to Asha' }], fetchImpl: f });
+  assert.equal(r.result.type, 'plan'); assert.equal(r.result.steps[0].command, 'give 2 Galaxy Z Fold6 to Bilal'); const b = seen[0];
+  assert.match(b.input, /^User: give Person A 2 fold6\n\nAssistant: Plan: give 2 Galaxy Z Fold6 to Person A\n\nUser: DATA/); assert.ok(!/Asha|Bilal/.test(JSON.stringify(b).replace(/same for bilal/, '')), 'no real names on the new route either'); assert.match(b.input, /MESSAGE:\nsame for Person B/); assert.match(b.system_instruction, /AI LENS/);
+  M.setGeminiRoute('legacy');
 }
 console.log('ai agent: settings, memory, 3 providers, every tool checked against the real assistant, and the agent loop with every safety refusal');
 process.exit(0);

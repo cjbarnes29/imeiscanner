@@ -189,7 +189,7 @@ try {
   await step('AI agent in the WebView (simulated provider): off = no calls; on = answer, plan waits for Approve, approve saves and checks it, Undo removes it; names and IMEIs never sent', async () => {
     const KEYS = ['imei-lens-ai-v1', 'imei-lens-ai-usage-v1', 'imei-lens-convo-v1'];
     await run(`(()=>{${JSON.stringify(KEYS)}.forEach(k=>localStorage.removeItem(k));window.__ai={calls:[],next:()=>({action:'reply',text:'ok'})};if(!window.__realFetch)window.__realFetch=window.fetch.bind(window);
-      window.fetch=async(url,init)=>{if(String(url).includes('generativelanguage.googleapis.com')){const b=JSON.parse(init.body);window.__ai.calls.push({user:b.contents[b.contents.length-1].parts[0].text,key:(init.headers||{})['x-goog-api-key']});return {ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{text:JSON.stringify(window.__ai.next())}]}}]})};}return window.__realFetch(url,init);};return true;})()`);
+      window.fetch=async(url,init)=>{if(String(url).includes('generativelanguage.googleapis.com')){const b=JSON.parse(init.body);const inter=String(url).endsWith('/interactions');const lastUser=inter?(b.input.lastIndexOf('User: ')>=0?b.input.slice(b.input.lastIndexOf('User: ')+6):b.input):b.contents[b.contents.length-1].parts[0].text;window.__ai.calls.push({user:lastUser,key:(init.headers||{})['x-goog-api-key']});const out=JSON.stringify(window.__ai.next());return {ok:true,status:200,json:async()=>(inter?{steps:[{type:'model_output',content:[{type:'text',text:out}]}]}:{candidates:[{content:{parts:[{text:out}]}}]})};}return window.__realFetch(url,init);};return true;})()`);
     const calls = () => run('window.__ai.calls.length');
     const FAKE = 'AIzaSyFAKEKEYFORANDROIDTESTS0123456789';
     try {
