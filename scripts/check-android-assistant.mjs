@@ -90,6 +90,10 @@ try {
   await step('approve (People create): the 3 people are in the saved data and survive a page reload', async () => {
     await toHome(); await approve(); await settle(async () => (await names()).includes('Carlou'), 'people in localStorage');
     const n = await names(); for (const x of ['Khuram', 'Raseen', 'Carlou']) assert.ok(n.includes(x), x + ' saved'); assert.equal(await lastStatus('add 3 person'), 'applied');
+    await settle(async () => (await requests()).find(r => r.text.startsWith('add 3 person'))?.verify === 'verified', 'the approval was confirmed against the saved data');
+    const entries = ((await readDb('retail:state')).agentLog || []).filter(e => e.tool === 'people.create');
+    assert.ok(entries.some(e => e.verify === 'verified' && e.outcome === 'applied' && e.actor === 'you' && e.mode === 'assistant'), 'the audit log has the approval, confirmed by reading the data back');
+    assert.ok(!JSON.stringify(entries).match(/\b\d{15}\b/), 'no full IMEI in the audit log');
     await reload(); const again = await names(); for (const x of ['Khuram', 'Raseen', 'Carlou']) assert.ok(again.includes(x), x + ' still there after reload');
   });
   await step(`safety gate with real names: ${SAFETY_B.length} more sentences change nothing`, () => checkUnsafe(SAFETY_B));

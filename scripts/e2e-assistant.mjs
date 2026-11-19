@@ -118,7 +118,7 @@ await ask('Turn off auto-detection');await toHome();await click('.assistant-requ
 await ask('add 2 people omar and lee');assert.deepEqual(await peopleNow(),before,'the chat alone adds nobody');await toHome();
 assert.equal(await run(`[...document.querySelectorAll('.assistant-requests .assistant-request button')].find(b=>b.textContent.trim().startsWith('Approve changes'))?.disabled`),false,'Approve is enabled for a people change');
 await click('.assistant-requests .assistant-request button','Approve changes');await sleep(700);const added=await peopleNow();assert.ok(added.includes('Omar')&&added.includes('Lee'),'the two people are saved: '+added);
-await click('.assistant-requests button','Undo this action');await sleep(700);assert.deepEqual(await peopleNow(),before,'Undo removes them again');await atReview();}
+await waitFor(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const q=o.result.transaction('inventory').objectStore('inventory').get('retail:state');q.onsuccess=()=>res(!!(q.result.agentLog||[]).find(e=>e.tool==='people.create'&&e.verify==='verified'&&e.outcome==='applied'));};})`,'the approval is in the audit log and was confirmed in the saved data');assert.match(await run(`document.querySelector('.assistant-requests')?.innerText||''`),/Checked in the saved data|Approved and saved/,'the screen says it was checked');await click('.assistant-requests button','Undo this action');await sleep(900);assert.deepEqual(await peopleNow(),before,'Undo removes them again');await atReview();}
 // 5. an app report (Excel, PowerPoint or simple notes) is asked for in the chat and made on Home; it can be downloaded or sent on WhatsApp. Making a report changes nothing.
 // WhatsApp is never really opened in this test: the browser's share and open functions are replaced by recorders.
 const ownersBefore=JSON.stringify((await readDb('record:')).map(r=>[r.id,r.personId]).sort());
@@ -334,7 +334,7 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
     for(let i=0;i<60;i++){st=await readDb('retail:state');if(st.assistantRoutines.find(r=>r.time===hhmm).runs.length>=2)break;await sleep(300);}
     routine=st.assistantRoutines.find(r=>r.time===hhmm);assert.equal(routine.runs.length,2,'Run now adds a run to the history');assert.equal(await assigned(),g1+2,'and does the work');assert.equal(routine.lastPrepared,today);
     // "auto give" (the Give & share rules with each person's limits) is a tool the assistant can run, and so can a routine
-    await ask('auto give');task=await until(t=>t.mode==='autopilot'&&/auto give/.test(t.text),'auto give task');
+    await ask('auto give');task=await until(t=>t.mode==='autopilot'&&/auto give/.test(t.text)&&t.status!=='running','auto give task finished');
     assert.ok(['done','failed','review'].includes(task.status),'the task finished or says why: '+JSON.stringify(task.steps.map(s=>s.error)));
     console.log('auto give task:',task.status,JSON.stringify(task.steps.map(s=>s.error||'applied')));
   }

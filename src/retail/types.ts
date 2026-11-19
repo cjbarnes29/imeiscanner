@@ -141,6 +141,7 @@ export type RosterDraft = { id: string; sourceId?: string; sourceName: string; m
 export type DeliverySetting = { enabled: boolean; destination: 'mobile' | 'group'; phone: string; includeReport: boolean; includeImeis: boolean; reportMode: 'all' | 'quantity'; quantities: Record<Segment,number> };
 export type DeliveryPacket = { id: string; at: string; personId: string; phone: string; destination: 'mobile' | 'group'; releaseIds: string[]; recordIds: string[]; reportIds: string[]; text: string; fingerprint?: string; kind?: 'report'; status: 'prepared' | 'opened' | 'sent-by-user' | 'not-sent' };
 export type AssistantMode = 'assistant' | 'copilot' | 'autopilot';
+export type AgentLogEntry = { id: string; at: string; actor: 'you' | 'agent' | 'routine'; mode: AssistantMode; tool: string; op: string; risk: string; summary: string; requestId?: string; taskId?: string; outcome: 'applied' | 'undone' | 'failed' | 'blocked' | 'rejected' | 'held'; verify: 'verified' | 'unverified' | 'n/a'; checks: number; failed?: string[] };
 export type AssistantTaskStep = { id: string; text: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'undone'; requestId?: string; attempts: number; error?: string; classes: string[]; doneAt?: string };
 export type AssistantTask = { id: string; text: string; mode: AssistantMode; status: 'running' | 'review' | 'done' | 'failed' | 'undone' | 'rejected'; at: string; updatedAt: string; steps: AssistantTaskStep[] };
 export type WorkSchedule = { requireSchedule?: boolean; windows?: AvailabilityWindow[]; targetMode?: 'manual' | 'linked'; calculationDays?: Record<Month, number>; offDivisor?: Record<Month, number>; leaveDivisor?: Record<Month, number>; offWeekdays: number[]; offDates: DateKey[]; annualLeave: { id: string; start: DateKey; end: DateKey }[] };
@@ -153,7 +154,9 @@ export type RetailState = {
   assistantRoutines?:TimedRoutine[];
   assistantFiles?:{id:string;name:string;type:string;bytes:number;at:string;status:'queued'|'reading'|'ready'|'failed';text:string;note:string;truncated?:boolean}[];
   assistantTasks?: AssistantTask[];
-  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>;peopleOps?:PeopleOp[]}[];
+  /** Append-only record of what the assistant did (newest last, at most 2000): who asked, which tool, what happened and whether the saved data was confirmed. */
+  agentLog?: AgentLogEntry[];
+  assistantRequests?: {id:string;at:string;text:string;status:'pending'|'answered'|'applied'|'rejected'|'undone';output:string;routineId?:string;fileReport?:{date:string;text:string;category:'phones'|'accessories'};allocationId?:string;reportDate?:string;beforeReport?:StockReport;afterReportFingerprint?:string;addedRecordIds?:string[];addedRecordsFingerprint?:string;businessBefore?:string;businessAfter?:string;beforeReportMode?:'auto'|'manual';settingsBefore?:Record<string,string|null>;settingsAfter?:Record<string,string|null>;peopleOps?:PeopleOp[];tool?:string;verify?:'verified'|'unverified'}[];
   savedQuestions?: string[];
   /** Additive v2 workflow fields; absent on older backups. Scanner records and photos stay untouched. */
   planningVersion?: 1;

@@ -3,7 +3,7 @@ import { useWorkflowOptions } from './AutoWorkflow';
 import { readWorkflowOptions } from './retail/auto-workflow';
 import { previewAssistant } from './retail/assistant-actions';
 import { guardVerdict } from './retail/guard';
-import { commitAssistantRequest, queueAssistant } from './AssistantReview';
+import { commitAssistantRequestVerified, queueAssistant } from './AssistantReview';
 import { actionClasses, autopilotUsedToday, decideStep, finishTask, handoverSummary, isStaleError, MAX_STEP_RETRIES, newTask, patchStep, splitSteps, taskProgress, upsertTask, type StepDecision } from './retail/assistant-tasks';
 import { withAudit } from './retail/data';
 import { waitForManualIdle } from './processing-options';
@@ -102,7 +102,8 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         const queued = queueAssistant(ctx, step.text);
         if (!queued?.saved || !queued.id || !queued.pending) throw new Error(queued && !queued.saved ? 'Too many requests are waiting on Home. Review or reject some first.' : 'This step could not be turned into a change.');
         requestId = queued.id;
-        commitAssistantRequest(ctx, requestId, { override: !!opts.override, notify: false });
+        const done = await commitAssistantRequestVerified(ctx, requestId, { override: !!opts.override, notify: false, actor: opts.manual ? 'you' : 'agent' });
+        if (done.verify.status === 'unverified') throw new Error(done.message);
         edit(ctx, taskId, t => patchStep(t, step.id, { status: 'done', requestId, doneAt: nowIso(), error: undefined }, nowIso()));
         ran++;
         if (!opts.manual && classes.includes('whatsapp')) notifyWhatsAppReady((ctx.latest?.() || ctx.state).deliveryPackets?.filter(p => p.kind === 'report' && p.status === 'prepared').slice(-1)[0]); // nobody is watching: tell the person it is ready (they still tap Send)
@@ -124,10 +125,10 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
 }
 
 /** Undo every applied step, newest first. Stops at the first step that cannot be undone safely (newer edits are never overwritten). */
-export function undoTask(ctx: RetailCtx, taskId: string): string {
+export async function undoTask(ctx: RetailCtx, taskId: string): Promise<string> {
   const task = latestTask(ctx, taskId); if (!task) return 'Task not found.';
   for (const step of [...task.steps].reverse().filter(s => s.status === 'done' && s.requestId)) {
-    try { commitAssistantRequest(ctx, step.requestId!, { undo: true, notify: false }); edit(ctx, taskId, t => patchStep(t, step.id, { status: 'undone', error: undefined }, nowIso())); }
+    try { const done = await commitAssistantRequestVerified(ctx, step.requestId!, { undo: true, notify: false, actor: 'you' }); if (done.verify.status === 'unverified') throw new Error(done.message); edit(ctx, taskId, t => patchStep(t, step.id, { status: 'undone', error: undefined }, nowIso())); }
     catch (e) { const why = (e as Error).message; edit(ctx, taskId, t => patchStep(t, step.id, { error: `Undo blocked: ${why}`.slice(0, 500) }, nowIso())); return `Undo stopped at “${step.text}”: ${why}`; }
   }
   edit(ctx, taskId, t => ({ ...t, steps: t.steps.map(s => s.status === 'pending' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task undone', task.text.slice(0, 200)]);
@@ -161,7 +162,7 @@ export function AssistantTasks(ctx: RetailCtx) {
         {open && task.status !== 'running' && task.mode === 'assistant' && <button className="plan-link" onClick={() => void run(task.id, { manual: true, one: true, override })}>Approve next step</button>}
         {open && task.status !== 'running' && task.mode !== 'assistant' && <button className="plan-link" onClick={() => void run(task.id, { manual: true, override })}>Approve all remaining steps</button>}
         {task.status === 'running' && <button className="plan-link" onClick={() => { stopTask(task.id); setMessage('Stopping after the current step.'); }}>Stop</button>}
-        {task.steps.some(s => s.status === 'done') && task.status !== 'undone' && <button className="plan-link" onClick={() => setMessage(undoTask(ctx, task.id))}>Undo applied steps</button>}
+        {task.steps.some(s => s.status === 'done') && task.status !== 'undone' && <button className="plan-link" onClick={() => { void undoTask(ctx, task.id).then(setMessage); }}>Undo applied steps</button>}
         {open && <button className="plan-link" onClick={() => rejectTask(ctx, task.id)}>Reject the rest</button>}
       </div>
     </article>; })}
