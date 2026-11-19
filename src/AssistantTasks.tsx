@@ -148,7 +148,7 @@ const MODE_LABEL: Record<AssistantMode, string> = { assistant: 'Assistant · you
 export function AssistantTasks(ctx: RetailCtx) {
   const options = useWorkflowOptions(), [message, setMessage] = useState(''), [override, setOverride] = useState(false), [handover, setHandover] = useState<{ lines: string[]; next: string[] } | null>(null);
   useEffect(() => { if (!ctx.readOnly) recoverTasks(ctx); }, [ctx.readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
-  const tasks = [...(ctx.state.assistantTasks || [])].reverse().slice(0, 5);
+  const all = [...(ctx.state.assistantTasks || [])].reverse(), isOpen = (t: AssistantTask) => t.status === 'review' || t.status === 'running' || t.status === 'failed', tasks = [...all.filter(isOpen), ...all.filter(t => !isOpen(t)).slice(0, 3)]; // every open task is always listed (an old one must never hide and block a new one); a few finished ones for reference
   const run = async (id: string, o: RunOptions) => { setMessage(await runTask(ctx, id, o)); };
   return <details className="retail-card assistant-tasks" open={tasks.some(t => t.status === 'review' || t.status === 'running')}>
     <summary><strong>Tasks · {MODE_LABEL[options.assistantMode]}</strong>{tasks.some(t => t.status === 'review') ? ' · needs you' : ''}</summary>
