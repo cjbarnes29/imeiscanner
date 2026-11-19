@@ -97,7 +97,7 @@ jobs:
       - name: Release gate (package id, version, app label, signing certificate)
         env:
           EXPECTED_APK_CERT_SHA256: ${{ vars.EXPECTED_APK_CERT_SHA256 }}
-        run: node scripts/verify-apk.mjs --apk "out/AI-LENS-${GITHUB_REF_NAME#beta-v}.apk" --kind main
+        run: node scripts/verify-apk.mjs --apk "out/AI-LENS-${GITHUB_REF_NAME#beta-v}.apk" --kind main --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
       - name: Checksum
         run: cd out && sha256sum "AI-LENS-${GITHUB_REF_NAME#beta-v}.apk" > "AI-LENS-${GITHUB_REF_NAME#beta-v}.apk.sha256"
       - name: Publish the pre-release (main app)

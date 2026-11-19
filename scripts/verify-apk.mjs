@@ -23,7 +23,7 @@ export function parseFacts(badging, signer) {
     package: pkg?.[1] || '', versionCode: pkg?.[2] || '', versionName: pkg?.[3] || '',
     label: badging.match(/^application-label:'([^']*)'/m)?.[1] || '',
     verifies: /^Verifies\s*$/m.test(signer),
-    signers: [...signer.matchAll(/^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})/gm)].map(m => m[1].toLowerCase())
+    signers: [...signer.matchAll(/^\s*Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})/gm)].map(m => m[1].toLowerCase())
   };
 }
 
@@ -75,6 +75,7 @@ function cli(argv) {
   const gradle = gradleVersion(readFileSync(arg('gradle') || 'android/app/build.gradle', 'utf8'));
   const facts = parseFacts(badging, signed), problems = checkApk(facts, { kind, cert, versionCode: gradle.code, versionName: gradle.name });
   console.log(`APK ${apk}\n  package ${facts.package} · version ${facts.versionName} (${facts.versionCode}) · label "${facts.label}"\n  signer SHA-256 ${facts.signers.join(', ') || 'none'} · signature ${facts.verifies ? 'verifies' : 'DOES NOT verify'}`);
+  if (facts.signers.length !== 1) console.error(`\nSigning tool output (public certificate details only; shown because the number of certificates is not 1):\n${signed.split(/\r?\n/).filter(l => /Signer|signers|Verif|ERROR|error|DOES NOT/i.test(l) && !/^WARNING: (?:A restricted|java\.lang|Use --enable|Restricted)/.test(l)).slice(0, 20).join('\n') || '(no matching lines)'}\nTool: ${signer || 'unknown'}`);
   if (!facts.verifies || !facts.package) console.error(`\nTool output (to diagnose a failure; it contains no secrets):\n${(!facts.package ? badging : signed).slice(0, 500).trim()}`);
   if (problems.length) { console.error(`\nNOT PUBLISHABLE (${kind}):\n- ${problems.join('\n- ')}`); return 1; }
   console.log(`\nOK: this is a valid ${kind} release APK.`);

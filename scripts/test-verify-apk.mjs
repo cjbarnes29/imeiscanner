@@ -52,6 +52,7 @@ check('parsing real-shaped tool output, and reading the version from build.gradl
   assert.deepEqual([f.package, f.versionCode, f.versionName, f.label, f.verifies, f.signers], [MAIN_PACKAGE, '47', '1.27.4', 'AI LENS', true, [CERT]]);
   assert.equal(parseFacts('', '').package, '', 'empty tool output never looks valid'); assert.equal(parseFacts('', 'Verifies\n').signers.length, 0);
   assert.equal(parseFacts(badging(MAIN_PACKAGE, '1', 'x'), 'DOES NOT VERIFY\nSigner #1 certificate SHA-256 digest: ' + CERT).verifies, false);
+  assert.deepEqual(parseFacts('', 'Verifies' + '\n' + '  Signer #1 certificate SHA-256 digest: ' + CERT + '\n').signers, [CERT], 'an indented digest line (other tool versions) is still read');
   const g = gradleVersion(readFileSync('android/app/build.gradle', 'utf8'));
   assert.match(g.code, /^\d+$/); assert.match(g.name, /^\d+\.\d+\.\d+$/);
 });
