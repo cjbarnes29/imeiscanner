@@ -112,3 +112,8 @@ section.modal.settings-modal>.modal-head{width:100%;max-width:100%;margin:0 0 8p
 @keyframes agent-breathe{0%,100%{opacity:.45}50%{opacity:.9}}
 @keyframes agent-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.agent-progress *{animation:none!important;transition:none!important}}
+
+/* Phase 7: assistant history list */
+.history-log-list{margin:6px 0 0;padding-left:18px;font-size:.88em}
+.history-log-list li[data-outcome="failed"],.history-log-list li[data-outcome="blocked"],.history-log-list li[data-verify="unverified"]{color:#b3261e}
+.assistant-history-log .share-toolbar button[aria-pressed="true"]{font-weight:700;text-decoration:underline}
