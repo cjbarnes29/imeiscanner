@@ -80,3 +80,40 @@ section.modal.settings-modal>.modal-head{width:100%;max-width:100%;margin:0 0 8p
 .routine-schedule{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}.routine-schedule input[type=time]{min-height:44px}.routine-schedule [role=group]{display:flex;flex-wrap:wrap;gap:6px}.routine-schedule .chip{min-width:44px;min-height:44px;background:#16283a;color:#dbe7f0;border:1px solid #304253;border-radius:10px}.routine-schedule .chip.on{background:#2f8f6f;color:#fff;border-color:#4fd1a1}.routine-runs summary{min-height:44px;display:flex;align-items:center}
 
 .voice-input{display:flex;flex-direction:column;gap:6px;min-width:0}.voice-btn{display:inline-flex;align-items:center;gap:6px;min-height:44px}.voice-recording{display:flex;flex-direction:column;gap:6px}.voice-dot{width:12px;height:12px;border-radius:50%;background:#e5534b;display:inline-block;margin-right:6px;animation:voice-pulse 1s ease-in-out infinite}@keyframes voice-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.voice-dot{animation:none}}.voice-heard{font-style:italic}
+
+/* Phase 4: removals need a deliberate action — press and hold (small) or type CONFIRM (big). Only transform/opacity animate. */
+.hold-btn{position:relative;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+.hold-btn .hold-fill{position:absolute;inset:0;background:rgba(255,255,255,.3);transform:scaleX(0);transform-origin:left center;transition:transform .15s linear;pointer-events:none}
+.hold-btn.holding .hold-fill{transform:scaleX(1);transition:transform .9s linear}
+.hold-btn .hold-label{position:relative}
+.confirm-typed{display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center}
+.confirm-typed input{min-width:0;width:9em;padding:8px 10px;border-radius:8px;border:1px solid currentColor;background:transparent;color:inherit}
+@media (prefers-reduced-motion:reduce){.hold-btn .hold-fill,.hold-btn.holding .hold-fill{transition:none}}
+.danger-btn{background:#b3261e;border-color:#b3261e;color:#fff}
+
+/* Phase 6: compact progress panel. Only transform and opacity animate (smooth in the Android WebView). */
+.agent-progress{margin:8px 0;padding:8px 10px;border-radius:12px;border:1px solid rgba(127,127,127,.35);font-size:.9em}
+.agent-progress-head{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;color:inherit;text-align:left;padding:2px 0;cursor:pointer}
+.agent-progress-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-progress-count{opacity:.7}
+.agent-pulse{display:inline-flex;gap:3px}
+.agent-pulse i{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.25;display:block}
+.agent-progress[data-busy="true"] .agent-pulse i{animation:agent-dot 1.2s ease-in-out infinite}
+.agent-progress[data-busy="true"] .agent-pulse i:nth-child(2){animation-delay:.2s}
+.agent-progress[data-busy="true"] .agent-pulse i:nth-child(3){animation-delay:.4s}
+.agent-bar{height:4px;border-radius:2px;background:rgba(127,127,127,.25);overflow:hidden;margin:4px 0}
+.agent-bar span{display:block;height:100%;width:100%;background:currentColor;opacity:.7;transform-origin:left center;transition:transform .35s ease}
+.agent-progress[data-busy="true"] .agent-bar span{animation:agent-breathe 1.6s ease-in-out infinite}
+.agent-steps{margin:6px 0 0;padding-left:18px}
+.agent-steps li{animation:agent-in .25s ease both}
+.agent-steps li[data-phase="step-error"],.agent-steps li[data-phase="failed"],.agent-steps li[data-phase="unverified"]{color:#b3261e}
+.agent-actions{display:flex;gap:12px;margin-top:4px}
+@keyframes agent-dot{0%,80%,100%{opacity:.25;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+@keyframes agent-breathe{0%,100%{opacity:.45}50%{opacity:.9}}
+@keyframes agent-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.agent-progress *{animation:none!important;transition:none!important}}
+
+/* Phase 7: assistant history list */
+.history-log-list{margin:6px 0 0;padding-left:18px;font-size:.88em}
+.history-log-list li[data-outcome="failed"],.history-log-list li[data-outcome="blocked"],.history-log-list li[data-verify="unverified"]{color:#b3261e}
+.assistant-history-log .share-toolbar button[aria-pressed="true"]{font-weight:700;text-decoration:underline}

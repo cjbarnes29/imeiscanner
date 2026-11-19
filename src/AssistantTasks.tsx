@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useWorkflowOptions } from './AutoWorkflow';
 import { readWorkflowOptions } from './retail/auto-workflow';
 import { previewAssistant } from './retail/assistant-actions';
-import { commitAssistantRequest, queueAssistant } from './AssistantReview';
-import { actionClasses, autopilotUsedToday, decideStep, finishTask, handoverSummary, isStaleError, MAX_STEP_RETRIES, newTask, patchStep, splitSteps, taskProgress, upsertTask, type StepDecision } from './retail/assistant-tasks';
+import { guardVerdict } from './retail/guard';
+import { commitAssistantRequestVerified, queueAssistant } from './AssistantReview';
+import { actionClasses, autopilotUsedToday, decideStep, findDuplicateTask, finishTask, handoverSummary, recoverInterrupted, taskCheckpoint, isStaleError, MAX_STEP_RETRIES, newTask, patchStep, splitSteps, taskProgress, upsertTask, type StepDecision } from './retail/assistant-tasks';
 import { withAudit } from './retail/data';
 import { waitForManualIdle } from './processing-options';
 import { recordDiagnostic } from './diagnostics';
 import { notifyWhatsAppReady } from './whatsapp-ready';
 import { setActivity } from './assistant-activity';
+import { emitAgent } from './agent/events';
 import type { AssistantMode, AssistantTask } from './retail/types';
 import type { RetailCtx } from './retail/ui-helpers';
 
@@ -23,7 +25,7 @@ const latestTask = (ctx: RetailCtx, id: string) => (ctx.latest?.() || ctx.state)
 const nowIso = () => new Date().toISOString();
 /** Same context, but with the records as they are at this moment. Every step must see what the step before it did. */
 const fresh = (ctx: RetailCtx): RetailCtx => ({ ...ctx, records: ctx.latestRecords?.() || ctx.records, people: ctx.latestPeople?.() || ctx.people });
-const actionable = (p: ReturnType<typeof previewAssistant>) => !!(p.giving.length || p.report || p.settings || p.business || p.people || p.additions?.length);
+const actionable = (p: ReturnType<typeof previewAssistant>) => !!(p.giving.length || p.report || p.settings || p.business || p.people || p.moves?.length || p.additions?.length);
 
 function saveTask(ctx: RetailCtx, task: AssistantTask, audit?: [string, string]) {
   const state = upsertTask(ctx.latest?.() || ctx.state, task);
@@ -39,12 +41,13 @@ function rejectRequest(ctx: RetailCtx, requestId: string, why: string) {
 }
 
 /** Turns one chat message into a task. Returns handled=false when the normal single-request path should answer instead. */
-export function startAssistantTask(base: RetailCtx, text: string): { handled: boolean; message: string; taskId?: string } {
+const localDay = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+export function startAssistantTask(base: RetailCtx, text: string, opts: { routine?: boolean } = {}): { handled: boolean; message: string; taskId?: string; duplicate?: boolean } {
   const ctx = fresh(base);
   const options = readWorkflowOptions(), mode = options.assistantMode, state = ctx.latest?.() || ctx.state;
   // 1. An explicit sequence ("A, then B") whose every part is understood becomes a task: safer than trusting one parse of a combined sentence.
   const parts = splitSteps(text);
-  const understood = (list: string[]) => list.every((t, i) => { const p = previewAssistant(state, ctx.records, ctx.people, ctx.today, t); return p.handled && (i > 0 || (!p.blockers.length && actionable(p))); });
+  const understood = (list: string[]) => list.every((t, i) => { if (guardVerdict(t).kind !== 'command') return false; const p = previewAssistant(state, ctx.records, ctx.people, ctx.today, t); return p.handled && (i > 0 || (!p.blockers.length && actionable(p))); });
   let steps: string[] = [];
   if (parts.length >= 2 && understood(parts)) steps = parts;
   else {
@@ -54,11 +57,19 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   }
   // 3. Anything unclear keeps the original single-request answer.
   if (!steps.length) return { handled: false, message: '' };
+  const twin = findDuplicateTask(state, text, mode);
+  if (twin) {
+    const sameDay = localDay(twin.at) === ctx.today, untouched = !twin.steps.some(s => s.status === 'done' || s.status === 'running');
+    // a routine's copy from an earlier day that nobody approved and nothing ran: replaced by today's run (rejecting it changes no data)
+    if (opts.routine && !sameDay && untouched) rejectTask(ctx, twin.id);
+    else return { handled: true, duplicate: true, taskId: twin.id, message: opts.routine ? (sameDay ? 'Today\'s run is already prepared. Open it under Tasks on Home.' : 'An earlier run of this routine is still partly done, so today\'s run was not started. Finish or reject it under Tasks on Home.') : 'This exact task is already open under Tasks on Home, so a second copy was not started.' };
+  }
   if ((state.assistantTasks || []).filter(t => t.status === 'review' || t.status === 'running').length >= 10) return { handled: true, message: 'Finish or reject some open tasks first (the limit is 10). Nothing was started.' };
   let n = 0;
   const task = newTask(crypto.randomUUID(), text.slice(0, 1000), mode, steps, nowIso(), () => `${Date.now().toString(36)}-${++n}`);
   saveTask(ctx, { ...task, status: 'review' }, ['assistant task started', `${mode}: ${text.slice(0, 200)} · ${steps.length} step${steps.length === 1 ? '' : 's'}`]);
   recordDiagnostic('assistant-task-start');
+  emitAgent({ phase: 'planning', taskId: task.id, done: 0, total: steps.length, text: `${steps.length} step${steps.length === 1 ? '' : 's'}` });
   if (mode === 'autopilot') { void runTask(ctx, task.id, { manual: false }); return { handled: true, taskId: task.id, message: `Autopilot started ${steps.length} step${steps.length === 1 ? '' : 's'}. Allowed steps apply by themselves; anything else waits for you under Tasks on Home.` }; }
   return { handled: true, taskId: task.id, message: mode === 'copilot' ? `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Review it under Tasks on Home, then approve it once.` : `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Under Tasks on Home you approve each step.` };
 }
@@ -81,14 +92,14 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
   try {
     for (;;) {
       const task = latestTask(ctx, taskId); if (!task) break;
-      if (stopped.has(taskId)) { message = 'Stopped. Steps already applied stay applied and can be undone.'; break; }
+      if (stopped.has(taskId)) { message = 'Stopped. Steps already applied stay applied and can be undone.'; emitAgent({ phase: 'cancelled', taskId, text: 'Saved steps stay saved' }); break; }
       const step = task.steps.find(s => s.status === 'pending'); if (!step) break;
       if (!opts.manual) await waitForManualIdle(); // yield to manual edits and keep the screen responsive
       else await new Promise(r => setTimeout(r, 0));
       if (stopped.has(taskId)) continue;
       ctx = fresh(base);
       const state = ctx.latest?.() || ctx.state, preview = previewAssistant(state, ctx.records, ctx.people, ctx.today, step.text), classes = actionClasses(preview, step.text);
-      const decision: StepDecision = opts.manual
+      const decision: StepDecision = guardVerdict(step.text).kind !== 'command' ? { action: 'blocked', reason: 'This does not read as a clear request, so nothing was applied.' } : classes.includes('remove') && opts.manual ? { action: 'hold', reason: 'Removing something needs your explicit confirmation on Home: ask for it on its own, then press and hold the button (or type CONFIRM for a big change).' } : opts.manual
         ? preview.blockers.length ? { action: 'blocked', reason: preview.blockers.join(' ') } : !classes.length ? { action: 'hold', reason: 'Nothing to change for this step.' } : preview.warnings.length && !opts.override ? { action: 'hold', reason: 'This step has warnings. Tick “I reviewed the warnings” and approve again.' } : { action: 'apply', reason: 'Approved by you.' }
         : decideStep(task.mode, preview, classes, { allow: options.autopilotAllow, dailyCap: options.autopilotDailyCap, usedToday: autopilotUsedToday(state, ctx.today) });
       if (decision.action !== 'apply') {
@@ -96,14 +107,17 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         message = decision.reason; break;
       }
       edit(ctx, taskId, t => patchStep(t, step.id, { classes, status: 'running', attempts: step.attempts + 1, error: undefined }, nowIso()));
+      emitAgent({ phase: 'step-start', taskId, stepId: step.id, text: step.text, done: task.steps.filter(s => s.status === 'done').length, total: task.steps.length });
       let requestId = '';
       try {
         const queued = queueAssistant(ctx, step.text);
         if (!queued?.saved || !queued.id || !queued.pending) throw new Error(queued && !queued.saved ? 'Too many requests are waiting on Home. Review or reject some first.' : 'This step could not be turned into a change.');
         requestId = queued.id;
-        commitAssistantRequest(ctx, requestId, { override: !!opts.override, notify: false });
+        const done = await commitAssistantRequestVerified(ctx, requestId, { override: !!opts.override, notify: false, actor: opts.manual ? 'you' : 'agent' });
+        if (done.verify.status === 'unverified') throw new Error(done.message);
         edit(ctx, taskId, t => patchStep(t, step.id, { status: 'done', requestId, doneAt: nowIso(), error: undefined }, nowIso()));
         ran++;
+        emitAgent({ phase: 'step-done', taskId, stepId: step.id, text: step.text, done: task.steps.filter(s => s.status === 'done').length + 1, total: task.steps.length });
         if (!opts.manual && classes.includes('whatsapp')) notifyWhatsAppReady((ctx.latest?.() || ctx.state).deliveryPackets?.filter(p => p.kind === 'report' && p.status === 'prepared').slice(-1)[0]); // nobody is watching: tell the person it is ready (they still tap Send)
         if (classes.includes('add-stock') || classes.includes('remove')) { message = 'Applied. This step changed the phone list, so the next step waits: approve again to continue.'; break; }
       } catch (e) {
@@ -112,6 +126,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         const attempts = (latestTask(ctx, taskId)?.steps.find(s => s.id === step.id)?.attempts) || 1;
         if (isStaleError(why) && attempts <= MAX_STEP_RETRIES) { edit(ctx, taskId, t => patchStep(t, step.id, { status: 'pending', error: `Retrying: ${why}` }, nowIso())); continue; }
         edit(ctx, taskId, t => patchStep(t, step.id, { status: 'failed', error: why.slice(0, 500) }, nowIso()));
+        emitAgent({ phase: 'step-error', taskId, stepId: step.id, text: why.slice(0, 80), done: task.steps.filter(s => s.status === 'done').length, total: task.steps.length });
         message = `Stopped at “${step.text}”: ${why}`; recordDiagnostic('assistant-task-step-failed', e); break;
       }
       if (opts.one) break;
@@ -123,10 +138,10 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
 }
 
 /** Undo every applied step, newest first. Stops at the first step that cannot be undone safely (newer edits are never overwritten). */
-export function undoTask(ctx: RetailCtx, taskId: string): string {
+export async function undoTask(ctx: RetailCtx, taskId: string): Promise<string> {
   const task = latestTask(ctx, taskId); if (!task) return 'Task not found.';
   for (const step of [...task.steps].reverse().filter(s => s.status === 'done' && s.requestId)) {
-    try { commitAssistantRequest(ctx, step.requestId!, { undo: true, notify: false }); edit(ctx, taskId, t => patchStep(t, step.id, { status: 'undone', error: undefined }, nowIso())); }
+    try { const done = await commitAssistantRequestVerified(ctx, step.requestId!, { undo: true, notify: false, actor: 'you' }); if (done.verify.status === 'unverified') throw new Error(done.message); edit(ctx, taskId, t => patchStep(t, step.id, { status: 'undone', error: undefined }, nowIso())); }
     catch (e) { const why = (e as Error).message; edit(ctx, taskId, t => patchStep(t, step.id, { error: `Undo blocked: ${why}`.slice(0, 500) }, nowIso())); return `Undo stopped at “${step.text}”: ${why}`; }
   }
   edit(ctx, taskId, t => ({ ...t, steps: t.steps.map(s => s.status === 'pending' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task undone', task.text.slice(0, 200)]);
@@ -137,12 +152,16 @@ export function rejectTask(ctx: RetailCtx, taskId: string) {
   edit(ctx, taskId, t => ({ ...t, status: 'rejected' as const, steps: t.steps.map(s => s.status === 'pending' || s.status === 'failed' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task rejected', latestTask(ctx, taskId)?.text.slice(0, 200) || '']);
 }
 export const stopTask = (id: string) => { stopped.add(id); };
+export const taskRunning = () => active.size > 0;
+/** Tasks a closed app left half-way go back to "waiting for you" (nothing resumes by itself). Called once when the Tasks card opens. */
+export function recoverTasks(ctx: RetailCtx) { const state = ctx.latest?.() || ctx.state, next = recoverInterrupted(state, active, nowIso()); if (next !== state) ctx.change(next, ''); }
 
 const MODE_LABEL: Record<AssistantMode, string> = { assistant: 'Assistant · you approve each step', copilot: 'Copilot · you approve once', autopilot: 'Autopilot · allowed steps apply themselves' };
 
 export function AssistantTasks(ctx: RetailCtx) {
   const options = useWorkflowOptions(), [message, setMessage] = useState(''), [override, setOverride] = useState(false), [handover, setHandover] = useState<{ lines: string[]; next: string[] } | null>(null);
-  const tasks = [...(ctx.state.assistantTasks || [])].reverse().slice(0, 5);
+  useEffect(() => { if (!ctx.readOnly) recoverTasks(ctx); }, [ctx.readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  const all = [...(ctx.state.assistantTasks || [])].reverse(), isOpen = (t: AssistantTask) => t.status === 'review' || t.status === 'running' || t.status === 'failed', tasks = [...all.filter(isOpen), ...all.filter(t => !isOpen(t)).slice(0, 3)]; // every open task is always listed (an old one must never hide and block a new one); a few finished ones for reference
   const run = async (id: string, o: RunOptions) => { setMessage(await runTask(ctx, id, o)); };
   return <details className="retail-card assistant-tasks" open={tasks.some(t => t.status === 'review' || t.status === 'running')}>
     <summary><strong>Tasks · {MODE_LABEL[options.assistantMode]}</strong>{tasks.some(t => t.status === 'review') ? ' · needs you' : ''}</summary>
@@ -154,13 +173,14 @@ export function AssistantTasks(ctx: RetailCtx) {
     {tasks.map(task => { const progress = taskProgress(task), open = task.status === 'review' || task.status === 'running' || task.status === 'failed'; return <article className="plan-preview-row" key={task.id} data-task-id={task.id}>
       <div className="plan-top"><strong>{task.text}</strong><span className="plan-badge">{task.status} · {task.mode}</span></div>
       <div className="task-bar" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${progress.done} of ${progress.total} steps done`}><span style={{ width: `${progress.percent}%` }} /></div>
+      <small className="task-checkpoint">{taskCheckpoint(task).line}</small>
       <ol>{task.steps.map(s => <li key={s.id}><span>{s.status === 'done' ? '✓' : s.status === 'failed' ? '✗' : s.status === 'undone' ? '↺' : s.status === 'skipped' ? '–' : s.status === 'running' ? '…' : '○'} {s.text}</span>{s.error && <small> · {s.error}</small>}</li>)}</ol>
       <div className="share-toolbar">
         {open && task.status !== 'running' && <label className="practice-choice"><input type="checkbox" checked={override} onChange={e => setOverride(e.target.checked)} />I reviewed the warnings</label>}
         {open && task.status !== 'running' && task.mode === 'assistant' && <button className="plan-link" onClick={() => void run(task.id, { manual: true, one: true, override })}>Approve next step</button>}
         {open && task.status !== 'running' && task.mode !== 'assistant' && <button className="plan-link" onClick={() => void run(task.id, { manual: true, override })}>Approve all remaining steps</button>}
         {task.status === 'running' && <button className="plan-link" onClick={() => { stopTask(task.id); setMessage('Stopping after the current step.'); }}>Stop</button>}
-        {task.steps.some(s => s.status === 'done') && task.status !== 'undone' && <button className="plan-link" onClick={() => setMessage(undoTask(ctx, task.id))}>Undo applied steps</button>}
+        {task.steps.some(s => s.status === 'done') && task.status !== 'undone' && <button className="plan-link" onClick={() => { void undoTask(ctx, task.id).then(setMessage); }}>Roll back {taskCheckpoint(task).saved} saved step{taskCheckpoint(task).saved === 1 ? '' : 's'}</button>}
         {open && <button className="plan-link" onClick={() => rejectTask(ctx, task.id)}>Reject the rest</button>}
       </div>
     </article>; })}

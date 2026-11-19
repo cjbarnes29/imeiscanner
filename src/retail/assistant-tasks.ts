@@ -1,4 +1,5 @@
 import type { AssistantPreview } from './assistant-actions';
+import { toolOf } from '../agent/registry';
 import type { AssistantMode, AssistantTask, AssistantTaskStep, RetailState } from './types';
 
 /**
@@ -26,6 +27,8 @@ export function actionClasses(preview: AssistantPreview, text: string): string[]
   if (preview.report) out.add('report');
   if (preview.settings) out.add('settings');
   if (preview.people) { out.add('people'); if (preview.people.ops.some(op => op.kind === 'delete')) out.add('remove'); }
+  if (preview.moves?.length) out.add('give');
+  if (toolOf(preview, text)?.risk === 'destructive') out.add('remove');
   const after = preview.business?.after || {};
   if ('recordMeta' in after) out.add(/\b(?:remove|delete)\b/i.test(text) ? 'remove' : 'stock');
   if ('targets' in after || 'storeTargets' in after) out.add('targets');
@@ -111,4 +114,41 @@ export function handoverSummary(state: RetailState, now: number): { lines: strin
   if (routines) next.push(`${routines} daily routine${routines === 1 ? '' : 's'} active.`);
   if (!next.length) next.push('Nothing is waiting. No open tasks.');
   return { lines, next };
+}
+
+// ---- Phase 5: duplicate guard, recovery after an interrupted run, checkpoints ----------------------------------------------------------------------
+
+const same = (a: string) => a.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/** An open task (running or waiting) that already has this exact request: starting it again would apply everything twice. */
+export const findDuplicateTask = (state: Pick<RetailState, 'assistantTasks'>, text: string, mode: AssistantMode): AssistantTask | undefined =>
+  (state.assistantTasks || []).find(t => (t.status === 'running' || t.status === 'review') && t.mode === mode && same(t.text) === same(text));
+
+/** A request that is already waiting for approval with the same words: the existing one is used instead of a second copy. */
+export const findDuplicateRequest = (state: Pick<RetailState, 'assistantRequests'>, text: string) =>
+  (state.assistantRequests || []).find(r => r.status === 'pending' && same(r.text) === same(text));
+
+export const INTERRUPTED = 'Interrupted: the app closed before this step finished. It is checked again before anything is applied, never repeated blindly.';
+
+/**
+ * After the app was closed in the middle of a task, no runner is working on it any more. Steps left "running" go back to "pending" (the next run looks at the
+ * saved data again, so a step that did finish is not applied twice) and the task waits for a person: nothing resumes by itself, Autopilot included.
+ */
+export function recoverInterrupted(state: RetailState, activeIds: ReadonlySet<string>, now: string): RetailState {
+  let changed = false;
+  const tasks = (state.assistantTasks || []).map(t => {
+    if (activeIds.has(t.id) || (t.status !== 'running' && !t.steps.some(s => s.status === 'running'))) return t;
+    changed = true;
+    return { ...t, status: 'review' as const, updatedAt: now, steps: t.steps.map(s => s.status === 'running' ? { ...s, status: 'pending' as const, error: INTERRUPTED } : s) };
+  });
+  return changed ? { ...state, assistantTasks: tasks } : state;
+}
+
+/** Where a task stands: what is already saved (and can be rolled back), and where it stopped. Plain words for the Tasks card. */
+export function taskCheckpoint(task: AssistantTask): { saved: number; total: number; stoppedAt?: string; canRollBack: boolean; line: string } {
+  const saved = task.steps.filter(s => s.status === 'done').length, total = task.steps.length;
+  const stopped = task.steps.find(s => s.status === 'failed') || task.steps.find(s => s.status === 'pending' && s.error);
+  const line = !saved && !stopped ? 'Nothing applied yet.'
+    : `${saved} of ${total} step${total === 1 ? '' : 's'} saved${stopped ? `; stopped at “${stopped.text}”` : ''}.${saved ? ' Rolling back undoes the saved steps, newest first.' : ''}`;
+  return { saved, total, stoppedAt: stopped?.text, canRollBack: saved > 0 && task.status !== 'undone', line };
 }

@@ -11,7 +11,9 @@ export const STARTER_QUESTIONS = ['Check my report', 'Plan to reach 70 percent t
 
 const keyOf = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 /** A text worth suggesting again: a sentence, not an IMEI list or a one-off date. */
-export const reusable = (text: string) => { const t = text.trim(); return t.length >= 4 && t.length <= 120 && !/\d{15}/.test(t) && !/\b20\d{2}-\d{2}-\d{2}\b/.test(t) && !/^report requested:/i.test(t); };
+export const reusable = (text: string) => { const t = text.trim(); return t.length >= 4 && t.length <= 120 && !/\d{15}/.test(t) && !/\b20\d{2}-\d{2}-\d{2}\b/.test(t) && !/^report requested:/i.test(t) && !CHAT_ONLY.test(t); };
+/** Memory notes and one-word follow-ups ("yes", "undo that", "make it 5") only make sense inside one conversation, so they are never suggested back. */
+const CHAT_ONLY = /^(?:(?:please\s+)?(?:remember|make a note|keep in mind|note|forget)\b|what (?:do you|did you) remember|(?:show|list) (?:me )?(?:my |the |your )?(?:memory|notes)|(?:yes|no|nope|yep|ok(?:ay)?|sure|undo(?: that| it)?|never ?mind|go ahead|do it)[.!]*$|(?:make it|actually|instead|change it to) \d+$|(?:and|also|now|same)\b.{0,30}\b(?:too|as well)$)/i;
 
 export function suggestFromHistory(state: Pick<RetailState, 'assistantRequests' | 'savedQuestions'>, limit = 6): Suggestion[] {
   const counts = new Map<string, { text: string; count: number; last: number }>();

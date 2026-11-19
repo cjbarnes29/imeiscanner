@@ -2,6 +2,7 @@
 import { itemFor, segmentOf } from './catalog';
 import { emptyDay } from './data';
 import { variantOf, type StockSource } from './inventory';
+import type { PersistedReader } from '../agent/verify';
 import { monthOf, type DateKey, type DayLog, type PeopleOp, type RetailState, type DeliveryPacket } from './types';
 
 export type RetailRecord = StockSource & { name: string; createdAt?: string; imei2?: string; serial?: string; needsReview?: boolean };
@@ -14,7 +15,7 @@ export type RetailCtx = {
   records: RetailRecord[];
   /** Records as they are right now, even in the middle of a multi-step task (`records` is a snapshot of the last screen draw). */
   latestRecords?: () => RetailRecord[];
-  people: { id: string; name: string }[];
+  people: { id: string; name: string; label?: string }[];
   today: DateKey;
   /** Sets the owner of phones (an approved Give, or its undo). */
   assign: (changes: { id: string; personId: string }[]) => boolean | void;
@@ -30,8 +31,10 @@ export type RetailCtx = {
   archivePhones?: (ids:string[])=>boolean;
   /** Adds, renames or removes people (an approved assistant request, or its undo). False = nothing was changed. */
   editPeople?: (ops: PeopleOp[]) => boolean;
+  /** Reads the saved data fresh from the stores (not from memory) so a change can be confirmed before the assistant says it worked. */
+  readPersisted?: PersistedReader;
   /** The people as they are right now, even in the middle of a multi-step task (`people` is a snapshot of the last screen draw). */
-  latestPeople?: () => { id: string; name: string }[];
+  latestPeople?: () => { id: string; name: string; label?: string }[];
   openPlan?: () => void;
   openHome?: () => void;
   openAssistant?: () => void;

@@ -45,6 +45,7 @@ const run=async expr=>{const r=await send('Runtime.evaluate',{expression:expr,aw
 const waitFor=async(expr,label,ms=60000)=>{const end=Date.now()+ms;while(Date.now()<end){try{if(await run(expr))return true;}catch{}await sleep(250);}throw new Error('Timed out waiting for: '+label);};
 const clickText=(selector,text)=>run(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(selector)})].find(x=>(x.textContent||'').trim().startsWith(${JSON.stringify(text)})&&!x.disabled);if(!b)return false;b.click();return true;})()`);
 const click=async(selector,text)=>{if(!await clickText(selector,text))throw new Error(`no enabled "${text}" in ${selector}`);};
+const confirmRemoval=async()=>{const state=await run(`(()=>{const q=document.querySelector('.assistant-requests .assistant-request');const b=q&&q.querySelector('button[data-confirm="hold"]');if(b){b.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));return 'hold';}const i=q&&q.querySelector('.confirm-typed input');if(i){const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(i,'CONFIRM');i.dispatchEvent(new Event('input',{bubbles:true}));return 'typed';}return 'none';})()`);if(state==='hold')await sleep(1300);if(state==='typed'){await sleep(200);await click('.assistant-requests .assistant-request button','Approve removal');}return state;};
 const setVal=(selector,value,index=0)=>run(`(()=>{const el=[...document.querySelectorAll(${JSON.stringify(selector)})][${index}];if(!el)return false;const proto=el.tagName==='SELECT'?HTMLSelectElement.prototype:el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));return true;})()`);
 const setLabelVal=(labelText,value)=>run(`(()=>{const label=[...document.querySelectorAll('.retail-card label')].find(l=>(l.childNodes[0]?.textContent||'').trim().startsWith(${JSON.stringify(labelText)}));const el=label?.querySelector('select,input,textarea');if(!el)return false;const proto=el.tagName==='SELECT'?HTMLSelectElement.prototype:el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));return true;})()`);
 const body=()=>run(`document.body.innerText`);
@@ -113,6 +114,12 @@ assert.equal(await run(`document.querySelector('.assistant-requests .assistant-r
 await run(`document.querySelector('.assistant-requests .assistant-request input[type=checkbox]').click()`);await click('.assistant-requests .assistant-request button','Approve changes');await sleep(500);saved=await readDb('retail:state');assert.equal(saved.reportDrafts[today].report.entries.find(r=>r.t==='item').sold,6);assert.equal(saved.releases?.length||0,0,'a report change records no sale');
 // 4. a settings request is also approved on Home
 await ask('Turn off auto-detection');await toHome();await click('.assistant-requests .assistant-request button','Approve changes');await sleep(300);assert.equal(await run(`JSON.parse(localStorage.getItem('retaillens-processing-v1')).autoFindBoxes`),false);await atReview();await capture('22-settings-action-result',true);
+// 4b. People by chat: the request is only a preview until Approve is pressed on Home; Approve must be ENABLED for a people change (it was not once), the people are saved, and Undo removes them again.
+{const peopleNow=()=>run(`JSON.parse(localStorage.getItem('imei-lens-people-v1')||'[]').map(p=>p.name)`);const before=await peopleNow();
+await ask('add 2 people omar and lee');assert.deepEqual(await peopleNow(),before,'the chat alone adds nobody');await toHome();
+assert.equal(await run(`[...document.querySelectorAll('.assistant-requests .assistant-request button')].find(b=>b.textContent.trim().startsWith('Approve changes'))?.disabled`),false,'Approve is enabled for a people change');
+await click('.assistant-requests .assistant-request button','Approve changes');await sleep(700);const added=await peopleNow();assert.ok(added.includes('Omar')&&added.includes('Lee'),'the two people are saved: '+added);
+await waitFor(`new Promise(res=>{const o=indexedDB.open('imei-lens-v2',1);o.onsuccess=()=>{const q=o.result.transaction('inventory').objectStore('inventory').get('retail:state');q.onsuccess=()=>res(!!(q.result.agentLog||[]).find(e=>e.tool==='people.create'&&e.verify==='verified'&&e.outcome==='applied'));};})`,'the approval is in the audit log and was confirmed in the saved data');assert.match(await run(`document.querySelector('.assistant-requests')?.innerText||''`),/Checked in the saved data|Approved and saved/,'the screen says it was checked');const saved4b=await readDb('retail:state');const req4b=saved4b.assistantRequests.find(r=>/^add 2 people/.test(r.text));assert.equal(req4b.tool,'people.create','the receipt names the tool');assert.equal(req4b.verify,'verified','the receipt records that the saved data was checked');await click('.assistant-requests button','Undo this action');await sleep(900);assert.deepEqual(await peopleNow(),before,'Undo removes them again');await atReview();}
 // 5. an app report (Excel, PowerPoint or simple notes) is asked for in the chat and made on Home; it can be downloaded or sent on WhatsApp. Making a report changes nothing.
 // WhatsApp is never really opened in this test: the browser's share and open functions are replaced by recorders.
 const ownersBefore=JSON.stringify((await readDb('record:')).map(r=>[r.id,r.personId]).sort());
@@ -178,6 +185,54 @@ await click('.assistant-panel button','Open the full assistant');
 await waitFor(`!!document.querySelector('.assistant-backdrop .assistant-panel')&&!document.querySelector('.assistant-quick')`,'the full assistant opens');
 await click('.assistant-backdrop button','Close assistant');await waitFor(`!document.querySelector('.assistant-panel')`,'the full assistant closes');
 await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-quick')`,'the round button opens the small card again');
+// 4c. Conversation: Approve / Reject / Undo right in the chat, "yes", "no", "undo that", a follow-up number, and the opt-in memory. A destructive change is only offered on Home.
+{
+  const peopleNow=()=>run(`JSON.parse(localStorage.getItem('imei-lens-people-v1')||'[]').map(p=>p.name)`);
+  const chatButtons=()=>run(`[...document.querySelectorAll('.assistant-panel .assistant-chat-actions button')].map(b=>b.textContent.trim())`);
+  const reply=()=>run(`document.querySelector('.assistant-panel .plan-ai-output')?.innerText||''`);
+  const said=async text=>{await ask(text);await sleep(700);};
+  const start=await peopleNow();
+  await said('add person Zed');
+  assert.deepEqual(await peopleNow(),start,'nothing is applied before Approve');
+  assert.ok((await chatButtons()).includes('Approve now')&&(await chatButtons()).includes('Reject'),'Approve and Reject are offered in the chat');
+  await click('.assistant-panel .assistant-chat-actions button','Approve now');
+  await waitFor(`/Approved and saved/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'approved in the chat and checked in the saved data');
+  assert.ok((await peopleNow()).includes('Zed'),'Zed is saved');assert.ok((await chatButtons()).includes('Undo'),'Undo is offered after it');
+  await said('rename zed to zack');await said('yes');
+  await waitFor(`/Approved and saved/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'"yes" approved the waiting change');
+  assert.ok((await peopleNow()).includes('Zack'),'the rename is saved');
+  await said('undo that');await waitFor(`/Undone/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'"undo that" undid it');
+  assert.ok((await peopleNow()).includes('Zed')&&!(await peopleNow()).includes('Zack'),'the old name is back');
+  await said('rename zed to zoe');await said('no');
+  assert.ok((await peopleNow()).includes('Zed')&&!(await peopleNow()).includes('Zoe'),'"no" rejects it');assert.match(await reply(),/Rejected/);
+  await said('delete zed');assert.ok(!(await chatButtons()).includes('Approve now'),'a delete is only offered on Home, never in the chat');
+  await said('yes');assert.ok((await peopleNow()).includes('Zed'),'"yes" cannot approve a delete from the chat');
+  await toHome();assert.ok(!await clickText('.assistant-requests .assistant-request button','Approve changes'),'a removal has no one-tap Approve');await run(`(()=>{const b=document.querySelector('.assistant-requests .assistant-request button[data-confirm="hold"]');b.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));setTimeout(()=>b.dispatchEvent(new PointerEvent('pointerup',{bubbles:true})),200);})()`);await sleep(1300);assert.ok((await peopleNow()).includes('Zed'),'a short press removes nothing');assert.equal(await confirmRemoval(),'hold');await sleep(900);assert.deepEqual(await peopleNow(),start,'Zed is removed on Home after press and hold');
+  // a follow-up with another number is a new request that says how it was read
+  const month4c=today.slice(0,7),target4c=async()=>((await readDb('retail:state')).targets?.[month4c]?.me?.lines||[]).find(l=>l.segment==='flagship1')?.target||0,t0=await target4c();
+  await said('set maya flagship 1 target to 9');await said('make it 5');
+  assert.match(await reply(),/Same as before, with 5/,'the follow-up shows how it was understood');
+  await said('yes');await waitFor(`/Approved and saved/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'the follow-up number was approved');
+  assert.equal(await target4c(),5,'the new number was applied, not the old one');
+  await said('undo that');await waitFor(`/Undone/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'the target was undone');assert.equal(await target4c(),t0,'the target is back');
+  await toHome();await click('.assistant-requests .assistant-request button','Reject');await sleep(500);
+  // memory: off by default, opt-in, visible, editable and deletable; never IMEIs
+  await run(`document.querySelector('[aria-label="Close assistant"]')?.click()`);await waitFor(`!document.querySelector('.assistant-panel')`,'the chat closes');await run(`document.querySelector('[aria-label="Settings"]').click()`);await waitFor(`!!document.querySelector('.settings-local-ai button')`,'Settings');await click('.settings-local-ai button','Local AI');await waitFor(`!!document.querySelector('.assistant-backdrop .assistant-panel')&&!!document.querySelector('.assistant-memory')`,'the assistant opened from Settings shows Memory & preferences');
+  await said('remember that maya covers the north store');assert.match(await reply(),/Memory is off/,'nothing is remembered while memory is off');
+  assert.ok(!(await readDb('retail:state')).agentChat?.memory?.length,'nothing was stored');
+  await run(`document.querySelector('.assistant-memory').open=true;document.querySelector('.assistant-memory input[type=checkbox]').click()`);await sleep(700);
+  assert.equal((await readDb('retail:state')).agentChat.memoryOn,true,'memory is on only after the switch');
+  await said('remember that maya covers the north store');await waitFor(`/Remembered/.test(document.querySelector('.assistant-panel .plan-ai-output')?.innerText||'')`,'remembered');
+  await said('what do you remember');assert.match(await reply(),/maya covers the north store/i,'the notes can be listed');
+  const imeiNote=imei();await said('remember that the phone is '+imeiNote);assert.match(await reply(),/never remember IMEI/,'IMEIs are refused');
+  assert.ok(!JSON.stringify(await readDb('retail:state')).includes(imeiNote),'the IMEI is nowhere in the saved data, not even in the chat history');
+  await run(`(()=>{const el=document.querySelector('.assistant-memory .memory-note input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'maya covers the south store');el.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`);
+  await click('.assistant-memory .memory-note button','Save');await sleep(700);assert.equal((await readDb('retail:state')).agentChat.memory[0].text,'maya covers the south store','an edit is saved');
+  await click('.assistant-memory .memory-note button','Delete');await sleep(700);assert.equal((await readDb('retail:state')).agentChat.memory.length,0,'a note can be deleted');
+  await run(`document.querySelector('.assistant-memory input[type=checkbox]').click()`);await sleep(700);assert.equal((await readDb('retail:state')).agentChat.memoryOn,false,'memory can be switched off again');
+  await click('.assistant-backdrop button','Close assistant');await waitFor(`!document.querySelector('.assistant-panel')`,'the assistant closes');await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!!document.querySelector('.assistant-quick')`,'the small card is open again, as the next steps expect');
+  await atReview();
+}
 await run(`document.querySelector('[aria-label="Open assistant"]').click()`);await waitFor(`!document.querySelector('.assistant-panel')`,'and closes it');
 // natural wording: the sentence the user typed is understood, previewed first, approved and undone; nothing changes before approval
 await ask('change flagship 3 target to 12 and divide it to promoters');
@@ -303,11 +358,11 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
   saved=await readDb('retail:state');assert.equal(saved.assistantRequests.filter(r=>/^give (2|3) Fold6/.test(r.text)&&r.status==='applied').length,2,'each step has its own receipt');
   assert.ok(saved.audit.some(a=>/assistant task/.test(a.what)),'the task is written to History');
   await showTasks();await capture('41-task-copilot-done',true);
-  await click('.assistant-tasks button','Undo applied steps');task=await until(t=>t.status==='undone','copilot undone');assert.equal(await assigned(),g0,'Undo hands every phone back');
+  await click('.assistant-tasks button','Roll back');task=await until(t=>t.status==='undone','copilot undone');assert.equal(await assigned(),g0,'Undo hands every phone back');
   await setMode('autopilot');await ask('give 2 Fold6 to Maya, then give 1 Fold6 to Noor');
-  task=await until(t=>t.mode==='autopilot'&&t.status==='done','autopilot done');assert.equal(await assigned(),g0+3,'Autopilot applied both allowed steps by itself');assert.ok(task.steps.every(s=>s.doneAt));
-  await toHome();await showTasks();await capture('42-task-autopilot-done',true);
-  await click('.assistant-tasks button','Undo applied steps');await until(t=>t.status==='undone','autopilot undone');assert.equal(await assigned(),g0);
+  task=await until(t=>t.mode==='autopilot'&&t.status==='done','autopilot done');assert.equal(await assigned(),g0+3,'Autopilot applied both allowed steps by itself');assert.ok(task.steps.every(s=>s.doneAt));await waitFor(`!!document.querySelector('.agent-progress')`,'the progress panel shows while a task runs');const panel=await run(`(()=>{const p=document.querySelector('.agent-progress');return {text:p.innerText,phase:p.dataset.phase,expanded:p.querySelector('[aria-expanded]').getAttribute('aria-expanded')}})()`);assert.match(panel.text,/2\/2|Saved and checked|Step saved/,'the panel shows the task progress');assert.equal(panel.expanded,'false','the panel starts compact');await run(`document.querySelector('.agent-progress-head').click()`);await waitFor(`!!document.querySelector('.agent-steps li')`,'the panel expands to the step list');await run(`document.querySelector('.agent-progress-head').click()`);
+  await toHome();await showTasks();await capture('42-task-autopilot-done',true);const hist=await run(`(()=>{const d=document.querySelector('.assistant-history-log');if(!d)return null;d.open=true;return {t:d.innerText,n:d.querySelectorAll('.history-log-list li').length}})()`);assert.ok(hist&&hist.n>0,'the assistant history lists what was done');assert.ok(!/\b\d{15}\b/.test(hist.t),'the history never shows a full IMEI');assert.match(hist.t,/Autopilot|You/,'the history says who did it');
+  await click('.assistant-tasks button','Roll back');await until(t=>t.status==='undone','autopilot undone');assert.equal(await assigned(),g0);
   const before=await run(`localStorage.getItem('retaillens-processing-v1')`);
   await ask('turn on auto-detection');task=await until(t=>t.mode==='autopilot'&&t.status==='review','autopilot holds settings');
   assert.equal(task.steps[0].status,'pending');assert.match(task.steps[0].error,/not allowed to change: settings/);assert.equal(await run(`localStorage.getItem('retaillens-processing-v1')`),before,'a held step changes nothing');
@@ -328,7 +383,7 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
     for(let i=0;i<60;i++){st=await readDb('retail:state');if(st.assistantRoutines.find(r=>r.time===hhmm).runs.length>=2)break;await sleep(300);}
     routine=st.assistantRoutines.find(r=>r.time===hhmm);assert.equal(routine.runs.length,2,'Run now adds a run to the history');assert.equal(await assigned(),g1+2,'and does the work');assert.equal(routine.lastPrepared,today);
     // "auto give" (the Give & share rules with each person's limits) is a tool the assistant can run, and so can a routine
-    await ask('auto give');task=await until(t=>t.mode==='autopilot'&&/auto give/.test(t.text),'auto give task');
+    await ask('auto give');task=await until(t=>t.mode==='autopilot'&&/auto give/.test(t.text)&&t.status!=='running','auto give task finished');
     assert.ok(['done','failed','review'].includes(task.status),'the task finished or says why: '+JSON.stringify(task.steps.map(s=>s.error)));
     console.log('auto give task:',task.status,JSON.stringify(task.steps.map(s=>s.error||'applied')));
   }

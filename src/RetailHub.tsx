@@ -1,3 +1,4 @@
+import { AssistantHistoryLog } from './AssistantHistoryLog';
 import {AssistantRequests} from './AssistantReview';
 import {AssistantTasks} from './AssistantTasks';
 import {HomeLayoutStyle} from './HomeSettings';
@@ -73,6 +74,7 @@ function TodayTab(ctx: RetailCtx & { openReport: () => void }) {
     {!records.length && !Object.keys(state.targets[monthOf(today)] || {}).length && <section className="retail-card first-use-checklist"><div className="plan-top"><h3>Start here</h3><HelpButton topic="Uploading and adding phones" /></div><p className="settings-help">Set up your team, then scan. You can edit these choices later.</p><ol><li><button className="plan-link" onClick={ctx.openPeople}>Add or name your people →</button></li><li><button className="plan-link" onClick={ctx.openModels}>Check models and segments →</button></li><li><button className="plan-link" onClick={ctx.openTargets}>Set monthly targets and caps →</button></li><li><button className="plan-link" onClick={ctx.openScan}>Upload or scan labels →</button></li><li><button className="plan-link" onClick={ctx.openPlan}>Choose Store or calculate a release plan →</button></li></ol><p className="settings-help">Tap ? Help on any screen for an interactive demo. Practice uses sample data and never changes your records.</p></section>}
     <HomeAttention {...ctx}/>
     <AssistantTasks {...ctx}/>
+    <AssistantHistoryLog {...ctx}/>
     <AssistantRequests {...ctx}/>
     <ScheduleReminder {...ctx} />
     <PlanSummary {...ctx} />

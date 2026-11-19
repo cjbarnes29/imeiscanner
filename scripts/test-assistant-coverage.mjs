@@ -92,7 +92,7 @@ for (const name of ['AssistantReview.tsx', 'RetailPlanAI.tsx', 'RoutineLearning.
 }
 assert.deepEqual(callers, ['AssistantReview.tsx'], 'only the Home review card applies a request: ' + callers.join(', '));
 const review = await src('AssistantReview.tsx');
-const commits = [...review.matchAll(/commit\(/g)].length, clicks = [...review.matchAll(/onClick=\{\(\)=>commit\(/g)].length;
+const commits = [...review.matchAll(/commit\(/g)].length, clicks = [...review.matchAll(/(?:onClick|onConfirm)=\{\(\)=>commit\(/g)].length; // Approve / Undo buttons and the press-and-hold / typed CONFIRM control
 assert.ok(commits >= 2 && commits === clicks, `commit() is only called from a button press (Approve, Undo): ${commits} calls, ${clicks} from a click`);
 const forbidden = /\b(?:confirmSale|setSubmitted|reattribute|voidSale)\s*\(|submitted\s*:\s*true/;
 for (const name of ['AssistantReview.tsx', 'RetailPlanAI.tsx', 'RoutineLearning.tsx', 'AssistantFiles.tsx', 'AssistantReportFiles.tsx', 'AssistantAnswer.tsx', 'AssistantBubble.tsx', 'AutoWorkflow.tsx', 'AutomaticAttention.tsx', 'NavSearch.tsx', 'retail/assistant-actions.ts', 'retail/local-assistant.ts', 'retail/routines.ts', 'retail/assistant-suggestions.ts', 'retail/report-intent.ts', 'assistant-settings.ts']) {

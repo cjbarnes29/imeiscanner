@@ -94,3 +94,22 @@ export async function saveOriginalSource(pictureId: string, photo: Blob): Promis
     database.close();
   }
 }
+
+/** The id and owner of every saved phone record, read straight from the database (the save bookkeeping is not touched). Used to confirm that a change was really saved. */
+export async function peekOwners(): Promise<{ id: string; personId: string }[]> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const out: { id: string; personId: string }[] = [];
+      const request = database.transaction(TABLE, 'readonly').objectStore(TABLE).openCursor(IDBKeyRange.bound(RECORD_PREFIX, `${RECORD_PREFIX}￿`));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(out); return; }
+        const row = cursor.value as { id?: unknown; personId?: unknown };
+        out.push({ id: String(row.id), personId: typeof row.personId === 'string' ? row.personId : '' });
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } finally { database.close(); }
+}
