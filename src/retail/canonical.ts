@@ -80,7 +80,7 @@ function target(t: string, ctx: CanonContext): string | null {
   if (SPLIT.test(t)) return !named.length || everyone ? `split store target ${n} for ${seg.name} among everyone` : null; // dividing is only ever a store split among everyone; "divide it to Maya" stays an unclear request
   if (named.length > 1 || (named.length && everyone)) return null;
   const targetWord = /\b(?:targets?|goals?)\b/.test(t);
-  if (!targetWord && !(named.length === 1 && wordsOf(rest).filter(w => !/^\d+$/.test(w) && !new Set(wordsOf(named[0].name)).has(w) && !/^(?:on|for|at|to|is|of|the|a|set|put|make|give|change|update|edit|assign|please)$/.test(w)).length === 0)) return null;
+  if (!targetWord && !(named.length === 1 && wordsOf(rest).filter(w => !/^\d+$/.test(w) && !new Set(wordsOf(named[0].name)).has(w) && !/^(?:on|for|at|to|is|of|the|a|set|put|make|give|change|update|edit|assign|please|needs?|should|must|will|be|in|equals?|gets?|has|bump|raise|lift|increase|up|hit|reach|aim|goal|goals|on)$/.test(w)).length === 0)) return null;
   if (/\b(?:report|stock|phones?|leave|available)\b/.test(t)) return null;
   if (named.length === 1) return `set ${named[0].name} ${seg.name} target to ${n}`;
   if (everyone && targetWord) return `set everyone's ${seg.name} target to ${n}`;
@@ -97,7 +97,11 @@ function stock(t: string, ctx: CanonContext): string | null {
   if (peopleIn(t, ctx.people).length) return null;
   const qty = firstNumber(t), model = modelOf(t, []);
   if (!qty || !model) return null;
-  if (/\b(?:take|pull|remove|delete|drop|write off|scrap|discard|dispose of)\b.*\b(?:out of|off|from)\s+(?:the\s+|my\s+|our\s+)?(?:stock|inventory)\b/.test(t)) return `remove ${qty} ${model} from stock`;
+  if (/\b(?:take|pull|remove|delete|drop|write off|scrap|discard|dispose of|strike|cross|knock)\b.*\b(?:out of|off|from)\s+(?:the\s+|my\s+|our\s+)?(?:stock|inventory)\b|\bout of circulation\b/.test(t)) return `remove ${qty} ${model} from stock`;
+  if (/\b(?:free up|unlock|unblock|open up)\b.*\b(?:for giving|to give|for the team|for promoters|for sale)\b|\bmake\b.*\bready\s+(?:to give|for giving|to be given)\b/.test(t)) return `make ${qty} ${model} available`;
+  if (/\b(?:lock|tuck|stash|stow|put|keep|store)\b.*\baway\b/.test(t)) return `store ${qty} ${model}`;
+  if (/\b(?:mark|set|flag|show)\b.*\bas\s+(?:sold out|sold|gone)\b|\bsold out\b/.test(t)) return `remove ${qty} ${model} from stock`;
+  if (/\b(?:bring|put|move|return|add|get)\b.*\bback\b.*\b(?:in|into|to|on)\s+(?:the\s+)?(?:stock|inventory)\b|\bre-?stock\b/.test(t)) return `restore ${qty} ${model} to stock`;
   if (/\b(?:release|return|bring)\b.*\bavailable\b|\bmake\b.*\bavailable\b|\b(?:move|put)\b.*\b(?:to|on|as|in)\s+(?:the\s+)?available\b/.test(t)) return `make ${qty} ${model} available`;
   if (/\b(?:reserve|stash|set aside|put aside|keep aside|hold back|keep back|hold on(?: to)?)\b|\b(?:set|put|keep|hold)\b.*\baside\b/.test(t)) return `store ${qty} ${model}`;
   if (/\b(?:set aside|keep|reserve|stash|hold|store|put|make)\b/.test(t) && /\b(?:aside|in (?:the )?store|into (?:the )?store|away|on hold|stored|for now)\b/.test(t)) return `store ${qty} ${model}`;
@@ -108,20 +112,20 @@ function stock(t: string, ctx: CanonContext): string | null {
 function report(t: string, ctx: CanonContext): string | null {
   if (!/\breports?\b/.test(t)) return null;
   const date = t.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
-  if (/whats\s?app/.test(t)) return /\b(?:make|get|prepare|create|draft|build|do|ready|send|share|compile|generate|need|want)\b|^(?:the |a |my |today'?s |daily )*whats\s?app (?:daily )?report(?: for (?:the )?(?:group|team|everyone))?$/.test(t) ? `prepare today's WhatsApp report${/\b(?:group|team|everyone)\b/.test(t) ? ' for the group' : ''}` : null;
+  if (/whats\s?app/.test(t)) return /\b(?:make|get|prepare|create|draft|build|do|ready|send|share|compile|generate|need|want)\b|^whats\s?app\b|^(?:the |a |my |today'?s |daily )*whats\s?app (?:daily )?report(?: for (?:the )?(?:group|team|everyone))?$/.test(t) ? `prepare today's WhatsApp report${/\b(?:group|team|everyone)\b/.test(t) ? ' for the group' : ''}` : null;
   const stripped = t.replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ');
   const qty = firstNumber(stripped), model = modelOf(stripped.replace(/\b(?:report|daily|so|is|sold|change|edit|update|numbers?|quantity)\b/g, ' '), []);
-  if (qty && model && !/\b(?:prepare|make|draft|build|produce|generate|create)\b.*\breport\b/.test(t) && !peopleIn(t, ctx.people).length) return `set report ${model} to ${qty}${date ? ' ' + date : ''}`;
+  if (qty && model && (!/\b(?:prepare|make|draft|build|produce|generate|create)\b.*\breport\b/.test(t) || /\b(?:show|shows|showing|say|says|read|reads)\b/.test(t)) && !peopleIn(t, ctx.people).length) return `set report ${model} to ${qty}${date ? ' ' + date : ''}`;
   if (qty) return null;
   if (/\b(?:accessor\w*|tablets?|osr)\b/.test(t)) return /\b(?:make|draft|build|produce|get|do|write|compile|generate|prepare|create)\b/.test(t) ? 'prepare the accessories report' : null;
-  if (/\b(?:make|draft|build|produce|get|do|write|compile|generate|prepare|create|put together|need|want|require)\b/.test(t)) return date ? `create the report for ${date}` : /\btomorrow\b/.test(t) ? "prepare tomorrow's report" : "prepare today's report";
+  if (/\b(?:make|draft|build|produce|get|do|write|compile|generate|prepare|create|put together|need|want|require|start|begin|kick off)\b/.test(t)) return date ? `create the report for ${date}` : /\btomorrow\b/.test(t) ? "prepare tomorrow's report" : "prepare today's report";
   return null;
 }
 
 // ---- settings and routines ------------------------------------------------------------------------------------------------------------------
 function settings(t: string): string | null {
   if (/\buploads?\b.*\bstor(?:e|ed|ing)\b.*\bautomatically\b|\bautomatically\b.*\bstor(?:e|ed|ing)\b.*\buploads?\b/.test(t) && !/\b(?:not|never|off|stop|don't)\b/.test(t)) return 'store uploads automatically';
-  const feature = /\bauto(?:matic)?[- ]?crop(?:ping)?\b/.test(t) ? 'automatic detection' : /\bauto(?:matic(?:ally)?)?[- ]?retr(?:y|ies)\b/.test(t) ? 'auto retry' : '';
+  const feature = /\b(?:auto(?:matic)?|background)[- ]?crop(?:ping)?\b/.test(t) ? 'automatic detection' : /\bauto(?:matic(?:ally)?)?[- ]?retr(?:y|ies)\b/.test(t) ? 'auto retry' : '';
   if (!feature) return null;
   const off = /\b(?:off|disable|stop|switch off|turn off)\b/.test(t), on = /\b(?:on|enable|start|switch on|turn on)\b/.test(t);
   return off !== on ? `turn ${off ? 'off' : 'on'} ${feature}` : null;
@@ -143,11 +147,13 @@ const VERB_KIND: [string, RegExp][] = [
 /** True when the sentence holds more than one separate KIND of command ("store 4 fold6 and set report fold6 to 6"). Those are refused as a whole, never read as one of them. */
 export function hasSeveralCommands(t: string): boolean {
   const kinds = new Set<string>();
-  for (const part of t.replace(/\bstore targets?\b/g, 'storetarget').replace(/\b(?:in|into|to)\s+(?:the\s+)?store\b/g, 'instore').split(/\s*(?:,|;|\bthen\b|\band\b)\s*/)) for (const [kind, re] of VERB_KIND) if (re.test(part)) kinds.add(kind);
+  for (const part of t.replace(/\b(?:put|place)\b(?=[^,;]*\b(?:on hold|aside|away)\b)/g, 'keep').replace(/\bstore targets?\b/g, 'storetarget').replace(/\b(?:in|into|to)\s+(?:the\s+)?store\b/g, 'instore').split(/\s*(?:,|;|\bthen\b|\band\b)\s*/)) for (const [kind, re] of VERB_KIND) if (re.test(part)) kinds.add(kind);
   return kinds.size > 1;
 }
 export function canonicalCandidates(text: string, ctx: CanonContext): string[] {
-  const t = digits(tidy(text));
+  let t = digits(tidy(text));
+  // "bilals flagship 2 goal" is bilal's; "bilal, 5 fold6 please" is bilal 5 fold6
+  for (const p of ctx.people) for (const w of wordsOf(p.name)) if (w.length > 2) t = t.replace(new RegExp(`\\b${w}s\\b`, 'g'), w).replace(new RegExp(`^${w},\\s*(?=\\d)`), `${w} `);
   if (!t || hasSeveralCommands(t)) return [];
   const out: string[] = [];
   for (const attempt of [() => routine(t), () => report(t, ctx), () => target(t, ctx), () => give(t, ctx), () => autoGive(t, ctx), () => stock(t, ctx), () => settings(t)]) {

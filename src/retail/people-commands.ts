@@ -30,7 +30,7 @@ const BAD_NEW_NAME = /\b(?:available|unavailable|away|off|sick|leave|working|lat
 const VERB = '(?:add|create|register|include|hire|welcome|make|set up|enrol|enroll|put in|(?:i|we)\\s+(?:need|want|have|got|hired|are hiring))';
 const CREATE = new RegExp(`^${VERB}\\s+(?:${COUNT}\\s+)?(?:new\\s+)?${KIND}\\b[\\s,:-]*(?:called|named)?[\\s,:-]*(.*)$|^new\\s+${KIND}\\b[\\s,:-]*(?:called|named)?[\\s,:-]*(.*)$`, 'i');
 const CREATE_AS = new RegExp(`^(?:add|create|register|enrol|enroll|put|hire)\\s+(.+?)(?:\\s+on\\s+(?:the\\s+|my\\s+)?(?:list|team))?\\s+(?:as|to be)\\s+(?:a\\s+|an\\s+)?(?:new\\s+)?${KIND}$`, 'i');
-const TO_TEAM = /^(?:add|include|register|enrol|enroll|put|place)\s+(.+?)\s+(?:to|into|in|on)\s+(?:the\s+|my\s+|our\s+)?(?:(?:people|team|staff|promoters?)\s+)?(?:team|list|app|staff|people|promoters?)$/i;
+const TO_TEAM = /^(?:add|include|register|enrol|enroll|put|place|bring)\s+(.+?)\s+(?:to|into|in|on)\s+(?:the\s+|my\s+|our\s+)?(?:(?:people|team|staff|promoters?)\s+)?(?:team|list|app|staff|people|promoters?)$/i;
 const BARE_ADD = /^add\s+([a-z][a-z' .-]{0,38})$/i;
 
 const RENAME_A = /^rename\s+(?:the\s+)?(?:(?:person|promoter|promotor)\s+)?(.+?)\s+(?:to|as)\s+(.+)$/i;
@@ -46,6 +46,11 @@ const RENAME_L = /^rename\s+(.+?)\s*[,;]\s*(?:(?:she|he|they|it)\s+)?(?:is|are|s
 const RENAME_G = /^call\s+(.+?)\s+(?:instead|from now on|from today|going forward)$/i;
 const RENAME_H = /^fix\s+(?:the\s+)?(?:spelling|name)\s+of\s+(.+?)\s*[,;]?\s+(?:it\s+is|it's|to|as)\s+(.+)$/i;
 
+const JOINED = /^(.+?)\s+(?:is|are)\s+(?:joining|joined|starting)(?:\s+(?:us|the\s+team|my\s+team|our\s+team|the\s+staff|today|tomorrow))*$/i;
+const STARTS = /^(.+?)\s+(?:starts|started|begins)(?:\s+(?:today|tomorrow|here|with us|work))*$/i;
+const HIRED = /^(?:we|i)\s+(?:just\s+|have\s+)?(?:hired|recruited|took on|signed up|employed)\s+(.+)$/i;
+const ADD_NAMES = /^add\s+([a-z][a-z' -]*(?:\s*(?:,|&|\band\b)\s*[a-z][a-z' -]*)+)$/i;
+const RENAME_J = /^(.+?)\s+should\s+be\s+(?:listed|shown|written|spelled|saved|displayed)\s+as\s+(.+)$/i;
 const DELETE_FROM = new RegExp(`^(?:delete|remove)\\s+(.+?)\\s+from\\s+(?:the\\s+|my\\s+)?(?:${KIND}|team|list)(?:\\s+list)?$`, 'i');
 const DELETE_KIND = new RegExp(`^(?:delete|remove|drop)\\s+(?:the\\s+)?${KIND}\\s+(.+)$`, 'i');
 const DELETE_VERB = /\b(?:delete|remove|drop|erase|get rid of|kick out|take\b.*\b(?:off|out of) (?:the\s+|my\s+)?(?:list|team|app|people))\b/i;
@@ -176,10 +181,12 @@ export function previewPeople(text: string, people: Person[], records: Owned[], 
   if (created) { const c = created[1]?.toLowerCase(); return create(created[2] ?? created[3] ?? '', c === undefined ? undefined : (NUMBER_WORDS[c] ?? +c), people); }
   const as = CREATE_AS.exec(t);
   if (as) return create(as[1], undefined, people);
+  const joined = JOINED.exec(t) || STARTS.exec(t) || HIRED.exec(t) || ADD_NAMES.exec(t);
+  if (joined && !STOCKISH.test(joined[1])) return create(joined[1], undefined, people);
   const toTeam = TO_TEAM.exec(t);
   if (toTeam && !STOCKISH.test(toTeam[1])) return create(toTeam[1], undefined, people);
 
-  for (const [re, explicit] of [[RENAME_B, true], [RENAME_C, true], [RENAME_M, true], [RENAME_D, true], [RENAME_H, true], [RENAME_L, true], [RENAME_A, /\b(?:person|promoter|promotor)\b/i.test(t)]] as const) {
+  for (const [re, explicit] of [[RENAME_B, true], [RENAME_C, true], [RENAME_M, true], [RENAME_D, true], [RENAME_H, true], [RENAME_L, true], [RENAME_J, true], [RENAME_A, /\b(?:person|promoter|promotor)\b/i.test(t)]] as const) {
     const m = re.exec(t);
     if (m) { const r = rename(m[1], m[2], people, explicit); if (r.handled) return r; }
   }
