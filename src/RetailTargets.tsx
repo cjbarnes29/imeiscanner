@@ -191,8 +191,8 @@ export function TargetsTab(ctx: RetailCtx) {
 
     {editAll && <TargetGrid ctx={ctx} month={month} level={level} days={days} segs={segs} onOpen={segment => { setEditAll(false); setOpenSeg(segment); }} onClose={() => setEditAll(false)} />}
 
-    {!seg && !editAll && <ul className="tg-segs">{visible.map(r => <li key={r.segment}><button type="button" className="tg-seg" onClick={() => setOpenSeg(r.segment)} aria-label={`Open ${segLabel(state, r.segment)}`}>
-      <span className="tg-top"><strong>{segLabel(state, r.segment)}</strong><small>Sold {r.sold} of {r.target}{r.today > 0 && <> · today {r.today}</>}</small></span>
+    {!seg && !editAll && <ul className="tg-segs">{visible.map(r => <li key={r.segment}><button type="button" className={`tg-seg${r.target <= 0 && r.sold <= 0 ? ' tg-seg-unset' : ''}`} onClick={() => setOpenSeg(r.segment)} aria-label={`Open ${segLabel(state, r.segment)}`}>
+      <span className="tg-top"><strong>{segLabel(state, r.segment)}</strong><small>{r.target <= 0 && r.sold <= 0 ? 'No target set · tap to set' : <>Sold {r.sold} of {r.target}</>}{r.today > 0 && <> · today {r.today}</>}</small></span>
       {r.capLabel && <span className="tg-cap-badge">{r.capLabel}</span>}
       <span className="tg-bar"><i style={{ width: `${r.target > 0 ? Math.min(100, Math.round(r.sold / r.target * 100)) : 0}%` }} /></span>
       <span className="tg-need">{r.target <= 0 ? 'No target set' : r.remaining <= 0 ? r.level === undefined ? 'Selected levels reached (caps applied)' : `${r.level}% reached` : <>Needs <b>{r.remaining} more</b> for {r.level === undefined ? "each person’s level (caps applied)" : `${r.level}%`} · {perDayText(r.remaining, days)}</>}</span>

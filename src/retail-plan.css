@@ -117,3 +117,24 @@ section.modal.settings-modal>.modal-head{width:100%;max-width:100%;margin:0 0 8p
 .history-log-list{margin:6px 0 0;padding-left:18px;font-size:.88em}
 .history-log-list li[data-outcome="failed"],.history-log-list li[data-outcome="blocked"],.history-log-list li[data-verify="unverified"]{color:#b3261e}
 .assistant-history-log .share-toolbar button[aria-pressed="true"]{font-weight:700;text-decoration:underline}
+/* UI polish 1.29: the assistant header may grow so the mascot row never prints over the intro text (the general 52px modal-head rule used to win) */
+.modal.assistant-panel:not(.crop-mode) .modal-head{height:auto;min-height:52px;padding-bottom:10px}
+.assistant-panel .modal-head .subtle-btn{white-space:nowrap}
+.assistant-panel .modal-head .ai-mascot{margin-top:2px}
+/* the round assistant button: a bit smaller and see-through enough that the text below stays readable; the page keeps room at the end so nothing is stuck beneath it */
+.assistant-bubble{width:48px;height:48px;right:10px;opacity:.9}
+.assistant-bubble .ai-mascot svg{width:28px;height:28px}
+.assistant-bubble:focus-visible,.assistant-bubble[aria-expanded=true]{opacity:1}
+main,.app-main{scroll-padding-bottom:96px}
+/* Start here: a collapsible card with tighter steps */
+.first-use-checklist summary.starthere-summary{list-style:none;cursor:pointer;min-height:48px;display:flex;align-items:center}
+.first-use-checklist summary.starthere-summary::-webkit-details-marker{display:none}
+.first-use-checklist summary.starthere-summary h3{margin:0;display:flex;align-items:center;gap:8px}
+.first-use-checklist summary.starthere-summary h3::after{content:'▾';font-size:14px;color:var(--muted,#9eb0c2);transition:transform .15s}
+.first-use-checklist details:not([open]) summary.starthere-summary h3::after{transform:rotate(-90deg)}
+.first-use-checklist ol{margin:6px 0;padding-left:22px}.first-use-checklist ol li{margin:0}
+@media(prefers-reduced-motion:reduce){.first-use-checklist summary.starthere-summary h3::after{transition:none}}
+/* Targets: a segment with nothing set is one compact row instead of a card with an empty bar */
+.tg-seg.tg-seg-unset{padding:10px 14px;gap:0}
+.tg-seg.tg-seg-unset .tg-bar,.tg-seg.tg-seg-unset .tg-need{display:none}
+.tg-seg.tg-seg-unset .tg-top small{color:#8fa3b8}

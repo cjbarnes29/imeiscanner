@@ -100,6 +100,8 @@ try{
       assert.equal(await run(`document.querySelectorAll('main .screen-details-toggle button').length`),1,'one Show all button per screen');
       await measure(name+' summary');
       if(name==='Targets')assert.equal(await run(`document.querySelector('.retail-targets > .screen-extra').getBoundingClientRect().height`),0,'Targets opens directly on segments');
+      if(name==='Targets'){const u=await run(`[...document.querySelectorAll('.tg-seg-unset')].map(b=>Math.round(b.getBoundingClientRect().height))`);console.log('unset target rows',JSON.stringify(u));assert.ok(u.every(h=>h<=72),'a segment without a target is one compact row: '+JSON.stringify(u));}
+      if(name==='Home'){const d=await run(`!!document.querySelector('.first-use-checklist details')`);console.log('Start here card',d);if(d){await run(`document.querySelector('.first-use-checklist summary').click()`);await sleep(150);assert.equal(await run(`document.querySelector('.first-use-checklist details').open`),false,'Start here collapses');assert.equal(await run(`localStorage.getItem('imei-lens-starthere-closed')`),'1','and remembers it');await run(`document.querySelector('.first-use-checklist summary').click()`);await sleep(150);assert.equal(await run(`localStorage.getItem('imei-lens-starthere-closed')`),'0','and opens again');}}
       if(name==='Segments')assert.equal(await run(`!!document.querySelector('.seg-model-summary li')&&document.querySelector('.retail-segments > .screen-extra').getBoundingClientRect().height===0`),true,'segment model summaries are visible before editing controls');
       await click('button[aria-label="Show all details"]','Show all');await sleep(100);
     }
