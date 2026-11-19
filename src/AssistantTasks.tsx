@@ -10,6 +10,7 @@ import { waitForManualIdle } from './processing-options';
 import { recordDiagnostic } from './diagnostics';
 import { notifyWhatsAppReady } from './whatsapp-ready';
 import { setActivity } from './assistant-activity';
+import { emitAgent } from './agent/events';
 import type { AssistantMode, AssistantTask } from './retail/types';
 import type { RetailCtx } from './retail/ui-helpers';
 
@@ -61,6 +62,7 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   const task = newTask(crypto.randomUUID(), text.slice(0, 1000), mode, steps, nowIso(), () => `${Date.now().toString(36)}-${++n}`);
   saveTask(ctx, { ...task, status: 'review' }, ['assistant task started', `${mode}: ${text.slice(0, 200)} · ${steps.length} step${steps.length === 1 ? '' : 's'}`]);
   recordDiagnostic('assistant-task-start');
+  emitAgent({ phase: 'planning', taskId: task.id, done: 0, total: steps.length, text: `${steps.length} step${steps.length === 1 ? '' : 's'}` });
   if (mode === 'autopilot') { void runTask(ctx, task.id, { manual: false }); return { handled: true, taskId: task.id, message: `Autopilot started ${steps.length} step${steps.length === 1 ? '' : 's'}. Allowed steps apply by themselves; anything else waits for you under Tasks on Home.` }; }
   return { handled: true, taskId: task.id, message: mode === 'copilot' ? `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Review it under Tasks on Home, then approve it once.` : `Task ready: ${steps.length} step${steps.length === 1 ? '' : 's'}. Under Tasks on Home you approve each step.` };
 }
@@ -83,7 +85,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
   try {
     for (;;) {
       const task = latestTask(ctx, taskId); if (!task) break;
-      if (stopped.has(taskId)) { message = 'Stopped. Steps already applied stay applied and can be undone.'; break; }
+      if (stopped.has(taskId)) { message = 'Stopped. Steps already applied stay applied and can be undone.'; emitAgent({ phase: 'cancelled', taskId, text: 'Saved steps stay saved' }); break; }
       const step = task.steps.find(s => s.status === 'pending'); if (!step) break;
       if (!opts.manual) await waitForManualIdle(); // yield to manual edits and keep the screen responsive
       else await new Promise(r => setTimeout(r, 0));
@@ -98,6 +100,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         message = decision.reason; break;
       }
       edit(ctx, taskId, t => patchStep(t, step.id, { classes, status: 'running', attempts: step.attempts + 1, error: undefined }, nowIso()));
+      emitAgent({ phase: 'step-start', taskId, stepId: step.id, text: step.text, done: task.steps.filter(s => s.status === 'done').length, total: task.steps.length });
       let requestId = '';
       try {
         const queued = queueAssistant(ctx, step.text);
@@ -107,6 +110,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         if (done.verify.status === 'unverified') throw new Error(done.message);
         edit(ctx, taskId, t => patchStep(t, step.id, { status: 'done', requestId, doneAt: nowIso(), error: undefined }, nowIso()));
         ran++;
+        emitAgent({ phase: 'step-done', taskId, stepId: step.id, text: step.text, done: task.steps.filter(s => s.status === 'done').length + 1, total: task.steps.length });
         if (!opts.manual && classes.includes('whatsapp')) notifyWhatsAppReady((ctx.latest?.() || ctx.state).deliveryPackets?.filter(p => p.kind === 'report' && p.status === 'prepared').slice(-1)[0]); // nobody is watching: tell the person it is ready (they still tap Send)
         if (classes.includes('add-stock') || classes.includes('remove')) { message = 'Applied. This step changed the phone list, so the next step waits: approve again to continue.'; break; }
       } catch (e) {
@@ -115,6 +119,7 @@ async function runLoop(base: RetailCtx, taskId: string, opts: RunOptions): Promi
         const attempts = (latestTask(ctx, taskId)?.steps.find(s => s.id === step.id)?.attempts) || 1;
         if (isStaleError(why) && attempts <= MAX_STEP_RETRIES) { edit(ctx, taskId, t => patchStep(t, step.id, { status: 'pending', error: `Retrying: ${why}` }, nowIso())); continue; }
         edit(ctx, taskId, t => patchStep(t, step.id, { status: 'failed', error: why.slice(0, 500) }, nowIso()));
+        emitAgent({ phase: 'step-error', taskId, stepId: step.id, text: why.slice(0, 80), done: task.steps.filter(s => s.status === 'done').length, total: task.steps.length });
         message = `Stopped at “${step.text}”: ${why}`; recordDiagnostic('assistant-task-step-failed', e); break;
       }
       if (opts.one) break;
@@ -140,6 +145,7 @@ export function rejectTask(ctx: RetailCtx, taskId: string) {
   edit(ctx, taskId, t => ({ ...t, status: 'rejected' as const, steps: t.steps.map(s => s.status === 'pending' || s.status === 'failed' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task rejected', latestTask(ctx, taskId)?.text.slice(0, 200) || '']);
 }
 export const stopTask = (id: string) => { stopped.add(id); };
+export const taskRunning = () => active.size > 0;
 /** Tasks a closed app left half-way go back to "waiting for you" (nothing resumes by itself). Called once when the Tasks card opens. */
 export function recoverTasks(ctx: RetailCtx) { const state = ctx.latest?.() || ctx.state, next = recoverInterrupted(state, active, nowIso()); if (next !== state) ctx.change(next, ''); }
 
