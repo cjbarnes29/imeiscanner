@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useWorkflowOptions } from './AutoWorkflow';
 import { readWorkflowOptions } from './retail/auto-workflow';
 import { previewAssistant } from './retail/assistant-actions';
 import { guardVerdict } from './retail/guard';
 import { commitAssistantRequestVerified, queueAssistant } from './AssistantReview';
-import { actionClasses, autopilotUsedToday, decideStep, finishTask, handoverSummary, isStaleError, MAX_STEP_RETRIES, newTask, patchStep, splitSteps, taskProgress, upsertTask, type StepDecision } from './retail/assistant-tasks';
+import { actionClasses, autopilotUsedToday, decideStep, findDuplicateTask, finishTask, handoverSummary, recoverInterrupted, taskCheckpoint, isStaleError, MAX_STEP_RETRIES, newTask, patchStep, splitSteps, taskProgress, upsertTask, type StepDecision } from './retail/assistant-tasks';
 import { withAudit } from './retail/data';
 import { waitForManualIdle } from './processing-options';
 import { recordDiagnostic } from './diagnostics';
@@ -55,6 +55,7 @@ export function startAssistantTask(base: RetailCtx, text: string): { handled: bo
   }
   // 3. Anything unclear keeps the original single-request answer.
   if (!steps.length) return { handled: false, message: '' };
+  const twin = findDuplicateTask(state, text); if (twin) return { handled: true, taskId: twin.id, message: 'This exact task is already open under Tasks on Home, so a second copy was not started.' };
   if ((state.assistantTasks || []).filter(t => t.status === 'review' || t.status === 'running').length >= 10) return { handled: true, message: 'Finish or reject some open tasks first (the limit is 10). Nothing was started.' };
   let n = 0;
   const task = newTask(crypto.randomUUID(), text.slice(0, 1000), mode, steps, nowIso(), () => `${Date.now().toString(36)}-${++n}`);
@@ -139,11 +140,14 @@ export function rejectTask(ctx: RetailCtx, taskId: string) {
   edit(ctx, taskId, t => ({ ...t, status: 'rejected' as const, steps: t.steps.map(s => s.status === 'pending' || s.status === 'failed' ? { ...s, status: 'skipped' as const } : s) }), ['assistant task rejected', latestTask(ctx, taskId)?.text.slice(0, 200) || '']);
 }
 export const stopTask = (id: string) => { stopped.add(id); };
+/** Tasks a closed app left half-way go back to "waiting for you" (nothing resumes by itself). Called once when the Tasks card opens. */
+export function recoverTasks(ctx: RetailCtx) { const state = ctx.latest?.() || ctx.state, next = recoverInterrupted(state, active, nowIso()); if (next !== state) ctx.change(next, ''); }
 
 const MODE_LABEL: Record<AssistantMode, string> = { assistant: 'Assistant · you approve each step', copilot: 'Copilot · you approve once', autopilot: 'Autopilot · allowed steps apply themselves' };
 
 export function AssistantTasks(ctx: RetailCtx) {
   const options = useWorkflowOptions(), [message, setMessage] = useState(''), [override, setOverride] = useState(false), [handover, setHandover] = useState<{ lines: string[]; next: string[] } | null>(null);
+  useEffect(() => { if (!ctx.readOnly) recoverTasks(ctx); }, [ctx.readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   const tasks = [...(ctx.state.assistantTasks || [])].reverse().slice(0, 5);
   const run = async (id: string, o: RunOptions) => { setMessage(await runTask(ctx, id, o)); };
   return <details className="retail-card assistant-tasks" open={tasks.some(t => t.status === 'review' || t.status === 'running')}>
@@ -156,13 +160,14 @@ export function AssistantTasks(ctx: RetailCtx) {
     {tasks.map(task => { const progress = taskProgress(task), open = task.status === 'review' || task.status === 'running' || task.status === 'failed'; return <article className="plan-preview-row" key={task.id} data-task-id={task.id}>
       <div className="plan-top"><strong>{task.text}</strong><span className="plan-badge">{task.status} · {task.mode}</span></div>
       <div className="task-bar" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${progress.done} of ${progress.total} steps done`}><span style={{ width: `${progress.percent}%` }} /></div>
+      <small className="task-checkpoint">{taskCheckpoint(task).line}</small>
       <ol>{task.steps.map(s => <li key={s.id}><span>{s.status === 'done' ? '✓' : s.status === 'failed' ? '✗' : s.status === 'undone' ? '↺' : s.status === 'skipped' ? '–' : s.status === 'running' ? '…' : '○'} {s.text}</span>{s.error && <small> · {s.error}</small>}</li>)}</ol>
       <div className="share-toolbar">
         {open && task.status !== 'running' && <label className="practice-choice"><input type="checkbox" checked={override} onChange={e => setOverride(e.target.checked)} />I reviewed the warnings</label>}
         {open && task.status !== 'running' && task.mode === 'assistant' && <button className="plan-link" onClick={() => void run(task.id, { manual: true, one: true, override })}>Approve next step</button>}
         {open && task.status !== 'running' && task.mode !== 'assistant' && <button className="plan-link" onClick={() => void run(task.id, { manual: true, override })}>Approve all remaining steps</button>}
         {task.status === 'running' && <button className="plan-link" onClick={() => { stopTask(task.id); setMessage('Stopping after the current step.'); }}>Stop</button>}
-        {task.steps.some(s => s.status === 'done') && task.status !== 'undone' && <button className="plan-link" onClick={() => { void undoTask(ctx, task.id).then(setMessage); }}>Undo applied steps</button>}
+        {task.steps.some(s => s.status === 'done') && task.status !== 'undone' && <button className="plan-link" onClick={() => { void undoTask(ctx, task.id).then(setMessage); }}>Roll back {taskCheckpoint(task).saved} saved step{taskCheckpoint(task).saved === 1 ? '' : 's'}</button>}
         {open && <button className="plan-link" onClick={() => rejectTask(ctx, task.id)}>Reject the rest</button>}
       </div>
     </article>; })}

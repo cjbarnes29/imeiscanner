@@ -358,11 +358,11 @@ await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion
   saved=await readDb('retail:state');assert.equal(saved.assistantRequests.filter(r=>/^give (2|3) Fold6/.test(r.text)&&r.status==='applied').length,2,'each step has its own receipt');
   assert.ok(saved.audit.some(a=>/assistant task/.test(a.what)),'the task is written to History');
   await showTasks();await capture('41-task-copilot-done',true);
-  await click('.assistant-tasks button','Undo applied steps');task=await until(t=>t.status==='undone','copilot undone');assert.equal(await assigned(),g0,'Undo hands every phone back');
+  await click('.assistant-tasks button','Roll back');task=await until(t=>t.status==='undone','copilot undone');assert.equal(await assigned(),g0,'Undo hands every phone back');
   await setMode('autopilot');await ask('give 2 Fold6 to Maya, then give 1 Fold6 to Noor');
   task=await until(t=>t.mode==='autopilot'&&t.status==='done','autopilot done');assert.equal(await assigned(),g0+3,'Autopilot applied both allowed steps by itself');assert.ok(task.steps.every(s=>s.doneAt));
   await toHome();await showTasks();await capture('42-task-autopilot-done',true);
-  await click('.assistant-tasks button','Undo applied steps');await until(t=>t.status==='undone','autopilot undone');assert.equal(await assigned(),g0);
+  await click('.assistant-tasks button','Roll back');await until(t=>t.status==='undone','autopilot undone');assert.equal(await assigned(),g0);
   const before=await run(`localStorage.getItem('retaillens-processing-v1')`);
   await ask('turn on auto-detection');task=await until(t=>t.mode==='autopilot'&&t.status==='review','autopilot holds settings');
   assert.equal(task.steps[0].status,'pending');assert.match(task.steps[0].error,/not allowed to change: settings/);assert.equal(await run(`localStorage.getItem('retaillens-processing-v1')`),before,'a held step changes nothing');
