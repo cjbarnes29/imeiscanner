@@ -28,7 +28,7 @@ const names = async () => (await readPeople()).map(p => p.name);
 const SKIP = ['assistantRequests', 'assistantTasks', 'audit', 'history'];
 // compared as data: the order of the keys inside an object does not matter (the loader tidies it on the first save after a reload)
 const stable = v => JSON.stringify(v, (k, val) => val && typeof val === 'object' && !Array.isArray(val) ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => a.localeCompare(b))) : val);
-const snap = async () => { const s = await readDb('retail:state'); for (const k of SKIP) delete s[k]; return stable({ retail: s, people: await readPeople(), options: await run(`localStorage.getItem('retaillens-auto-workflow-v1')`) }); };
+const snap = async () => { const s = await readDb('retail:state'); for (const k of SKIP) delete s[k]; const ac = s.agentChat; if (ac && !ac.memoryOn && !(ac.memory || []).length && !Object.keys(ac.prefs || {}).length) delete s.agentChat; /* an empty default is not saved data */ return stable({ retail: s, people: await readPeople(), options: await run(`localStorage.getItem('retaillens-auto-workflow-v1')`) }); };
 const requests = async () => (await readDb('retail:state')).assistantRequests || [];
 const tasks = async () => ((await readDb('retail:state')).assistantTasks || []).length;
 const pendingCount = async () => (await requests()).filter(r => r.status === 'pending').length;
